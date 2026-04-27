@@ -1,0 +1,1 @@
+"""Snapshot generation for SitRep."""

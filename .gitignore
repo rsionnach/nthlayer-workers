@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Beads task tracking (centralized in opensrm Dolt DB)
+.beads/
+.beads.archived/
+
+# Local SQLite stores produced by tests / dev runs
+*.db
+*.db-wal
+*.db-shm
