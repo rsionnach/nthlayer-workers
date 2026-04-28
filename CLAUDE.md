@@ -163,3 +163,7 @@ uv pip install -e .
 
 Dev: `pytest>=8.2`, `pytest-asyncio>=0.23` (`asyncio_mode = "auto"`), `respx>=0.21` (HTTP mocking), `ruff>=0.8`
 <!-- END AUTO-MANAGED -->
+
+## Documentation
+
+- `README.md` — added 2026-04-28; project-level overview for GitHub and contributors
