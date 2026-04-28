@@ -97,6 +97,7 @@ class AgentBase(ABC):
         reasoning: str,
         tags: list[str] | None = None,
         dimensions: dict | None = None,
+        metadata: dict | None = None,
     ) -> Verdict:
         """Create, wire lineage, persist, and register a verdict.
 
@@ -104,6 +105,12 @@ class AgentBase(ABC):
         a local SQLiteVerdictStore (legacy CLI mode). Exactly one is configured
         at construction time. Lineage and parent_ids are wired before persist;
         escalation flag is captured at write-time on the IncidentContext.
+
+        ``metadata`` is forwarded to ``verdict_create`` unchanged. Subclasses
+        attach role-specific structured fields (e.g. RemediationAgent populates
+        ``metadata.custom.proposed_action`` / ``target`` so downstream
+        consumers like bench's brief can read structured remediation data
+        without parsing free-form summary strings).
         """
         judgment: dict[str, Any] = {
             "action": action,
@@ -123,6 +130,7 @@ class AgentBase(ABC):
             },
             judgment=judgment,
             producer={"system": "nthlayer-respond", "model": self._model},
+            metadata=metadata,
         )
 
         # Wire lineage (existing) + parent_ids (P3-E.1: cross-module ancestry)
@@ -349,7 +357,29 @@ class AgentBase(ABC):
             confidence=0.0,
             reasoning=f"Agent operating in degraded mode: {reason}",
             tags=["degraded", "human-takeover-required"],
+            metadata=self._build_degraded_metadata(),
         )
+
+    def _build_metadata(self, result: Any) -> dict | None:
+        """Hook: subclass returns structured metadata for the normal-path verdict.
+
+        Default returns None (no metadata attached). RemediationAgent overrides
+        to attach proposed_action/target so downstream consumers (bench brief,
+        post-incident review) can read structured fields without parsing
+        free-form summary strings. Subclasses narrow ``result`` to their own
+        result type (e.g. ``RemediationResult``).
+        """
+        return None
+
+    def _build_degraded_metadata(self) -> dict | None:
+        """Hook: subclass returns structured metadata for the degraded-path verdict.
+
+        RemediationAgent overrides to attach proposed_action=None / target=None
+        so the field is explicitly absent — distinguishable by downstream
+        consumers from a non-remediation verdict (where the metadata key
+        is simply missing).
+        """
+        return None
 
     def _build_degraded_summary(self, context: IncidentContext) -> str:
         """Build an informative degraded summary using available context data."""
@@ -485,6 +515,7 @@ class AgentBase(ABC):
                 action="flag",
                 confidence=confidence,
                 reasoning=getattr(result, "reasoning", ""),
+                metadata=self._build_metadata(result),
             )
             self._write_decision_verdict(context, verdict, system, user, response)
             # Slack notification (fail-open, opt-in via SLACK_WEBHOOK_URL)

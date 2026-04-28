@@ -612,6 +612,179 @@ async def test_approve_records_approved_by(
     assert "rob@nthlayer.com" in verdict.judgment.reasoning
 
 
+# ------------------------------------------------------------------ #
+# Bead 1: structured remediation emission in approve verdicts          #
+# ------------------------------------------------------------------ #
+
+
+async def test_approve_success_emits_proposed_action_and_target(
+    make_coordinator, context_store, verdict_store, triggered_context
+):
+    """Bead 1: coordinator.approve() success path stores proposed_action and
+    target in metadata.custom alongside approved_by. Bench brief reads these
+    structured fields rather than parsing subject.summary."""
+
+    async def remediation_needs_approval(ctx):
+        ctx.remediation = RemediationResult(
+            proposed_action="rollback",
+            target="payment-api",
+            requires_human_approval=True,
+            reasoning="needs approval",
+        )
+        ctx.verdict_chain.append("vrd-remediation")
+        return ctx
+
+    approval_agent = make_mock_agent(
+        AgentRole.REMEDIATION, side_effect=remediation_needs_approval
+    )
+    mock_registry = AsyncMock()
+    mock_registry.execute = AsyncMock(
+        return_value={"success": True, "detail": "rolled back"}
+    )
+
+    coord = make_coordinator(
+        {AgentRole.REMEDIATION: approval_agent},
+        safe_action_registry=mock_registry,
+    )
+    await coord.run(triggered_context)
+
+    result = await coord.approve("INC-2026-0001", approved_by="rob@nthlayer.com")
+    assert result.state == IncidentState.RESOLVED
+
+    last_verdict = verdict_store.get(result.verdict_chain[-1])
+    custom = last_verdict.metadata.custom
+    assert custom["proposed_action"] == "rollback"
+    assert custom["target"] == "payment-api"
+    assert custom["approved_by"] == "rob@nthlayer.com"
+
+
+async def test_approve_without_approved_by_defaults_to_human(
+    make_coordinator, context_store, verdict_store, triggered_context
+):
+    """Bead 1: when approve() is called without approved_by, metadata.custom
+    still carries the key with value "human" — same shape as authenticated
+    calls. Mirrors the reasoning string's `who = approved_by or "human"`
+    fallback. Pins the "stable shape regardless of caller" guarantee that
+    downstream consumers depend on."""
+
+    async def remediation_needs_approval(ctx):
+        ctx.remediation = RemediationResult(
+            proposed_action="rollback",
+            target="payment-api",
+            requires_human_approval=True,
+            reasoning="needs approval",
+        )
+        ctx.verdict_chain.append("vrd-remediation")
+        return ctx
+
+    approval_agent = make_mock_agent(
+        AgentRole.REMEDIATION, side_effect=remediation_needs_approval
+    )
+    mock_registry = AsyncMock()
+    mock_registry.execute = AsyncMock(
+        return_value={"success": True, "detail": "rolled back"}
+    )
+
+    coord = make_coordinator(
+        {AgentRole.REMEDIATION: approval_agent},
+        safe_action_registry=mock_registry,
+    )
+    await coord.run(triggered_context)
+
+    # No approved_by arg
+    result = await coord.approve("INC-2026-0001")
+    assert result.state == IncidentState.RESOLVED
+
+    last_verdict = verdict_store.get(result.verdict_chain[-1])
+    custom = last_verdict.metadata.custom
+    assert set(custom.keys()) == {"proposed_action", "target", "approved_by"}
+    assert custom["approved_by"] == "human"
+    assert custom["proposed_action"] == "rollback"
+    assert custom["target"] == "payment-api"
+
+
+async def test_approve_with_none_proposed_action_propagates_in_metadata(
+    make_coordinator, context_store, verdict_store, triggered_context
+):
+    """Bead 1 + edge case: if approval is reached with proposed_action=None
+    (e.g. parse_response rejected a hallucinated action but
+    requires_human_approval forced the gate), the registry.execute call will
+    fail with the None action. The failure path's verdict still emits a
+    well-formed metadata.custom — proposed_action is None, target preserved.
+    Documents what bench brief sees for this degenerate state."""
+
+    async def remediation_needs_approval(ctx):
+        ctx.remediation = RemediationResult(
+            proposed_action=None,        # rejected hallucination
+            target="payment-api",        # model still suggested a target
+            requires_human_approval=True,
+            reasoning="hallucinated action rejected; awaiting manual decision",
+        )
+        ctx.verdict_chain.append("vrd-remediation")
+        return ctx
+
+    approval_agent = make_mock_agent(
+        AgentRole.REMEDIATION, side_effect=remediation_needs_approval
+    )
+    mock_registry = AsyncMock()
+    # registry.execute(None, ...) will raise — exercises the failure path
+    mock_registry.execute = AsyncMock(side_effect=ValueError("no action specified"))
+
+    coord = make_coordinator(
+        {AgentRole.REMEDIATION: approval_agent},
+        safe_action_registry=mock_registry,
+    )
+    await coord.run(triggered_context)
+
+    result = await coord.approve("INC-2026-0001", approved_by="rob@nthlayer.com")
+    assert result.state == IncidentState.ESCALATED
+
+    last_verdict = verdict_store.get(result.verdict_chain[-1])
+    custom = last_verdict.metadata.custom
+    assert custom["proposed_action"] is None
+    assert custom["target"] == "payment-api"
+    assert custom["approved_by"] == "rob@nthlayer.com"
+
+
+async def test_approve_failure_emits_proposed_action_and_target(
+    make_coordinator, context_store, verdict_store, triggered_context
+):
+    """Bead 1: coordinator.approve() failure path (registry.execute raises)
+    still stores proposed_action and target in metadata.custom — the action
+    was attempted, just failed. Brief renders 'Recommended (failed): X on Y'."""
+
+    async def remediation_needs_approval(ctx):
+        ctx.remediation = RemediationResult(
+            proposed_action="rollback",
+            target="payment-api",
+            requires_human_approval=True,
+            reasoning="needs approval",
+        )
+        ctx.verdict_chain.append("vrd-remediation")
+        return ctx
+
+    approval_agent = make_mock_agent(
+        AgentRole.REMEDIATION, side_effect=remediation_needs_approval
+    )
+    mock_registry = AsyncMock()
+    mock_registry.execute = AsyncMock(side_effect=RuntimeError("registry exploded"))
+
+    coord = make_coordinator(
+        {AgentRole.REMEDIATION: approval_agent},
+        safe_action_registry=mock_registry,
+    )
+    await coord.run(triggered_context)
+
+    result = await coord.approve("INC-2026-0001", approved_by="rob@nthlayer.com")
+    assert result.state == IncidentState.ESCALATED
+
+    last_verdict = verdict_store.get(result.verdict_chain[-1])
+    custom = last_verdict.metadata.custom
+    assert custom["proposed_action"] == "rollback"
+    assert custom["target"] == "payment-api"
+    assert custom["approved_by"] == "rob@nthlayer.com"
+
+
 async def test_reject_records_rejected_by(
     make_coordinator, context_store, verdict_store, triggered_context
 ):

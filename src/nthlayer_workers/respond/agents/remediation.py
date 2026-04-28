@@ -171,6 +171,25 @@ class RemediationAgent(AgentBase):
         context.remediation = result
         return context
 
+    def _build_metadata(self, result: RemediationResult) -> dict:
+        # Structured fields for downstream consumers (bench brief,
+        # post-incident review, P3-E.3 safe-action execution, audit tooling).
+        # Both keys always present — None values disambiguate "rejected
+        # hallucinated action" / "model omitted target" from "non-remediation
+        # verdict" at the consumer site.
+        return {
+            "custom": {
+                "proposed_action": result.proposed_action,
+                "target": result.target,
+            }
+        }
+
+    def _build_degraded_metadata(self) -> dict:
+        # Degraded path: model never returned a result. Both fields
+        # explicitly None so brief can render "manual intervention required"
+        # without inferring degradation from absence.
+        return {"custom": {"proposed_action": None, "target": None}}
+
     # ------------------------------------------------------------------ #
     # Post-execute: safe action + autonomy reduction                      #
     # ------------------------------------------------------------------ #

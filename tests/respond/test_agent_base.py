@@ -77,6 +77,39 @@ async def test_emit_verdict_creates_verdict(stub_agent, verdict_store, triggered
     assert verdict_store.get(v.id) is not None
 
 
+async def test_emit_verdict_threads_metadata(stub_agent, verdict_store, triggered_context):
+    """metadata kwarg is forwarded to verdict_create unchanged.
+
+    Bead 1 (structured remediation emission) needs subclasses to attach
+    role-specific structured fields. This test pins the kwarg path.
+    """
+    v = await stub_agent._emit_verdict(
+        triggered_context,
+        subject_summary="metadata-bearing verdict",
+        action="flag",
+        confidence=0.8,
+        reasoning="r",
+        metadata={"custom": {"some_key": "some_value", "nullable": None}},
+    )
+    assert v.metadata.custom == {"some_key": "some_value", "nullable": None}
+
+
+async def test_emit_verdict_metadata_default_is_empty_custom(
+    stub_agent, verdict_store, triggered_context,
+):
+    """When metadata kwarg is omitted, the verdict's metadata.custom is the
+    empty dict (Metadata default). Documents the backward-compatible default
+    so existing callers keep working."""
+    v = await stub_agent._emit_verdict(
+        triggered_context,
+        subject_summary="no metadata",
+        action="flag",
+        confidence=0.8,
+        reasoning="r",
+    )
+    assert v.metadata.custom == {}
+
+
 async def test_emit_verdict_chains_parent(stub_agent, verdict_store, triggered_context):
     v1 = await stub_agent._emit_verdict(
         triggered_context, "first", "flag", 0.8, "first verdict",

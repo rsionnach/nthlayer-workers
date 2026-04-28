@@ -543,3 +543,100 @@ def test_apply_result_returns_context(agent, context):
     )
     updated = agent._apply_result(context, result)
     assert updated is context
+
+
+# ------------------------------------------------------------------ #
+# Bead 1: structured remediation emission                             #
+# ------------------------------------------------------------------ #
+
+@pytest.fixture
+def bare_agent(verdict_store, tmp_path):
+    """Minimal RemediationAgent with an empty SafeActionRegistry — bypasses
+    safe-action policy YAML loading so we can exercise pure metadata-builder
+    methods (`_build_metadata`, `_build_degraded_metadata`) without setting
+    up the full agent harness. The standard `agent` fixture loads
+    `register_builtin_actions(registry)` which reads
+    `src/registry/safe-actions.yaml` — that path doesn't exist in this tree
+    (pre-existing infrastructure rot), so tests that don't need the registry
+    use this slimmer fixture instead."""
+    return RemediationAgent(
+        model="test-model",
+        max_tokens=256,
+        verdict_store=verdict_store,
+        config={"arbiter_url": "http://arbiter.local"},
+        safe_action_registry=make_registry(tmp_path, with_builtins=False),
+    )
+
+
+def test_build_metadata_carries_proposed_action_and_target(bare_agent):
+    """Normal-path remediation verdicts carry proposed_action and target
+    in metadata.custom — structured fields for bench brief and other
+    downstream consumers (Bead 1)."""
+    result = RemediationResult(
+        proposed_action="rollback",
+        target="payment-api",
+        risk_assessment="Low",
+        requires_human_approval=True,
+        reasoning="Safe rollback.",
+    )
+    md = bare_agent._build_metadata(result)
+    assert md == {"custom": {"proposed_action": "rollback", "target": "payment-api"}}
+
+
+def test_build_metadata_with_rejected_hallucinated_action(bare_agent):
+    """When parse_response rejects a hallucinated action it sets
+    proposed_action=None but leaves target intact. Metadata must reflect
+    that exactly so consumers can disambiguate 'no proposal' from
+    'rejected proposal'."""
+    result = RemediationResult(
+        proposed_action=None,            # rejected by registry
+        target="payment-api",            # model still suggested a target
+        risk_assessment="",
+        requires_human_approval=True,
+        reasoning="hallucinated action rejected",
+    )
+    md = bare_agent._build_metadata(result)
+    assert md == {"custom": {"proposed_action": None, "target": "payment-api"}}
+
+
+def test_build_metadata_preserves_empty_strings(bare_agent):
+    """Empty-string fields are propagated as-is, not coerced to None.
+    Consumers (bench brief) see what the model actually produced and can
+    decide how to render — coercing to None here would lose information."""
+    result = RemediationResult(
+        proposed_action="rollback",
+        target="",                       # model omitted target
+        risk_assessment="",
+        requires_human_approval=True,
+        reasoning="rollback recommended; target unspecified",
+    )
+    md = bare_agent._build_metadata(result)
+    assert md == {"custom": {"proposed_action": "rollback", "target": ""}}
+
+
+def test_degraded_metadata_survives_http_round_trip_to_bench(bare_agent):
+    """Bench reads remediation verdicts from core's HTTP API as JSON dicts.
+    The metadata.custom shape — including None values — must survive a
+    to_dict/from_dict round-trip so bench brief sees the same data the worker
+    emitted."""
+    from nthlayer_common.verdicts import create as verdict_create
+    from nthlayer_common.verdicts.serialise import to_dict, from_dict
+
+    md = bare_agent._build_degraded_metadata()
+    v = verdict_create(
+        subject={"type": "remediation", "ref": "INC-TEST", "summary": "degraded"},
+        judgment={"action": "escalate", "confidence": 0.0, "reasoning": "r"},
+        producer={"system": "nthlayer-respond", "instance": "test"},
+        metadata=md,
+    )
+    payload = to_dict(v)
+    restored = from_dict(payload)
+    assert restored.metadata.custom == {"proposed_action": None, "target": None}
+
+
+def test_build_degraded_metadata_explicit_nones(bare_agent):
+    """Degraded path: model never returned a result. Both fields explicitly
+    None — distinguishable from 'non-remediation verdict' (which has no
+    proposed_action key at all)."""
+    md = bare_agent._build_degraded_metadata()
+    assert md == {"custom": {"proposed_action": None, "target": None}}

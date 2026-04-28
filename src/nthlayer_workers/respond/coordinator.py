@@ -43,6 +43,28 @@ _STEP_STATES: dict[int, IncidentState] = {
 }
 
 
+def _build_approval_custom(
+    action: str | None,
+    target: str | None,
+    approved_by: str | None,
+) -> dict[str, Any]:
+    """Build the metadata.custom dict for an approval-step verdict.
+
+    All three keys are always present — success and failure paths and
+    authenticated/unauthenticated callers all produce the same shape so
+    downstream consumers (bench brief, post-incident review) can pattern-match
+    on a fixed key set without defensive ``in`` checks. ``approved_by``
+    defaults to ``"human"`` when absent, mirroring the reasoning string's
+    fallback (``f"{who} approved {action} on {target}"`` where
+    ``who = approved_by or "human"``).
+    """
+    return {
+        "proposed_action": action,
+        "target": target,
+        "approved_by": approved_by or "human",
+    }
+
+
 class Coordinator:
     """Deterministic state machine that sequences agent execution.
 
@@ -134,6 +156,12 @@ class Coordinator:
         who = approved_by or "human"
         from nthlayer_common.verdicts import create as verdict_create
 
+        # Bead 1: structured fields for downstream consumers (bench brief,
+        # post-incident review). Identical shape on success and failure paths
+        # so the next reader can confirm at a glance the only difference is
+        # the verdict's subject/judgment, not its metadata.
+        approval_custom = _build_approval_custom(action, target, approved_by)
+
         try:
             exec_result = await registry.execute(action, target, context)
             remediation.executed = True
@@ -151,7 +179,7 @@ class Coordinator:
                     "reasoning": f"{who} approved {action} on {target}",
                 },
                 producer={"system": "nthlayer-respond", "instance": "coordinator"},
-                metadata={"custom": {"approved_by": approved_by}} if approved_by else None,
+                metadata={"custom": approval_custom},
             )
             self._verdict_store.put(v)
             context.verdict_chain.append(v.id)
@@ -175,7 +203,7 @@ class Coordinator:
                     "reasoning": f"Approved action failed: {exc}",
                 },
                 producer={"system": "nthlayer-respond", "instance": "coordinator"},
-                metadata={"custom": {"approved_by": approved_by}} if approved_by else None,
+                metadata={"custom": approval_custom},
             )
             self._verdict_store.put(v)
             context.verdict_chain.append(v.id)
