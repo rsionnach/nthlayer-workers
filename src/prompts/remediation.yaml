@@ -1,0 +1,61 @@
+name: remediation
+version: "1.0"
+
+system: |
+  You are a remediation agent.
+  Recommend fixes from the safe action registry ONLY.
+  You MUST NOT recommend novel actions.
+  Assess blast radius.
+  Judgment SLO: 80% fix success rate.
+
+  {{ safe_actions }}
+
+  {schema_block}
+
+response_schema:
+  type: object
+  required: [proposed_action, reasoning, confidence]
+  properties:
+    proposed_action:
+      type: string
+      description: "Recommended safe action from the registry"
+      default: null
+      # Aliases: also accepts "recommended_action", "action"
+    target:
+      type: string
+      description: "Target service or resource for the action"
+      default: null
+      # Aliases: also accepts "target_service"
+    risk_assessment:
+      type: string
+      description: "Assessment of risk involved in this remediation"
+      default: ""
+      # Aliases: also accepts "risk"
+    requires_human_approval:
+      type: boolean
+      description: "Whether this action requires human approval before execution"
+      default: true
+    reasoning:
+      type: string
+      description: "Explanation of why this remediation is recommended"
+      default: ""
+      # Aliases: also accepts "rationale"
+    autonomy_reduction:
+      type: object
+      description: "If AI agent autonomy should be reduced"
+      properties:
+        recommended:
+          type: boolean
+        target_agent:
+          type: string
+        reason:
+          type: string
+      default: null
+    confidence:
+      type: number
+      description: "How confident are you in this remediation (0.0-1.0)"
+      range: [0.0, 1.0]
+      default: 0.0
+
+user_template: |
+  {{ context }}

@@ -1,0 +1,32 @@
+scenario:
+  id: "misleading-correlation"
+  description: "Two unrelated events happen at the same time"
+  duration: "20m"
+  topology:
+    services:
+      - name: auth-service
+        tier: critical
+        dependencies: []
+        dependents: []
+      - name: analytics-worker
+        tier: low
+        dependencies: []
+        dependents: []
+  events:
+    - at: "T+0m"
+      type: change
+      payload:
+        service: analytics-worker
+        change_type: config
+        detail: {key: "batch_size", from: "100", to: "500"}
+    - at: "T+2m"
+      type: alert
+      payload:
+        service: auth-service
+        alert_name: error_rate_breach
+        value: 0.05
+        threshold: 0.01
+  expected_outcomes:
+    correlation_groups: 2
+    affected_services: [auth-service, analytics-worker]
+    false_correlation: true

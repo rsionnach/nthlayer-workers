@@ -1,0 +1,44 @@
+scenario:
+  id: remediation-approval
+  description: "Remediation proposes rollback requiring human approval"
+  trigger:
+    source: nthlayer-correlate
+    sitrep_scenario: "../../nthlayer-correlate/scenarios/synthetic/cascading-failure.yaml"
+  mock_responses:
+    triage:
+      severity: 1
+      blast_radius: ["payment-api", "checkout-service"]
+      affected_slos: ["availability"]
+      assigned_team: "payments-oncall"
+      reasoning: "Critical service affected"
+    investigation:
+      hypotheses:
+        - description: "payment-api deploy v2.3.1"
+          confidence: 0.85
+          evidence: ["latency after deploy"]
+          change_candidate: "payment-api deploy v2.3.1"
+      root_cause: "payment-api deploy v2.3.1"
+      root_cause_confidence: 0.85
+      reasoning: "Strong correlation"
+    communication_initial:
+      updates:
+        - channel: "slack"
+          update_type: "initial"
+          content: "Investigating payment-api. Rollback under consideration."
+      reasoning: "Initial notification"
+    remediation:
+      proposed_action: "rollback"
+      target: "payment-api"
+      risk_assessment: "Moderate risk - rollback may affect in-flight transactions"
+      requires_human_approval: true
+      reasoning: "Recommending rollback but requesting human approval due to in-flight risk"
+    communication_resolution: null
+  interactions:
+    - at: "after:remediation_proposed"
+      action: approve
+  expected_outcomes:
+    final_state: "resolved"
+    verdict_count: 5
+    root_cause: "payment-api deploy v2.3.1"
+    remediation_executed: true
+    autonomy_reduced: false

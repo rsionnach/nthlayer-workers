@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
-import pytest
 
 from nthlayer_common.api_client import APIResult
 from nthlayer_workers.correlate.worker import (

@@ -59,6 +59,13 @@ def test_agent_output_construction():
     assert output.metadata == {}
 
 
+@pytest.mark.skip(
+    reason=(
+        "Asserts on the pre-P3-C.2 3-level enum (FULL/SUPERVISED/"
+        "SUSPENDED). Current taxonomy is the 5-level ladder pinned "
+        "by test_measure_worker.py::TestReduceAutonomy. opensrm-mnyj."
+    )
+)
 def test_autonomy_level_values():
     assert AutonomyLevel.FULL.value == "full"
     assert AutonomyLevel.SUSPENDED.value == "suspended"
@@ -123,6 +130,15 @@ def test_quality_score_tier_defaults():
     assert score.auto_approved is False
 
 
+@pytest.mark.skip(
+    reason=(
+        "References pre-P3-C.2 AutonomyLevel.SUPERVISED. The "
+        "GovernanceAction shape is also legacy from the model-based "
+        "governance engine; deterministic v1.5 governance lives in "
+        "measure/worker.py and emits autonomy_change verdicts directly. "
+        "opensrm-mnyj."
+    )
+)
 def test_governance_action_construction():
     ga = GovernanceAction(
         agent_name="bot",

@@ -11,7 +11,6 @@ v2 LLM class refactor (V2-F deferred) makes this native-async.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 import structlog
 from pydantic import BaseModel, Field

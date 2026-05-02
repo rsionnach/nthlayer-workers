@@ -1,15 +1,47 @@
-"""Tests for the FastAPI HTTP API server."""
+"""Tests for the legacy FastAPI HTTP API server.
+
+Superseded by nthlayer-core's HTTP API in v1.5: per the three-tier
+architecture (NTHLAYER-SERVE-MODE-v2.1), workers communicate with
+core via the shared HTTP boundary, not via per-module FastAPI
+servers. The ``measure.api.server`` module and these tests survive
+as legacy / not-yet-deleted code; both reference the pre-P3-C.2
+3-level AutonomyLevel enum (FULL/SUPERVISED/SUSPENDED) which no
+longer exists.
+
+Skipped at the module level via ``pytest.importorskip("fastapi")``
+when the dependency isn't installed (it isn't a v1.5 dep), so CI
+treats this whole file as not-applicable rather than a hard failure.
+Tracking the dead-code cleanup in opensrm-mnyj.
+"""
 from __future__ import annotations
 
 import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi.testclient import TestClient
 
-from nthlayer_common.verdicts import MemoryStore, create as verdict_create
-from nthlayer_workers.measure.api.server import create_app
-from nthlayer_workers.measure.types import AutonomyLevel, QualityScore, TrendWindow
+# fastapi isn't a v1.5 dependency; skip cleanly when absent so CI
+# doesn't fail on a missing optional package for a deprecated module.
+pytest.importorskip("fastapi")
+
+# Even when fastapi happens to be installed (e.g. transitively in a
+# developer's env), the test bodies reference the pre-P3-C.2
+# 3-level AutonomyLevel enum (FULL/SUPERVISED/SUSPENDED) which no
+# longer exists. Skip the whole module unconditionally — the
+# importorskip above keeps CI green even on the no-fastapi path.
+pytestmark = pytest.mark.skip(
+    reason=(
+        "Superseded by core's HTTP API in v1.5 (per "
+        "NTHLAYER-SERVE-MODE-v2.1) and references the legacy 3-level "
+        "AutonomyLevel enum. opensrm-mnyj."
+    )
+)
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from nthlayer_common.verdicts import MemoryStore, create as verdict_create  # noqa: E402
+from nthlayer_workers.measure.api.server import create_app  # noqa: E402
+from nthlayer_workers.measure.types import AutonomyLevel, QualityScore, TrendWindow  # noqa: E402
 
 
 def _make_score(agent="test-agent", task_id="task-1"):

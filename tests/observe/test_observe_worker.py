@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
 
 from nthlayer_common.api_client import APIResult
 from nthlayer_workers.observe.worker import (

@@ -1,6 +1,6 @@
 """Tests for ModelEvaluator — prompt construction + structured evaluation."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 

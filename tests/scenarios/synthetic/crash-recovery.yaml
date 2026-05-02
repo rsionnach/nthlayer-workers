@@ -1,0 +1,48 @@
+scenario:
+  id: crash-recovery
+  description: "Coordinator crashes after triage, resumes from investigation"
+  trigger:
+    source: nthlayer-correlate
+    sitrep_scenario: "../../nthlayer-correlate/scenarios/synthetic/cascading-failure.yaml"
+  crash_after_step: 0
+  mock_responses:
+    triage:
+      severity: 1
+      blast_radius: ["payment-api", "checkout-service"]
+      affected_slos: ["availability"]
+      assigned_team: "payments-oncall"
+      reasoning: "Critical service affected"
+    investigation:
+      hypotheses:
+        - description: "payment-api deploy v2.3.1"
+          confidence: 0.87
+          evidence: ["latency after deploy"]
+          change_candidate: "payment-api deploy v2.3.1"
+      root_cause: "payment-api deploy v2.3.1"
+      root_cause_confidence: 0.87
+      reasoning: "Deploy caused failure"
+    communication_initial:
+      updates:
+        - channel: "slack"
+          update_type: "initial"
+          content: "Investigating payment-api after coordinator recovery."
+      reasoning: "Post-recovery notification"
+    remediation:
+      proposed_action: "rollback"
+      target: "payment-api"
+      risk_assessment: "Low risk"
+      requires_human_approval: false
+      reasoning: "Rollback after recovery"
+    communication_resolution:
+      updates:
+        - channel: "slack"
+          update_type: "resolution"
+          content: "payment-api rolled back after coordinator recovery."
+      reasoning: "Resolution after recovery"
+  interactions: []
+  expected_outcomes:
+    final_state: "resolved"
+    verdict_count: 5
+    root_cause: "payment-api deploy v2.3.1"
+    remediation_executed: true
+    autonomy_reduced: false

@@ -1,0 +1,52 @@
+scenario:
+  id: "multi-candidate"
+  description: "Three changes happened, only one caused the issue"
+  duration: "30m"
+  topology:
+    services:
+      - name: order-service
+        tier: critical
+        dependencies: [inventory-service, payment-api]
+  events:
+    - at: "T+0m"
+      type: change
+      payload:
+        service: inventory-service
+        change_type: deploy
+        detail: {to_version: "3.1.0"}
+    - at: "T+2m"
+      type: change
+      payload:
+        service: order-service
+        change_type: config
+        detail: {key: "timeout_ms", from: "5000", to: "500"}
+    - at: "T+3m"
+      type: change
+      payload:
+        service: payment-api
+        change_type: feature_flag
+        detail: {flag: "new_checkout_flow", enabled: true}
+    - at: "T+7m"
+      type: alert
+      payload:
+        service: order-service
+        alert_name: error_rate_breach
+        value: 0.12
+        threshold: 0.01
+    - at: "T+8m"
+      type: alert
+      payload:
+        service: order-service
+        alert_name: latency_p99_breach
+        value: 5.2
+        threshold: 1.0
+  expected_outcomes:
+    correlation_groups: 1
+    affected_services: [order-service]
+    change_candidates:
+      - service: order-service
+        change_type: config
+      - service: inventory-service
+        change_type: deploy
+      - service: payment-api
+        change_type: feature_flag

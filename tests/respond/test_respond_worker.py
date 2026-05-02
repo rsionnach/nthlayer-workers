@@ -626,7 +626,9 @@ async def test_first_verdict_from_snapshot_parents_to_trigger(fake_client, confi
         role = AgentRole.TRIAGE
         def build_prompt(self, ctx): return ("s", "u")
         def parse_response(self, r, ctx): return TriageResult(0, [], [], None, "x")
-        def _apply_result(self, ctx, r): ctx.triage = r; return ctx
+        def _apply_result(self, ctx, r):
+            ctx.triage = r
+            return ctx
 
     fake_client.submit_verdict = AsyncMock(
         return_value=APIResult(ok=True, status_code=200, data={}, error=None, detail=None)
@@ -654,7 +656,9 @@ async def test_chained_verdicts_parent_to_previous(fake_client, config):
         role = AgentRole.TRIAGE
         def build_prompt(self, ctx): return ("s", "u")
         def parse_response(self, r, ctx): return TriageResult(0, [], [], None, "x")
-        def _apply_result(self, ctx, r): ctx.triage = r; return ctx
+        def _apply_result(self, ctx, r):
+            ctx.triage = r
+            return ctx
 
     fake_client.submit_verdict = AsyncMock(
         return_value=APIResult(ok=True, status_code=200, data={}, error=None, detail=None)
@@ -685,7 +689,9 @@ async def test_fallback_path_lineage_walk(fake_client, config):
         role = AgentRole.TRIAGE
         def build_prompt(self, ctx): return ("s", "u")
         def parse_response(self, r, ctx): return TriageResult(0, [], [], None, "x")
-        def _apply_result(self, ctx, r): ctx.triage = r; return ctx
+        def _apply_result(self, ctx, r):
+            ctx.triage = r
+            return ctx
 
     submitted: list[dict] = []
 

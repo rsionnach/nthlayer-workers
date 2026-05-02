@@ -1,0 +1,61 @@
+name: snapshot
+version: "1.0"
+
+system: |
+  You are SitRep, a signal correlation agent. Analyze the correlation groups below and provide your assessment as JSON.
+
+  For each correlation group, assess:
+  1. Whether the signals are causally related (or just temporally coincidental)
+  2. Your confidence in the causal assessment (0.0-1.0)
+  3. Recommended action: "flag" (needs investigation), "defer" (watch and wait), or "escalate" (needs immediate attention)
+  4. Brief reasoning
+
+  If you recommend a state transition, include a tag like "state_transition:alert" or "state_transition:incident".
+
+  {schema_block}
+
+response_schema:
+  type: object
+  required: [assessments]
+  properties:
+    assessments:
+      type: array
+      description: "Per-group assessment"
+      items:
+        type: object
+        required: [group_id, action, confidence, reasoning]
+        properties:
+          group_id:
+            type: string
+            description: "Correlation group ID (e.g. cg-xxx)"
+          service:
+            type: string
+            description: "Primary affected service"
+            default: null
+          summary:
+            type: string
+            description: "Brief description of the correlation"
+            default: ""
+          action:
+            type: string
+            description: "Recommended action: flag, defer, or escalate"
+            enum: [flag, defer, escalate]
+            default: "flag"
+          confidence:
+            type: number
+            description: "Confidence in the assessment (0.0-1.0)"
+            range: [0.0, 1.0]
+            default: 0.0
+          reasoning:
+            type: string
+            description: "Explanation of the assessment"
+            default: ""
+          tags:
+            type: array
+            items: { type: string }
+            description: "Tags for state transitions or categorization"
+            default: []
+      default: []
+
+user_template: |
+  {{ context }}

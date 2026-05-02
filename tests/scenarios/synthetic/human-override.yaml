@@ -1,0 +1,27 @@
+scenario:
+  id: human-override
+  description: "On-call rejects triage severity assessment"
+  trigger:
+    source: nthlayer-correlate
+    sitrep_scenario: "../../nthlayer-correlate/scenarios/synthetic/simple-causal-chain.yaml"
+  mock_responses:
+    triage:
+      severity: 3
+      blast_radius: ["web-frontend"]
+      affected_slos: ["latency_p99"]
+      assigned_team: "frontend-oncall"
+      reasoning: "Minor latency increase on non-critical service"
+    investigation: null
+    communication_initial: null
+    remediation: null
+    communication_resolution: null
+  interactions:
+    - at: "after:triage"
+      action: reject
+      reason: "Severity should be P1 - this affects checkout flow"
+  expected_outcomes:
+    final_state: "escalated"
+    verdict_count: 1
+    root_cause: null
+    remediation_executed: false
+    autonomy_reduced: false

@@ -264,7 +264,10 @@ async def test_emit_verdict_chains_to_last_successful_after_failure(
     agent = StubAgent(model="m", max_tokens=10, client=fake_client, config={})
     v1 = await agent._emit_verdict(triggered_context, "1", "flag", 0.5, "r")
     v2 = await agent._emit_verdict(triggered_context, "2", "flag", 0.5, "r")
-    v3 = await agent._emit_verdict(triggered_context, "3", "flag", 0.5, "r")
+    # v3 deliberately not bound — its submit_verdict mock returns ok=False
+    # so it never appends to verdict_chain. The next verdict (v4) chains
+    # to v2 instead, which is the assertion below.
+    _ = await agent._emit_verdict(triggered_context, "3", "flag", 0.5, "r")
     v4 = await agent._emit_verdict(triggered_context, "4", "flag", 0.5, "r")
 
     # v1, v2, v4 in chain; v3 (failed) NOT in chain

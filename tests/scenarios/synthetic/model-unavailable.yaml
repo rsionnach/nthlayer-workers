@@ -1,0 +1,19 @@
+scenario:
+  id: model-unavailable
+  description: "Anthropic API down - all agents degrade gracefully"
+  trigger:
+    source: nthlayer-correlate
+    sitrep_scenario: "../../nthlayer-correlate/scenarios/synthetic/cascading-failure.yaml"
+  mock_responses:
+    triage: null
+    investigation: null
+    communication_initial: null
+    remediation: null
+    communication_resolution: null
+  interactions: []
+  expected_outcomes:
+    final_state: "escalated"
+    verdict_count: 1
+    root_cause: null
+    remediation_executed: false
+    autonomy_reduced: false

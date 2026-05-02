@@ -1,0 +1,31 @@
+scenario:
+  id: "simple-causal-chain"
+  description: "Single deploy causes latency spike on the same service"
+  duration: "30m"
+  topology:
+    services:
+      - name: payment-api
+        tier: critical
+        dependencies: []
+        dependents: [checkout-service]
+  events:
+    - at: "T+0m"
+      type: change
+      payload:
+        service: payment-api
+        change_type: deploy
+        detail: {from_version: "1.0.0", to_version: "1.1.0"}
+    - at: "T+8m"
+      type: alert
+      payload:
+        service: payment-api
+        alert_name: latency_p99_breach
+        value: 0.45
+        threshold: 0.20
+  expected_outcomes:
+    correlation_groups: 1
+    root_cause: "deploy v1.1.0"
+    affected_services: [payment-api]
+    change_candidates:
+      - service: payment-api
+        change_type: deploy

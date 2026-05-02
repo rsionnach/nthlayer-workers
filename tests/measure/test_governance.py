@@ -1,14 +1,37 @@
-"""Tests for ErrorBudgetGovernance — model-based judgment + safety ratchet enforcement."""
+"""Tests for ErrorBudgetGovernance — superseded by P3-C.2.
+
+The model-based ``ErrorBudgetGovernance`` engine and the 3-level
+``AutonomyLevel`` enum (FULL/SUPERVISED/SUSPENDED) it expects are
+both legacy. P3-C.2 (closed under opensrm-430.2) replaced this with
+a deterministic 5-level ladder (fully_autonomous → autonomous →
+limited_autonomous → advisor → observer) implemented in
+``measure/worker.py`` and tested in ``test_measure_worker.py``.
+
+The legacy engine and these tests survive as not-yet-deleted code.
+Skipped at the module level so CI runs green; cleanup tracked in
+opensrm-mnyj.
+"""
 
 import json
 import pytest
 import pytest_asyncio
 from unittest.mock import MagicMock, patch
 
-from nthlayer_workers.measure.store.sqlite import SQLiteScoreStore
-from nthlayer_workers.measure.governance.engine import ErrorBudgetGovernance
-from nthlayer_workers.measure.trends.tracker import StoreTrendTracker
-from nthlayer_workers.measure.types import AutonomyLevel, QualityScore
+# Module-level skip: governance/engine.py expects the pre-P3-C.2
+# enum which no longer exists. Re-enable when the legacy engine is
+# either updated to the 5-level ladder or removed alongside its tests.
+pytestmark = pytest.mark.skip(
+    reason=(
+        "Superseded by P3-C.2 deterministic governance "
+        "(measure/worker.py + test_measure_worker.py). "
+        "Tracked for cleanup in opensrm-mnyj."
+    )
+)
+
+from nthlayer_workers.measure.store.sqlite import SQLiteScoreStore  # noqa: E402
+from nthlayer_workers.measure.governance.engine import ErrorBudgetGovernance  # noqa: E402
+from nthlayer_workers.measure.trends.tracker import StoreTrendTracker  # noqa: E402
+from nthlayer_workers.measure.types import AutonomyLevel, QualityScore  # noqa: E402
 
 
 @pytest_asyncio.fixture

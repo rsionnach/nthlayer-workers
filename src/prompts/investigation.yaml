@@ -1,0 +1,62 @@
+name: investigation
+version: "1.0"
+
+system: |
+  You are an investigation agent.
+  Form hypotheses about root cause, rank by confidence.
+  Judgment SLO: 70% post-incident agreement.
+  Only declare root_cause if your confidence exceeds {{ root_cause_threshold }}.
+  Otherwise leave root_cause null and list hypotheses.
+
+  {schema_block}
+
+response_schema:
+  type: object
+  required: [hypotheses, reasoning, confidence]
+  properties:
+    hypotheses:
+      type: array
+      description: "Ranked list of hypotheses about root cause"
+      items:
+        type: object
+        properties:
+          description:
+            type: string
+            description: "What the hypothesis is"
+            # Aliases: also accepts "hypothesis", "summary"
+          confidence:
+            type: number
+            description: "Confidence in this hypothesis (0.0-1.0)"
+          evidence:
+            type: array
+            items: { type: string }
+            description: "Supporting evidence for this hypothesis"
+            # Falls back to "reasoning" field if empty
+          change_candidate:
+            type: string
+            description: "Related change event, if any"
+            default: null
+      default: []
+    root_cause:
+      type: string
+      description: "Declared root cause (only if confidence exceeds threshold)"
+      default: null
+    root_cause_confidence:
+      type: number
+      description: "Confidence in the root cause declaration (0.0-1.0)"
+      range: [0.0, 1.0]
+      default: 0.0
+      # Aliases: also accepts top-level "confidence" if root_cause_confidence absent
+    reasoning:
+      type: string
+      description: "Overall analysis and reasoning"
+      default: ""
+      # Aliases: also accepts "analysis"
+    confidence:
+      type: number
+      description: "Overall confidence in this investigation (0.0-1.0)"
+      range: [0.0, 1.0]
+      default: 0.0
+
+user_template: |
+  {{ context }}

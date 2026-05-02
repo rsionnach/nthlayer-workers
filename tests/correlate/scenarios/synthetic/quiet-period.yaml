@@ -1,0 +1,26 @@
+scenario:
+  id: "quiet-period"
+  description: "Normal operations, no incidents"
+  duration: "30m"
+  topology:
+    services:
+      - name: api-gateway
+        tier: critical
+      - name: user-service
+        tier: standard
+  events:
+    - at: "T+5m"
+      type: quality_score
+      payload:
+        service: api-gateway
+        agent: code-reviewer
+        score: 0.92
+    - at: "T+15m"
+      type: quality_score
+      payload:
+        service: user-service
+        agent: code-reviewer
+        score: 0.88
+  expected_outcomes:
+    correlation_groups: 0
+    affected_services: []

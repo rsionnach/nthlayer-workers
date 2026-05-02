@@ -1,0 +1,50 @@
+scenario:
+  id: "cascading-failure"
+  description: "Deploy removes connection pooling, causing cascading latency"
+  duration: "45m"
+  topology:
+    services:
+      - name: payment-api
+        tier: critical
+        dependencies: [database-primary]
+        dependents: [checkout-service]
+      - name: checkout-service
+        tier: critical
+        dependencies: [payment-api]
+      - name: database-primary
+        tier: critical
+  events:
+    - at: "T+0m"
+      type: change
+      payload:
+        service: payment-api
+        change_type: deploy
+        detail: {from_version: "2.3.0", to_version: "2.3.1"}
+    - at: "T+12m"
+      type: alert
+      payload:
+        service: payment-api
+        alert_name: latency_p99_breach
+        value: 0.52
+        threshold: 0.20
+    - at: "T+13m"
+      type: metric_breach
+      payload:
+        service: payment-api
+        metric: database_connection_pool_active
+        value: 0
+        expected_range: [10, 50]
+    - at: "T+14m"
+      type: alert
+      payload:
+        service: checkout-service
+        alert_name: error_rate_breach
+        value: 0.08
+        threshold: 0.01
+  expected_outcomes:
+    correlation_groups: 1
+    root_cause: "deploy v2.3.1"
+    affected_services: [payment-api, checkout-service]
+    change_candidates:
+      - service: payment-api
+        change_type: deploy

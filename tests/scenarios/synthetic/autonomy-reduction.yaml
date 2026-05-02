@@ -1,0 +1,51 @@
+scenario:
+  id: autonomy-reduction
+  description: "Agent model update caused quality breach - remediation reduces autonomy"
+  trigger:
+    source: nthlayer-correlate
+    sitrep_scenario: "../../nthlayer-correlate/scenarios/synthetic/simple-causal-chain.yaml"
+  mock_responses:
+    triage:
+      severity: 2
+      blast_radius: ["code-reviewer"]
+      affected_slos: ["reversal_rate"]
+      assigned_team: "ml-platform"
+      reasoning: "Agent quality breach after model update"
+    investigation:
+      hypotheses:
+        - description: "Model update degraded code review quality"
+          confidence: 0.9
+          evidence: ["reversal rate spiked after model swap"]
+          change_candidate: "code-reviewer model update"
+      root_cause: "code-reviewer model update degraded judgment quality"
+      root_cause_confidence: 0.9
+      reasoning: "Clear causal link between model swap and quality degradation"
+    communication_initial:
+      updates:
+        - channel: "slack"
+          update_type: "initial"
+          content: "code-reviewer quality degraded after model update. Reducing autonomy."
+      reasoning: "Alert ML platform team"
+    remediation:
+      proposed_action: "reduce_autonomy"
+      target: "code-reviewer"
+      risk_assessment: "No risk - autonomy reduction is always safe (one-way ratchet)"
+      requires_human_approval: false
+      autonomy_reduction:
+        recommended: true
+        target_agent: "code-reviewer"
+        reason: "Model update caused quality breach"
+      reasoning: "Reduce autonomy until model quality is verified"
+    communication_resolution:
+      updates:
+        - channel: "slack"
+          update_type: "resolution"
+          content: "code-reviewer autonomy reduced. Human review required until quality verified."
+      reasoning: "Communicate autonomy change"
+  interactions: []
+  expected_outcomes:
+    final_state: "resolved"
+    verdict_count: 5
+    root_cause: "code-reviewer model update degraded judgment quality"
+    remediation_executed: true
+    autonomy_reduced: true

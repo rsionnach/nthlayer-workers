@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-import pytest
 
 from nthlayer_common.api_client import APIResult
 
@@ -24,7 +23,6 @@ from nthlayer_workers.respond.types import (
     CommunicationResult,
     CommunicationUpdate,
     Hypothesis,
-    IncidentContext,
     IncidentState,
     InvestigationResult,
     RemediationResult,

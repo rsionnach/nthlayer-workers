@@ -10,8 +10,18 @@ from nthlayer_workers.correlate.types import EventType, SitRepEvent
 
 
 def _load_scenario(name: str) -> dict:
+    """Load a correlate scenario from the co-located fixtures dir.
+
+    Co-located (``tests/correlate/scenarios/synthetic/``) rather than
+    shared with respond's scenarios (``tests/scenarios/synthetic/``)
+    so the two suites don't collide on filenames like
+    ``cascading-failure.yaml`` — each suite tests its module against
+    its own scenario set.
+    """
     import os
-    path = os.path.join(os.path.dirname(__file__), "..", "scenarios", "synthetic", f"{name}.yaml")
+    path = os.path.join(
+        os.path.dirname(__file__), "scenarios", "synthetic", f"{name}.yaml"
+    )
     with open(path) as f:
         return yaml.safe_load(f)["scenario"]
 

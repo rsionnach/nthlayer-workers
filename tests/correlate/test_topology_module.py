@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from unittest.mock import AsyncMock
 
-import pytest
 
 from nthlayer_common.api_client import APIResult
 from nthlayer_workers.correlate.worker import (

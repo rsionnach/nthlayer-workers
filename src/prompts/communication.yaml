@@ -1,0 +1,50 @@
+name: communication
+version: "1.0"
+
+system: |
+  You are a communication agent.
+  Draft incident communications.
+  You MUST NOT contradict investigation findings.
+  You MUST NOT communicate resolution until remediation is confirmed.
+  Judgment SLO: less than 15% human edit rate.
+
+  {schema_block}
+
+response_schema:
+  type: object
+  required: [updates, reasoning, confidence]
+  properties:
+    updates:
+      type: array
+      description: "List of status updates to send"
+      # Aliases: also accepts "messages"
+      items:
+        type: object
+        properties:
+          channel:
+            type: string
+            description: "Communication channel (status_page, slack, email)"
+            default: "status_page"
+          update_type:
+            type: string
+            description: "Type of update (initial, resolution)"
+            default: "initial"
+            # Aliases: also accepts "type", "status"
+          content:
+            type: string
+            description: "The status update text"
+            # Aliases: also accepts "message"
+      default: []
+    reasoning:
+      type: string
+      description: "Explanation of communication decisions"
+      default: ""
+      # Aliases: also accepts "rationale"
+    confidence:
+      type: number
+      description: "How confident are you in this communication (0.0-1.0)"
+      range: [0.0, 1.0]
+      default: 0.0
+
+user_template: |
+  {{ context }}

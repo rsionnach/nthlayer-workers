@@ -1,0 +1,41 @@
+scenario:
+  id: low-confidence-escalation
+  description: "Investigation confidence too low - escalate to human"
+  trigger:
+    source: nthlayer-correlate
+    sitrep_scenario: "../../nthlayer-correlate/scenarios/synthetic/multi-candidate.yaml"
+  mock_responses:
+    triage:
+      severity: 2
+      blast_radius: ["api-gateway"]
+      affected_slos: ["error_rate"]
+      assigned_team: "platform-oncall"
+      reasoning: "Multiple change candidates, unclear root cause"
+    investigation:
+      hypotheses:
+        - description: "Config change to connection timeout"
+          confidence: 0.25
+          evidence: ["timing coincidence"]
+          change_candidate: "config-change-001"
+        - description: "Database migration"
+          confidence: 0.20
+          evidence: ["some correlation"]
+          change_candidate: "db-migration-002"
+      root_cause: null
+      root_cause_confidence: 0.25
+      reasoning: "Multiple candidates, none with sufficient confidence"
+    communication_initial:
+      updates:
+        - channel: "slack"
+          update_type: "initial"
+          content: "Investigating api-gateway errors. Multiple candidates under review."
+      reasoning: "Notify while investigation continues"
+    remediation: null
+    communication_resolution: null
+  interactions: []
+  expected_outcomes:
+    final_state: "escalated"
+    verdict_count: 3
+    root_cause: null
+    remediation_executed: false
+    autonomy_reduced: false

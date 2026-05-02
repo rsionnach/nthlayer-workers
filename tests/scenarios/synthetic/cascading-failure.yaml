@@ -1,0 +1,49 @@
+scenario:
+  id: cascading-failure
+  description: "End-to-end: SitRep correlation -> full Mayday pipeline -> RESOLVED"
+  trigger:
+    source: nthlayer-correlate
+    sitrep_scenario: "../../nthlayer-correlate/scenarios/synthetic/cascading-failure.yaml"
+  mock_responses:
+    triage:
+      severity: 1
+      blast_radius: ["payment-api", "checkout-service"]
+      affected_slos: ["availability", "latency_p99"]
+      assigned_team: "payments-oncall"
+      reasoning: "Critical payment service affected with cascading dependency impact"
+    investigation:
+      hypotheses:
+        - description: "payment-api deploy v2.3.1 removed connection pooling"
+          confidence: 0.87
+          evidence:
+            - "latency spike 12m after deploy"
+            - "connection pool metric dropped to 0"
+          change_candidate: "payment-api deploy v2.3.1"
+      root_cause: "payment-api deploy v2.3.1 removed connection pooling"
+      root_cause_confidence: 0.87
+      reasoning: "Strong temporal and causal correlation between deploy and failure"
+    communication_initial:
+      updates:
+        - channel: "slack"
+          update_type: "initial"
+          content: "Investigating payment-api latency. Checkout-service affected. Payments team engaged."
+      reasoning: "Notify affected teams of P1 incident"
+    remediation:
+      proposed_action: "rollback"
+      target: "payment-api"
+      risk_assessment: "Low risk - rolling back to known-good v2.3.0"
+      requires_human_approval: false
+      reasoning: "Rollback is pre-approved safe action for this service"
+    communication_resolution:
+      updates:
+        - channel: "slack"
+          update_type: "resolution"
+          content: "payment-api rolled back to v2.3.0. Latency recovering. Monitoring."
+      reasoning: "Communicate resolution to affected teams"
+  interactions: []
+  expected_outcomes:
+    final_state: "resolved"
+    verdict_count: 5
+    root_cause: "payment-api deploy v2.3.1 removed connection pooling"
+    remediation_executed: true
+    autonomy_reduced: false

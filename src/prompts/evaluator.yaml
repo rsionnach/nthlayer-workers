@@ -1,0 +1,56 @@
+name: evaluator
+version: "1.0"
+
+# Note: the evaluator uses the system prompt as empty string and puts
+# all instructions in the user prompt. The system field here contains
+# the evaluation instructions that will be prepended to the user prompt.
+system: ""
+
+response_schema:
+  type: object
+  required: [dimensions, confidence]
+  properties:
+    dimensions:
+      type: object
+      description: "Per-dimension scores and reasoning"
+      additionalProperties:
+        type: object
+        properties:
+          score:
+            type: number
+            description: "Score from 0.0 to 1.0"
+            range: [0.0, 1.0]
+          reasoning:
+            type: string
+            description: "Brief reasoning for this score"
+      default: {}
+    confidence:
+      type: number
+      description: "Overall confidence in this evaluation (0.0-1.0)"
+      range: [0.0, 1.0]
+      default: 0.0
+
+user_template: |
+  You are an evaluation judge. Score the following agent output on each dimension.
+
+  ## Agent Output
+  - Agent: {{ agent_name }}
+  - Task: {{ task_id }}
+  - Type: {{ output_type }}
+
+  ### Content
+  <agent_output>
+  {{ output_content }}
+  </agent_output>
+
+  ## Dimensions to Score
+  {{ dimensions_block }}
+
+  ## Instructions
+  For each dimension, provide:
+  1. A score from 0.0 to 1.0
+  2. Brief reasoning for your score
+
+  Also provide an overall confidence score (0.0 to 1.0) representing how confident you are in your evaluation.
+
+  {schema_block}

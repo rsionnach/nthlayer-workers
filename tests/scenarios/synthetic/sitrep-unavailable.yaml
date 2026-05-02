@@ -1,0 +1,50 @@
+scenario:
+  id: sitrep-unavailable
+  description: "Raw PagerDuty alert with no SitRep correlation - degraded path"
+  trigger:
+    source: pagerduty
+    alert:
+      service: "payment-api"
+      severity: 0.9
+      description: "payment-api p99 latency > 500ms for 10 minutes"
+  mock_responses:
+    triage:
+      severity: 1
+      blast_radius: ["payment-api"]
+      affected_slos: ["latency_p99"]
+      assigned_team: "payments-oncall"
+      reasoning: "High severity latency breach on critical service, limited context without SitRep"
+    investigation:
+      hypotheses:
+        - description: "Possible resource exhaustion or upstream dependency issue"
+          confidence: 0.4
+          evidence: ["sustained p99 latency breach"]
+          change_candidate: null
+      root_cause: null
+      root_cause_confidence: 0.4
+      reasoning: "Low confidence without pre-correlated change data"
+    communication_initial:
+      updates:
+        - channel: "slack"
+          update_type: "initial"
+          content: "Investigating payment-api latency breach. Limited context - SitRep unavailable."
+      reasoning: "Alert stakeholders with reduced confidence"
+    remediation:
+      proposed_action: "scale_up"
+      target: "payment-api"
+      risk_assessment: "Low risk - scaling up is safe and reversible"
+      requires_human_approval: false
+      reasoning: "Scale up to handle potential resource exhaustion"
+    communication_resolution:
+      updates:
+        - channel: "slack"
+          update_type: "resolution"
+          content: "payment-api scaled up. Monitoring latency recovery."
+      reasoning: "Communicate scale-up action"
+  interactions: []
+  expected_outcomes:
+    final_state: "resolved"
+    verdict_count: 5
+    root_cause: null
+    remediation_executed: true
+    autonomy_reduced: false

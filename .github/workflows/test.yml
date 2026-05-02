@@ -1,0 +1,56 @@
+name: Test
+
+# Security note (per the GitHub Actions injection guide): this workflow
+# only references workflow-controlled context (matrix.python-version)
+# and never interpolates user-controllable strings (PR titles, commit
+# messages, issue bodies, etc.) into `run:` shells. No env-quoting
+# precautions needed because no untrusted input flows through.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      # Don't cancel the rest of the matrix if one Python version fails —
+      # operators on different Python versions get full signal.
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      # nthlayer-workers depends on nthlayer-common via a relative-path
+      # uv source (`path = "../nthlayer-common"`). Check out both repos
+      # as siblings so the path resolves the same way it does locally.
+      - name: Checkout nthlayer-workers
+        uses: actions/checkout@v6
+        with:
+          path: nthlayer-workers
+
+      - name: Checkout nthlayer-common (sibling)
+        uses: actions/checkout@v6
+        with:
+          repository: rsionnach/nthlayer-common
+          path: nthlayer-common
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync dependencies (with dev extras)
+        working-directory: nthlayer-workers
+        run: uv sync --extra dev --python ${{ matrix.python-version }}
+
+      - name: Lint (ruff check)
+        working-directory: nthlayer-workers
+        run: uv run ruff check src/ tests/
+
+      - name: Run tests
+        working-directory: nthlayer-workers
+        run: uv run pytest -q

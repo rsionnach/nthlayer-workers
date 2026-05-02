@@ -17,6 +17,12 @@ dependencies = [
     "numpy>=1.24",
     "starlette>=0.40",
     "uvicorn>=0.30",
+    # Required by ApprovalServer's Slack interaction endpoint at
+    # `respond/server.py:197` — `await request.form()` hard-imports
+    # python-multipart via Starlette. Operators running with
+    # `slack_signing_secret` set need this at runtime, not just for
+    # tests; declared as a top-level production dep.
+    "python-multipart>=0.0.18",
 ]
 
 [project.scripts]

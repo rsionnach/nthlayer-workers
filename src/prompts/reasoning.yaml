@@ -1,0 +1,66 @@
+name: reasoning
+version: "1.0"
+
+system: |
+  You are a reliability engineer analyzing pre-correlated observability signals. Your job is to assess causal relationships between correlated signal groups using dependency graph direction, temporal proximity, and cascading failure patterns.
+
+  You receive pre-correlated groups (transport has already done temporal grouping, topology grouping, deduplication, and change candidate indexing). You provide the judgment: is this correlation causal or coincidental? What is the likely root cause? What should the team do?
+
+  Rules:
+  - Dependency direction matters: if service A depends on B, and B degrades first, B is likely the root cause, not A.
+  - Temporal proximity matters: changes within minutes of signal onset are stronger candidates than changes 30 minutes prior.
+  - Cascading failures follow dependency chains: A→B→C means C's failure can cascade to B then A.
+  - Multiple changes near signal onset require disambiguation: which change best explains the observed failure mode?
+  - Coincidental correlation (unrelated services, no topology link, different failure modes) should be flagged as non-causal.
+
+  {schema_block}
+
+response_schema:
+  type: object
+  required: [groups, overall_assessment, overall_confidence]
+  properties:
+    groups:
+      type: array
+      description: "Per-group causal assessment"
+      items:
+        type: object
+        required: [group_id, confidence, reasoning]
+        properties:
+          group_id:
+            type: string
+            description: "Correlation group ID (e.g. cg-xxx)"
+          root_cause:
+            type: string
+            description: "Description of likely root cause, or null if unclear"
+            default: null
+          confidence:
+            type: number
+            description: "Confidence in the causal assessment (0.0-1.0)"
+            range: [0.0, 1.0]
+            default: 0.0
+          reasoning:
+            type: string
+            description: "Explanation of causal assessment"
+            default: ""
+          recommended_actions:
+            type: array
+            items: { type: string }
+            description: "Recommended actions for this group"
+            default: []
+          is_causal:
+            type: boolean
+            description: "Whether the correlation is causal (true) or coincidental (false)"
+            default: null
+      default: []
+    overall_assessment:
+      type: string
+      description: "Brief overall situation summary"
+      default: ""
+    overall_confidence:
+      type: number
+      description: "Overall confidence across all groups (0.0-1.0)"
+      range: [0.0, 1.0]
+      default: 0.0
+
+user_template: |
+  {{ context }}

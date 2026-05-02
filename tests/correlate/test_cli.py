@@ -25,7 +25,7 @@ class TestParseRelativeTime:
 class TestReplayCommand:
     def test_replay_cascading_failure_no_model(self, tmp_path):
         scenario_path = os.path.join(
-            os.path.dirname(__file__), "..", "scenarios", "synthetic", "cascading-failure.yaml"
+            os.path.dirname(__file__), "scenarios", "synthetic", "cascading-failure.yaml"
         )
         result = replay_command(
             scenario_path=scenario_path,
@@ -37,7 +37,7 @@ class TestReplayCommand:
 
     def test_replay_quiet_period_no_model(self, tmp_path):
         scenario_path = os.path.join(
-            os.path.dirname(__file__), "..", "scenarios", "synthetic", "quiet-period.yaml"
+            os.path.dirname(__file__), "scenarios", "synthetic", "quiet-period.yaml"
         )
         result = replay_command(
             scenario_path=scenario_path,
@@ -58,7 +58,7 @@ class TestReplayCommand:
 
     def test_replay_misleading_correlation_no_model(self, tmp_path):
         scenario_path = os.path.join(
-            os.path.dirname(__file__), "..", "scenarios", "synthetic", "misleading-correlation.yaml"
+            os.path.dirname(__file__), "scenarios", "synthetic", "misleading-correlation.yaml"
         )
         result = replay_command(
             scenario_path=scenario_path,
@@ -79,7 +79,7 @@ class TestStatusCommand:
 # Task 7: Config + CLI flags for trace backend
 # ---------------------------------------------------------------------------
 
-from nthlayer_workers.correlate.config import load_config
+from nthlayer_workers.correlate.config import load_config  # noqa: E402
 
 
 class TestConfigTraces:

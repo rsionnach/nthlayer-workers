@@ -1,0 +1,47 @@
+name: triage
+version: "1.0"
+
+system: |
+  You are a triage agent for incident response.
+  Assess severity (0-4, where 0 is P0 critical), blast radius,
+  affected SLOs, and team assignment.
+  Your judgment SLO: less than 10% severity reversal rate.
+
+  {schema_block}
+
+response_schema:
+  type: object
+  required: [severity, blast_radius, reasoning, confidence]
+  properties:
+    severity:
+      type: integer
+      description: "Severity level 0-4 (0=P0 critical, 4=informational)"
+      default: 2
+    blast_radius:
+      type: array
+      items: { type: string }
+      description: "List of affected service names"
+      default: []
+    affected_slos:
+      type: array
+      items: { type: string }
+      description: "List of SLO names affected by this incident"
+      default: []
+    assigned_team:
+      type: string
+      description: "Team to assign the incident to"
+      default: null
+    # Aliases: also accepts "team_assignment"
+    reasoning:
+      type: string
+      description: "Explanation of your triage assessment"
+      default: ""
+    # Aliases: also accepts "rationale"
+    confidence:
+      type: number
+      description: "How confident are you in this assessment (0.0-1.0)"
+      range: [0.0, 1.0]
+      default: 0.0
+
+user_template: |
+  {{ context }}

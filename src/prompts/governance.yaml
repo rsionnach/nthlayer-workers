@@ -1,0 +1,53 @@
+name: governance
+version: "1.0"
+
+# Note: the governance engine puts all instructions in the user prompt
+# (no system prompt). The user_template contains the full prompt with
+# variable interpolation.
+system: ""
+
+response_schema:
+  type: object
+  required: [should_reduce, reason, confidence]
+  properties:
+    should_reduce:
+      type: boolean
+      description: "Whether the agent's autonomy should be reduced one level"
+      default: false
+    reason:
+      type: string
+      description: "Brief explanation of the decision"
+      default: ""
+    confidence:
+      type: number
+      description: "How confident are you in this governance decision (0.0-1.0)"
+      range: [0.0, 1.0]
+      default: 0.0
+
+user_template: |
+  You are a governance advisor for an AI agent quality monitoring system.
+
+  ## Agent Trend Data
+  - Agent: {{ agent_name }}
+  - Window: {{ window_days }} days
+  - Evaluation count: {{ evaluation_count }}
+  - Confidence mean: {{ confidence_mean }}
+  - Reversal rate: {{ reversal_rate }}
+  - Current autonomy level: {{ current_level }}
+  - Dimension averages:
+  {{ dimension_averages }}
+
+  ## Operator Preferences
+  - The operator considers dimension scores below {{ threshold }} to be concerning
+  - Error budget window: {{ window_days }} days
+
+  ## Decision
+  Based on the trend data and operator preferences, should this agent's autonomy be reduced one level (from {{ current_level }} to {{ reduced_level }})?
+
+  Consider:
+  - Is the degradation significant enough to warrant action, or is it normal variance?
+  - Which dimensions are underperforming and how critical might they be?
+  - Does the evaluation count provide a statistically meaningful sample?
+  - Is the current autonomy level already appropriate for the observed performance?
+
+  {schema_block}

@@ -1,0 +1,124 @@
+# Safe Action Registry — policy file
+#
+# Defines which actions the remediation agent may recommend.
+# Enforcement logic (novel action rejection, approval ratchet,
+# applicability checks, blast radius validation) stays in Python.
+# This file is the policy: what exists and when it applies.
+
+actions:
+  rollback:
+    description: >
+      Roll back a service to its previous stable deployment.
+      Use when a recent deployment is the suspected root cause.
+    risk: high
+    requires_approval: true
+    cooldown_seconds: 300
+    target_type: service
+    applicable_to:
+      service_types: [api, worker, ai-gate]
+      failure_modes: [deployment_regression, model_regression, config_change]
+    blast_radius: >
+      Reverts the service to a previous version. Active connections
+      may be interrupted. Downstream services see a brief disruption.
+    estimated_recovery: "2-5 minutes"
+    binding:
+      method: webhook
+      url: "https://argocd.internal/api/v1/applications/{{service}}/rollback"
+      headers:
+        Authorization: "Bearer ${ARGOCD_TOKEN}"
+        Content-Type: "application/json"
+      body:
+        revision: "{{previous_revision}}"
+        prune: true
+      timeout: 30
+      retry:
+        attempts: 3
+        backoff: [1, 2, 4]
+      verify_after:
+        wait: 60
+        prometheus_url: "${PROMETHEUS_URL}"
+        query: >
+          rate(http_server_request_duration_count{service="{{service}}", status=~"5.."}[2m])
+          / rate(http_server_request_duration_count{service="{{service}}"}[2m])
+          < 0.01
+        description: "error rate below 1% within 60s of rollback"
+
+  scale_up:
+    description: >
+      Increase the replica count of a service to handle elevated load.
+      Use when error rate is driven by capacity exhaustion.
+    risk: low
+    requires_approval: false
+    cooldown_seconds: 120
+    target_type: service
+    applicable_to:
+      service_types: [api, worker]
+      failure_modes: [capacity_exhaustion, latency_spike, traffic_surge]
+    not_applicable_to:
+      service_types: [ai-gate]
+      reason: >
+        AI gate failures are judgment quality issues, not capacity.
+        Scaling up does not fix bad model decisions.
+    blast_radius: >
+      Adds replicas. No disruption to existing traffic.
+      Cost increases proportionally.
+    estimated_recovery: "1-3 minutes"
+    binding: stub
+
+  disable_feature_flag:
+    description: >
+      Disable a feature flag to revert to the previous behaviour.
+      Use when a recently enabled flag correlates with the incident.
+    risk: medium
+    requires_approval: true
+    cooldown_seconds: 60
+    target_type: feature_flag
+    applicable_to:
+      service_types: [api, worker, ai-gate]
+      failure_modes: [feature_regression, config_change, a_b_test_failure]
+    blast_radius: >
+      Reverts the feature to its previous state for all users.
+      May affect user experience if the flag controlled a visible feature.
+    estimated_recovery: "< 1 minute"
+    binding: stub
+
+  reduce_autonomy:
+    description: >
+      Reduce the autonomy level of an NthLayer-governed agent.
+      Autonomy ratchet is one-way safe: can reduce, never increase
+      without human approval.
+    risk: low
+    requires_approval: false
+    cooldown_seconds: 0
+    target_type: agent
+    applicable_to:
+      service_types: [ai-gate]
+      failure_modes: [model_regression, judgment_slo_breach, calibration_drift]
+    not_applicable_to:
+      service_types: [api, worker]
+      reason: >
+        Autonomy reduction targets AI agents, not infrastructure services.
+    blast_radius: >
+      Moves the agent to a more supervised mode. Decisions require
+      human review. No service disruption — only decision throughput
+      may decrease.
+    estimated_recovery: "Immediate (autonomy change is instant)"
+    binding: stub
+
+  pause_pipeline:
+    description: >
+      Pause a deployment or processing pipeline to stop further
+      propagation. Use when an in-progress rollout is worsening
+      an incident.
+    risk: medium
+    requires_approval: true
+    cooldown_seconds: 60
+    target_type: service
+    applicable_to:
+      service_types: [api, worker, ai-gate]
+      failure_modes: [deployment_regression, cascading_failure]
+    blast_radius: >
+      Stops new deployments or pipeline runs. In-flight work
+      completes but no new work starts. May delay scheduled releases.
+    estimated_recovery: "Immediate (pause takes effect within seconds)"
+    binding: stub

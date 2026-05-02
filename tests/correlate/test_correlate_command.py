@@ -209,10 +209,10 @@ def test_correlate_command_missing_verdict(tmp_path):
 # Task 5: Trace backend integration tests
 # ---------------------------------------------------------------------------
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock
+from datetime import datetime, timezone  # noqa: E402
+from unittest.mock import AsyncMock  # noqa: E402
 
-from nthlayer_workers.correlate.traces.protocol import (
+from nthlayer_workers.correlate.traces.protocol import (  # noqa: E402
     ServiceTraceProfile,
     TraceEvidence,
 )

@@ -156,9 +156,9 @@ async def _gate_async(args: argparse.Namespace) -> int:
 
     from nthlayer_common.api_client import CoreAPIClient
 
-    from nthlayer_workers.observe.assessment import Assessment, create, from_dict, to_dict
+    from nthlayer_workers.observe.assessment import create, from_dict, to_dict
     from nthlayer_workers.observe.gate.evaluator import check_deploy
-    from nthlayer_workers.observe.store import AssessmentFilter, MemoryAssessmentStore
+    from nthlayer_workers.observe.store import MemoryAssessmentStore
 
     client = CoreAPIClient(base_url=args.core_url)
 
