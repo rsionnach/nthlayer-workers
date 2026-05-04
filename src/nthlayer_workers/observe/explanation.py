@@ -73,12 +73,14 @@ class ExplanationEngine:
         desc = status_desc.get(status, "within budget")
         headline = f"{slo_name}: {pct:.0f}% consumed — {desc} ({status})"
 
-        # Body
+        # Body. SLI and objective are in collector.py's 0-100 percentage range
+        # (slo/collector.py multiplies SLI by 100; YAML target uses the same
+        # convention, e.g. availability target=99.9, reversal_rate target=98.5).
         body = (
             f"Window: {window}. "
             f"Budget: {total:.0f} min total, {burned:.0f} min consumed, "
             f"{remaining:.0f} min remaining. "
-            f"Current SLI: {sli:.4f} (target: {obj:.4f})."
+            f"Current SLI: {sli:.2f}% (target: {obj:.2f}%)."
         )
 
         # Causes
@@ -88,9 +90,9 @@ class ExplanationEngine:
                 "Budget consumption exceeds 80% — sustained error rate above target"
             )
         if sli < obj and obj > 0:
-            gap = (obj - sli) * 100
+            gap = obj - sli  # both in 0-100 range, so subtraction yields percentage points
             causes.append(
-                f"Current SLI ({sli:.4f}) is {gap:.2f}pp below target ({obj:.4f})"
+                f"Current SLI ({sli:.2f}%) is {gap:.2f}pp below target ({obj:.2f}%)"
             )
 
         # Actions

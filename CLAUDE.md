@@ -25,7 +25,7 @@ src/nthlayer_workers/
     deployments/
     discovery/
     drift/
-    explanation.py
+    explanation.py  # ExplanationEngine: builds human-readable BudgetExplanation objects from slo_status assessments; explain_service(service, store, slo_filter?) → list[BudgetExplanation] — deduplicates keeping latest per SLO name (desc order); _explain_slo(service, assessment) → BudgetExplanation from assessment data fields (slo_name, status, percent_consumed, burned_minutes, total_budget_minutes, current_sli, objective, window); _STATUS_SEVERITY: EXHAUSTED/CRITICAL→"critical", WARNING/ERROR→"warning", HEALTHY/NO_DATA/UNKNOWN→"info"; headline: "{slo_name}: {pct:.0f}% consumed — {desc} ({status})"; body: window + budget totals; SLI and objective in 0–100 range (collector.py multiplies by 100); causes: >80% consumption or SLI < objective (gap in pp); actions: EXHAUSTED→gate block warning, CRITICAL/EXHAUSTED→investigate+freeze, WARNING→monitor; deterministic, no LLM; imports BudgetExplanation from nthlayer_common.explanation
     gate/
     incident.py
     portfolio/
