@@ -330,7 +330,7 @@ class TestReasonAboutCorrelations:
 class TestCorrelateCommandReasoning:
     def test_no_reasoning_produces_heuristic_verdict(self, tmp_path):
         """--no-reasoning flag produces verdict with reasoning_mode=heuristic."""
-        from nthlayer_common.verdicts import SQLiteVerdictStore, VerdictFilter, create as verdict_create
+        from nthlayer_common.verdicts import SQLiteVerdictStore, create as verdict_create
         from nthlayer_workers.correlate.cli import correlate_command
 
         store_path = str(tmp_path / "verdicts.db")
@@ -375,16 +375,18 @@ class TestCorrelateCommandReasoning:
 
         assert result == 0
 
-        corr_verdicts = store.query(VerdictFilter(subject_type="correlation", limit=10))
-        assert len(corr_verdicts) >= 1
-        cv = corr_verdicts[0]
-        custom = cv.metadata.custom
+        from nthlayer_workers.observe.sqlite_store import SQLiteAssessmentStore
+        from nthlayer_workers.observe.store import AssessmentFilter
+        asm_store = SQLiteAssessmentStore(store_path)
+        rows = asm_store.query(AssessmentFilter(kind="correlation_snapshot", limit=10))
+        assert rows
+        custom = rows[0].data
         assert custom["reasoning_mode"] == "heuristic"
         assert custom["reasoning"] is None
 
     def test_reasoning_enabled_without_api_key_falls_back(self, tmp_path, monkeypatch):
         """reasoning=True but no API key falls back to heuristic."""
-        from nthlayer_common.verdicts import SQLiteVerdictStore, VerdictFilter, create as verdict_create
+        from nthlayer_common.verdicts import SQLiteVerdictStore, create as verdict_create
         from nthlayer_workers.correlate.cli import correlate_command
 
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -431,13 +433,16 @@ class TestCorrelateCommandReasoning:
             )
 
         assert result == 0
-        corr_verdicts = store.query(VerdictFilter(subject_type="correlation", limit=10))
-        assert len(corr_verdicts) >= 1
-        assert corr_verdicts[0].metadata.custom["reasoning_mode"] == "heuristic"
+        from nthlayer_workers.observe.sqlite_store import SQLiteAssessmentStore
+        from nthlayer_workers.observe.store import AssessmentFilter
+        asm_store = SQLiteAssessmentStore(store_path)
+        rows = asm_store.query(AssessmentFilter(kind="correlation_snapshot", limit=10))
+        assert rows
+        assert rows[0].data["reasoning_mode"] == "heuristic"
 
     def test_reasoning_enabled_with_model_success(self, tmp_path, monkeypatch):
         """reasoning=True with API key and successful model call sets reasoning_mode=model."""
-        from nthlayer_common.verdicts import SQLiteVerdictStore, VerdictFilter, create as verdict_create
+        from nthlayer_common.verdicts import SQLiteVerdictStore, create as verdict_create
         from nthlayer_workers.correlate.cli import correlate_command
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
@@ -503,14 +508,19 @@ class TestCorrelateCommandReasoning:
             )
 
         assert result == 0
-        corr_verdicts = store.query(VerdictFilter(subject_type="correlation", limit=10))
-        assert len(corr_verdicts) >= 1
-        cv = corr_verdicts[0]
-        custom = cv.metadata.custom
+        from nthlayer_workers.observe.sqlite_store import SQLiteAssessmentStore
+        from nthlayer_workers.observe.store import AssessmentFilter
+        asm_store = SQLiteAssessmentStore(store_path)
+        rows = asm_store.query(AssessmentFilter(kind="correlation_snapshot", limit=10))
+        assert rows
+        custom = rows[0].data
         assert custom["reasoning_mode"] == "model"
         assert custom["reasoning"] is not None
-        assert cv.judgment.confidence == 0.87
-        assert "Causal link" in cv.subject.summary
+        # opensrm-saun.1.2.1: assertions migrated to assessment shape.
+        # Confidence and summary live in assessment.data (the verdict's
+        # judgment.confidence / subject.summary equivalents).
+        assert custom["confidence"] == 0.87
+        assert "Causal link" in custom["summary"]
 
 
 # ---------------------------------------------------------------------------

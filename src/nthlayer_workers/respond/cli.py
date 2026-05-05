@@ -250,16 +250,17 @@ def _build_incident_context(
     if trigger_source in ("nthlayer-correlate", "sitrep"):
         trigger_verdict_ids: list[str] = []
         if no_model:
-            from nthlayer_common.verdicts import create as verdict_create
-            v = verdict_create(
-                subject={"type": "correlation", "ref": incident_id,
-                         "summary": f"nthlayer-correlate correlation for {scenario['id']}"},
-                judgment={"action": "flag", "confidence": 0.9,
-                          "reasoning": "Mock nthlayer-correlate correlation verdict for replay"},
-                producer={"system": "nthlayer-correlate", "model": "mock"},
-            )
-            verdict_store.put(v)
-            trigger_verdict_ids.append(v.id)
+            # opensrm-saun.1.2.1: emit a mock correlation_snapshot assessment
+            # rather than a "correlation"-typed pseudo-verdict. The
+            # trigger_verdict_ids variable name is preserved (it's used as
+            # parent_ids on respond's first emitted verdict — the lineage
+            # bridge), but the id is now an assessment id (csn-*) reflecting
+            # the canonical primitive. verdict_store.put() is skipped because
+            # this is an assessment, not a verdict; replay mode doesn't
+            # exercise the bench lineage-walk path.
+            import uuid as _uuid
+            mock_id = f"csn-{scenario['id']}-{_uuid.uuid4().hex[:8]}"
+            trigger_verdict_ids.append(mock_id)
         else:
             print("nthlayer-correlate must be installed for correlation-triggered scenarios: "
                   "pip install -e ../nthlayer-correlate")

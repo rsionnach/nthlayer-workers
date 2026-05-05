@@ -224,11 +224,11 @@ def replay_command(
             if groups:
                 prompt, cache_hit = generator.generate(groups, AgentState.WATCHING)
                 try:
-                    verdicts = asyncio.run(model.interpret(prompt, groups))
-                    print(f"Verdicts created: {len(verdicts)}")
+                    assessments = asyncio.run(model.interpret(prompt, groups))
+                    print(f"Correlation assessments created: {len(assessments)}")
                 except Exception as exc:
                     logger.warning("model_call_failed", error=str(exc))
-                    print("Model call failed, skipping verdicts")
+                    print("Model call failed, skipping assessments")
         else:
             print("Model: skipped (--no-model)")
 
@@ -314,13 +314,17 @@ async def _serve_loop(config: SitRepConfig) -> None:
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, _handle_signal)
 
-    # Optionally open verdict store
-    verdict_store = None
+    # Optionally open assessment store. opensrm-saun.1.2.1: model.interpret()
+    # now emits correlation_snapshot assessments (was: correlation pseudo-
+    # verdicts). The legacy nthlayer_learn.store.VerdictStore import path is
+    # removed; serve mode persists via SQLiteAssessmentStore sharing the
+    # configured verdict-store db file.
+    assessment_store = None
     try:
-        from nthlayer_learn.store import VerdictStore
-        verdict_store = VerdictStore(config.verdict_store_path)
+        from nthlayer_workers.observe.sqlite_store import SQLiteAssessmentStore
+        assessment_store = SQLiteAssessmentStore(config.verdict_store_path)
     except Exception:
-        logger.info("verdict_store_not_available")
+        logger.info("assessment_store_not_available")
 
     try:
         while not shutdown.is_set():
@@ -354,7 +358,7 @@ async def _serve_loop(config: SitRepConfig) -> None:
 
                 if not cache_hit and groups:
                     try:
-                        await model.interpret(prompt, groups, verdict_store)
+                        await model.interpret(prompt, groups, assessment_store)
                     except Exception as exc:
                         logger.warning("model_call_failed", error=str(exc))
                         state_machine.update(groups, model_healthy=False)
@@ -409,8 +413,6 @@ def correlate_command(
     from nthlayer_common.verdicts import (
         SQLiteVerdictStore,
         VerdictFilter,
-        create as verdict_create,
-        link as verdict_link,
     )
 
     from nthlayer_workers.correlate.prometheus import (
@@ -623,83 +625,75 @@ def correlate_command(
     else:
         verdict_summary = f"{trigger_service} incident — {len(blast_list)} services affected"
 
-    corr_verdict = verdict_create(
-        subject={
-            "type": "correlation",
-            "ref": trigger_service,
-            "summary": verdict_summary,
+    # opensrm-saun.1.2.1: emit a correlation_snapshot ASSESSMENT (the v1.5
+    # canonical primitive). correlation_snapshot is in ASSESSMENT_KINDS;
+    # producing a "correlation"-typed verdict here was a category error.
+    import uuid as _uuid
+    from nthlayer_workers.observe.assessment import Assessment as _Assessment
+    from nthlayer_workers.observe.sqlite_store import SQLiteAssessmentStore
+
+    corr_assessment_id = f"csn-{trigger_service}-{_uuid.uuid4().hex[:8]}"
+    corr_assessment_data = {
+        "summary": verdict_summary,
+        "action": "flag" if any(g.priority <= 1 for g in groups) else "escalate",
+        "confidence": overall_confidence,
+        # parent_ids: lineage anchor to the trigger verdict (replaces the
+        # legacy verdict_link(context=[...]) pattern).
+        "parent_ids": [trigger_verdict_id],
+        "trigger_verdict": trigger_verdict_id,
+        "root_causes": root_causes,
+        "blast_radius": blast_list,
+        "groups": len(groups),
+        "events_gathered": len(events),
+        "reasoning_mode": reasoning_mode,
+        "reasoning": reasoning_result if reasoning_mode == "model" else None,
+        "evidence_sources": {
+            "prometheus": True,
+            "verdict_store": True,
+            "trace_backend": trace_evidence.backend if trace_evidence else None,
         },
-        judgment={
-            "action": "flag" if any(g.priority <= 1 for g in groups) else "escalate",
-            "confidence": overall_confidence,
-        },
-        producer={"system": "nthlayer-correlate"},
-        metadata={"custom": {
-            "trigger_verdict": trigger_verdict_id,
-            "root_causes": root_causes,
-            "blast_radius": blast_list,
-            "groups": len(groups),
-            "events_gathered": len(events),
-            "reasoning_mode": reasoning_mode,
-            "reasoning": reasoning_result if reasoning_mode == "model" else None,
-            "evidence_sources": {
-                "prometheus": True,
-                "verdict_store": True,
-                "trace_backend": trace_evidence.backend if trace_evidence else None,
-            },
-            "trace_query_time_ms": trace_evidence.query_time_ms if trace_evidence else None,
-        }},
+        "trace_query_time_ms": trace_evidence.query_time_ms if trace_evidence else None,
+    }
+    corr_assessment = _Assessment(
+        id=corr_assessment_id,
+        created_at=datetime.now(timezone.utc),
+        kind="correlation_snapshot",
+        service=trigger_service,
+        producer="nthlayer-correlate",
+        data=corr_assessment_data,
     )
-    verdict_link(corr_verdict, context=[trigger_verdict_id])
-    verdict_store.put(corr_verdict)
+    # Persist to a SQLite assessment store sharing the verdict store's
+    # database file (assessments and verdicts can coexist per
+    # SQLiteAssessmentStore's docstring).
+    asm_store = SQLiteAssessmentStore(verdict_store_path)
+    asm_store.put(corr_assessment)
 
-    # Write content-addressed decision record
+    # Legacy CLI side-effect (opensrm-saun.1.2.1).
+    # The correlate worker owns production side-effects (decision records,
+    # notifications, downstream incident triggering). This CLI command's
+    # integrations are no-ops on the assessment path pending assessment-shaped
+    # overloads in nthlayer-common.records and the Slack block builder.
+    # See docs/superpowers/decisions/legacy-cli-maintenance-mode.md
     if decision_store_path:
-        from nthlayer_common.records.sqlite_store import SQLiteDecisionRecordStore
-        from nthlayer_common.records.verdict_bridge import write_decision_verdict
-
-        ds = SQLiteDecisionRecordStore(decision_store_path)
-        write_decision_verdict(
-            ds,
-            agent="correlate",
-            incident_id=getattr(corr_verdict.subject, "ref", "") or trigger_service,
-            timestamp=corr_verdict.timestamp,
-            model=reasoning_model or os.environ.get("NTHLAYER_MODEL", "heuristic"),
-            reasoning=getattr(corr_verdict.judgment, "reasoning", "") or verdict_summary,
-            action={
-                "root_causes": root_causes[:3],
-                "blast_radius_count": len(blast_list),
-                "trace_backend": trace_evidence.backend if trace_evidence else None,
-                "trace_services_count": len(trace_evidence.services) if trace_evidence else 0,
-            },
-            prompt_text=f"correlate {trigger_service} mode={reasoning_mode}",
-            response_text=str(reasoning_result) if reasoning_result else "heuristic",
-            summaries_technical=(
-                f"Correlation: {trigger_service}, {len(groups)} groups, {len(blast_list)} blast radius"
-                + (f", trace evidence from {trace_evidence.backend}" if trace_evidence else "")
-            ),
-            summaries_plain=verdict_summary[:280],
-            summaries_executive=(
-                f"{trigger_service} correlation — {reasoning_mode}"
-                + (" + traces" if trace_evidence else "")
-            ),
+        log.info(
+            "decision_record_write_skipped_for_assessment",
+            assessment_id=corr_assessment_id,
+            note="opensrm-saun.1.2.1: write_decision_assessment helper not yet available",
         )
 
-    # Slack notification for correlation verdict
+    # Slack notification path used Verdict-attribute semantics
+    # (corr_verdict.metadata.custom, .subject.ref, .judgment.confidence).
+    # Skipping on the assessment path; the hot-path worker emits Slack via
+    # a different channel. Tracked as legacy CLI cleanup.
     slack_url = os.environ.get("SLACK_WEBHOOK_URL", "")
     if slack_url:
-        from nthlayer_common.slack import SlackNotifier
-        from nthlayer_workers.correlate.notifications import build_correlation_blocks, find_slack_thread_ts
+        log.info(
+            "slack_notification_skipped_for_assessment",
+            assessment_id=corr_assessment_id,
+            note="opensrm-saun.1.2.1: legacy Slack flow assumed Verdict semantics",
+        )
 
-        thread_ts = find_slack_thread_ts(verdict_store, [trigger_verdict_id])
-        blocks, text = build_correlation_blocks(corr_verdict)
-        notifier = SlackNotifier(slack_url)
-        new_ts = asyncio.run(notifier.send(blocks, text, thread_ts=thread_ts))
-        if new_ts and not thread_ts:
-            corr_verdict.metadata.custom["slack_thread_ts"] = new_ts
-            verdict_store.put(corr_verdict)
-
-    print(f"Correlation verdict: {corr_verdict.id}")
+    print(f"Correlation snapshot assessment: {corr_assessment_id}")
     print(f"  Groups: {len(groups)}, Events: {len(events)}, Blast radius: {len(affected)} services")
 
     # Forward to nthlayer-respond if respond_args is set
@@ -721,7 +715,7 @@ def correlate_command(
 
         cmd = [
             "nthlayer-respond", "respond",
-            "--trigger-verdict", corr_verdict.id,
+            "--trigger-verdict", corr_assessment_id,
             "--verdict-store", verdict_store_path,
         ]
         for key, value in args_dict.items():
