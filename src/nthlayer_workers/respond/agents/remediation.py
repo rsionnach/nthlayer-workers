@@ -58,10 +58,15 @@ class RemediationAgent(AgentBase):
     def __init__(
         self,
         *args,
-        safe_action_registry: SafeActionRegistry,
+        safe_action_registry: SafeActionRegistry | None,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
+        # Worker mode currently passes None pending opensrm P3-E.3 (registry
+        # wiring). When the registry is absent we cannot verify whether the
+        # model's proposed action is hallucinated or whether the policy
+        # requires approval — so parse_response forces approval to be
+        # required, and _post_execute skips automatic execution.
         self._registry = safe_action_registry
 
     # ------------------------------------------------------------------ #
@@ -130,22 +135,35 @@ class RemediationAgent(AgentBase):
 
         # Critical validation: reject hallucinated actions
         if proposed_action is not None:
-            try:
-                registry_action = self._registry.get(proposed_action)
-            except KeyError:
+            if self._registry is None:
+                # Worker mode without a wired registry (P3-E.3 pending) —
+                # we can't verify the action against the safe-action policy,
+                # so force human approval as the safest default. The
+                # proposal is preserved for the operator to review.
                 logger.warning(
-                    "RemediationAgent: model proposed unknown action %r — rejecting "
-                    "(hallucinated action name). Forcing requires_human_approval=True.",
+                    "RemediationAgent: no safe-action registry configured — "
+                    "cannot verify proposed action %r; forcing requires_human_approval=True.",
                     proposed_action,
                 )
-                proposed_action = None
                 requires_human_approval = True
                 registry_action = None
             else:
-                # Approval ratchet: registry can only escalate, never downgrade.
-                # If registry says approval required, model cannot override it to False.
-                if registry_action.requires_approval and not requires_human_approval:
+                try:
+                    registry_action = self._registry.get(proposed_action)
+                except KeyError:
+                    logger.warning(
+                        "RemediationAgent: model proposed unknown action %r — rejecting "
+                        "(hallucinated action name). Forcing requires_human_approval=True.",
+                        proposed_action,
+                    )
+                    proposed_action = None
                     requires_human_approval = True
+                    registry_action = None
+                else:
+                    # Approval ratchet: registry can only escalate, never downgrade.
+                    # If registry says approval required, model cannot override it to False.
+                    if registry_action.requires_approval and not requires_human_approval:
+                        requires_human_approval = True
         else:
             registry_action = None
 
@@ -203,8 +221,15 @@ class RemediationAgent(AgentBase):
         1. Execute safe action (if not requires_human_approval and action is set)
         2. Autonomy reduction (if recommended)
         """
-        # Step 1: Execute safe action
-        if not result.requires_human_approval and result.proposed_action is not None:
+        # Step 1: Execute safe action. When registry is None (worker mode
+        # pending P3-E.3) parse_response has already forced
+        # requires_human_approval=True, so this branch is unreachable; the
+        # `is not None` check is a defensive belt-and-braces guard.
+        if (
+            not result.requires_human_approval
+            and result.proposed_action is not None
+            and self._registry is not None
+        ):
             try:
                 exec_result = await self._registry.execute(
                     result.proposed_action, result.target, context

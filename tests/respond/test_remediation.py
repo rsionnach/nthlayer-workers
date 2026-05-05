@@ -640,3 +640,100 @@ def test_build_degraded_metadata_explicit_nones(bare_agent):
     proposed_action key at all)."""
     md = bare_agent._build_degraded_metadata()
     assert md == {"custom": {"proposed_action": None, "target": None}}
+
+
+# ------------------------------------------------------------------ #
+# None-registry safety (opensrm-saun.1.3)                              #
+# ------------------------------------------------------------------ #
+
+# Worker mode currently constructs RemediationAgent with
+# safe_action_registry=None pending opensrm P3-E.3 (registry wiring). The
+# agent must not crash with AttributeError when parse_response runs against
+# a model response that proposes a real action — instead it should preserve
+# the proposal and force requires_human_approval=True since the action
+# can't be verified against the policy.
+
+@pytest.fixture
+def agent_no_registry(verdict_store):
+    """RemediationAgent constructed with safe_action_registry=None — mirrors
+    worker.py's pre-P3-E.3 wiring."""
+    return RemediationAgent(
+        model="test-model",
+        max_tokens=256,
+        verdict_store=verdict_store,
+        config={"arbiter_url": "http://arbiter.local"},
+        safe_action_registry=None,
+    )
+
+
+def test_parse_response_no_registry_does_not_crash(agent_no_registry, context):
+    """The reproduction case from the integration test: canned LLM response
+    proposes a real action (rollback), but registry is None. Before the
+    fix, this raised AttributeError on self._registry.get(...). After the
+    fix, it returns a result with the proposal preserved and approval
+    forced."""
+    response = json.dumps({
+        "proposed_action": "rollback",
+        "target": "fraud-detect",
+        "risk_assessment": "Stub remediation",
+        "requires_human_approval": False,  # Model says no — we override.
+        "reasoning": "test",
+        "confidence": 0.85,
+    })
+    result = agent_no_registry.parse_response(response, context)
+    assert result.proposed_action == "rollback"
+    assert result.target == "fraud-detect"
+    assert result.requires_human_approval is True
+
+
+def test_parse_response_no_registry_logs_warning(agent_no_registry, context):
+    response = json.dumps({
+        "proposed_action": "rollback",
+        "target": "fraud-detect",
+        "requires_human_approval": True,
+        "confidence": 0.85,
+    })
+    with patch("nthlayer_workers.respond.agents.remediation.logger") as mock_logger:
+        agent_no_registry.parse_response(response, context)
+    mock_logger.warning.assert_called_once()
+    args, _ = mock_logger.warning.call_args
+    assert "no safe-action registry" in args[0]
+
+
+def test_parse_response_no_registry_no_action_proposed(agent_no_registry, context):
+    """Model returned no action — registry-None path is not triggered, but
+    confirm we still produce a clean result without crashing."""
+    response = json.dumps({
+        "proposed_action": None,
+        "target": None,
+        "reasoning": "no remediation available",
+        "confidence": 0.5,
+    })
+    result = agent_no_registry.parse_response(response, context)
+    assert result.proposed_action is None
+    assert result.target is None
+
+
+@pytest.mark.asyncio
+async def test_post_execute_no_registry_skips_execution(agent_no_registry, context):
+    """Defensive belt: even if requires_human_approval ended up False
+    despite the registry being None (e.g. a future code path), the
+    post-execute guard skips the registry.execute() call rather than
+    crashing. We construct the result directly to bypass parse_response's
+    approval forcing."""
+    result = RemediationResult(
+        proposed_action="rollback",
+        target="fraud-detect",
+        risk_assessment="",
+        requires_human_approval=False,  # Bypassing parse_response's forcing.
+        reasoning="",
+        confidence=0.85,
+    )
+    result.autonomy_reduction = {}
+
+    out_context = await agent_no_registry._post_execute(context, result)
+
+    # No exception, no execution attempt logged on result.
+    assert getattr(result, "executed", None) in (None, False)
+    # Context returned unchanged (no autonomy_reduction either).
+    assert out_context is context
