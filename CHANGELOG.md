@@ -6,6 +6,71 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## v1.5.0 — 2026-05-03
+
+First lockstep release with the rest of the v1.5 ecosystem. Phase 5
+landed several substantive changes:
+
+**Envelope transport on all 14 submission sites** (opensrm-saun.1.2).
+Workers now wrap every verdict and assessment in a CloudEvents v1.0
+envelope before submitting to core. Previously workers built envelopes
+but stripped them at the wire — a half-implementation discovered by the
+saun.1 three-tier integration test. Affected sites: respond ×3, measure
+×3, observe ×4, correlate ×3, learn ×2, observe-gate CLI ×1 (note:
+respond/verdict_submission removed the dead-code envelope strip).
+
+**`verdict_type` typed column populated at 7 verdict_create sites**
+(opensrm-saun.1.2). The Verdict dataclass's `verdict_type` column was
+nullable and unset by every emitter; core's `GET /verdicts?type=...`
+filter therefore couldn't find verdicts by their domain type. Fix routes
+the role label through `verdict_type` at emission time. respond agents
+emit `triage` / `investigation` / `communication` / `remediation` per
+role; respond's coordinator approve+deny paths emit `remediation` (v1.5
+owns the bundled flow; RBAC §10's separate approval/denial typing is a
+v2 concept). measure/cli emits `quality_breach` on breach;
+measure/tiering/promotion emits `autonomy_change`; bench's
+reasoning_capture emits `operator_note`.
+
+**Eager case creation in respond worker** (opensrm-saun.1.2). When respond
+opens an `IncidentContext` (from a snapshot or fallback breach), it now
+POSTs a case to core concurrently with the incident-open transition,
+before triage runs. Operators see incidents in the bench queue
+immediately. Case fields: `kind="incident"`, `underlying_verdict` anchored
+on the breach verdict (snapshot path: from `data.parent_ids`; fallback
+path: `breach["id"]`), `service`, `blast_radius` (env string for core's
+`_derive_priority`), `has_active_incident=True`, `briefing` composed from
+breach data. Failure non-fatal — case-create errors are logged but the
+incident still progresses through the agent pipeline. correlate also
+now sets `snapshot_data["parent_ids"]` to the list of QUALITY_SCORE event
+verdict ids so respond can read them for the case anchor.
+
+**RemediationAgent hardening against None safe_action_registry**
+(opensrm-saun.1.3). Worker mode constructs `RemediationAgent` with
+`safe_action_registry=None` (P3-E.3 wires the real registry). Pre-fix,
+`parse_response` raised `AttributeError: 'NoneType' object has no attribute
+'get'` on every cycle when the canned LLM stub proposed a real action.
+Caught by the broad except in `AgentBase.execute`, but every remediation
+hit the degraded path. Fix: constructor now accepts `SafeActionRegistry
+| None`; when None, `parse_response` logs a warning, forces
+`requires_human_approval=True`, and preserves the model's proposal for the
+operator to review. `_post_execute` gains a defensive `is not None` guard
+on the auto-execute branch.
+
+**Cold-path correlation pseudo-verdicts migrated to assessments**
+(opensrm-saun.1.2.1). Six call sites in `correlate/snapshot/model.py`
+(×4), `correlate/cli.py`, and `respond/cli.py` were emitting
+`verdict_create()` with `subject.type="correlation"` — but
+`correlation_snapshot` is in `ASSESSMENT_KINDS`, not `VALID_VERDICT_TYPES`.
+The hot-path correlate worker already emitted these correctly as
+assessments; this bead aligned the cold-path CLI sites with the same
+primitive. `ModelInterface.interpret()` returns `list[Assessment]`
+(typed); `correlate_command` writes via `SQLiteAssessmentStore` (sharing
+the verdict store's db file). Decision-record write integration deferred
+— no `write_decision_assessment` helper exists yet in
+`nthlayer-common.records`. Decision-record + Slack notification paths
+in `correlate/cli.py` are routed to no-ops with anchoring comments
+explaining the maintenance-mode posture.
+
 ## Provenance
 
 `nthlayer-workers` is the Tier 2 (background computation) process in the three-tier

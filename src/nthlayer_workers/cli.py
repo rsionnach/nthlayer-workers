@@ -9,7 +9,7 @@ from nthlayer_workers.runner import ModuleRunner
 
 def main():
     parser = argparse.ArgumentParser(description="NthLayer workers")
-    parser.add_argument("-V", "--version", action="version", version="%(prog)s 1.5.0a1")
+    parser.add_argument("-V", "--version", action="version", version="%(prog)s 1.5.0")
     sub = parser.add_subparsers(dest="command")
 
     # -- serve: start all worker modules --
@@ -204,7 +204,10 @@ async def _gate_async(args: argparse.Namespace) -> int:
             "commit_sha": args.commit_sha,
             "parent_ids": slo_ids,
         })
-        await client.submit_assessment(to_dict(assessment))
+        from nthlayer_common.cloudevents import wrap_assessment
+        await client.submit_assessment(
+            wrap_assessment(to_dict(assessment), component="observe.gate")
+        )
 
         # 5. Output result
         output = {
