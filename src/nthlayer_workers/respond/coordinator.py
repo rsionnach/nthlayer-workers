@@ -181,6 +181,12 @@ class Coordinator:
                 producer={"system": "nthlayer-respond", "instance": "coordinator"},
                 metadata={"custom": approval_custom},
             )
+            # opensrm-saun.1.2: typed column matches subject.type. RBAC §10's
+            # "approval" verdict-type is a v2 concept (separate authorise
+            # module); v1.5's coordinator owns the bundled approve-and-execute
+            # flow, so the verdict's nature is "remediation". The approve
+            # vs deny distinction lives in judgment.action.
+            v.verdict_type = "remediation"
             self._verdict_store.put(v)
             context.verdict_chain.append(v.id)
 
@@ -205,6 +211,9 @@ class Coordinator:
                 producer={"system": "nthlayer-respond", "instance": "coordinator"},
                 metadata={"custom": approval_custom},
             )
+            # See approval-success branch above for the rationale on
+            # remediation vs approval/denial typing.
+            v.verdict_type = "remediation"
             self._verdict_store.put(v)
             context.verdict_chain.append(v.id)
 

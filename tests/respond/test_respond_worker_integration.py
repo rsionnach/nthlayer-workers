@@ -161,7 +161,7 @@ async def test_p3_e1_milestone_full_chain_to_core():
     submitted_envelopes: list[dict] = []
 
     async def capture_submit(payload):
-        submitted_envelopes.append(payload)
+        submitted_envelopes.append(payload.get('data', payload))
         return APIResult(ok=True, status_code=200, data={}, error=None, detail=None)
 
     fake_client = AsyncMock()
@@ -288,7 +288,7 @@ async def test_p3_e1_fallback_path_full_chain():
     submitted_envelopes: list[dict] = []
 
     async def capture_submit(payload):
-        submitted_envelopes.append(payload)
+        submitted_envelopes.append(payload.get('data', payload))
         return APIResult(ok=True, status_code=200, data={}, error=None, detail=None)
 
     fake_client = AsyncMock()

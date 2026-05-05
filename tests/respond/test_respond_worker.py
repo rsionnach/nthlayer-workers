@@ -864,3 +864,120 @@ async def test_ingest_breach_cursor_advances(fake_client, config):
     module = RespondModule(client=fake_client, config=config)
     await module.process_cycle()
     assert module._cursors.breach_after == "2026-04-25T11:00:00+00:00"
+
+
+# ------------------------------------------------------------------ #
+# Eager case creation (opensrm-saun.1.2)                                #
+# ------------------------------------------------------------------ #
+
+async def test_snapshot_path_creates_case(fake_client, config):
+    """Opening an incident from a snapshot eagerly POSTs a case to core,
+    anchored on the breach verdict that triggered the snapshot."""
+    snap = _snapshot(parent_ids=["vrd-breach-x"])
+    fake_client.get_assessments = AsyncMock(return_value=_ok_result([snap]))
+    fake_client.get_verdicts = AsyncMock(return_value=_ok_result([]))
+    fake_client.get_manifest = AsyncMock(
+        return_value=_ok_result({"name": "fraud-detect", "tier": "critical"})
+    )
+    fake_client.create_case = AsyncMock(return_value=_ok_result({"id": "case-x", "priority": "P1"}))
+
+    module = RespondModule(client=fake_client, config=config)
+    await module._ingest_triggers()
+
+    fake_client.create_case.assert_awaited_once()
+    case = fake_client.create_case.await_args.args[0]
+    assert case["kind"] == "incident"
+    assert case["service"] == "fraud-detect"
+    # Anchor: first parent_id from snapshot data (the triggering breach).
+    assert case["underlying_verdict"] == "vrd-breach-x"
+    assert case["has_active_incident"] is True
+    # Environment from the snapshot's domain — feeds core's _derive_priority.
+    assert case["blast_radius"] == "production"
+    assert case["briefing"]
+
+
+async def test_breach_path_creates_case(fake_client, config):
+    """Fallback path: incident opened from a quality_breach verdict creates
+    a case anchored directly on the breach (no snapshot to anchor on)."""
+    breach = _breach(breach_id="vrd-breach-only")
+    breach["data"] = {"slo_name": "reversal_rate", "current_value": 0.08, "target": 0.015}
+    # Force fallback by aging the breach past the threshold; threshold=1s in
+    # the test config and breach is from 2026-04-25.
+    fake_client.get_assessments = AsyncMock(return_value=_ok_result([]))
+    fake_client.get_verdicts = AsyncMock(return_value=_ok_result([breach]))
+    fake_client.get_manifest = AsyncMock(
+        return_value=_ok_result({"name": "fraud-detect", "tier": "critical"})
+    )
+    fake_client.create_case = AsyncMock(return_value=_ok_result({"id": "case-y", "priority": "P1"}))
+
+    module = RespondModule(client=fake_client, config=config)
+    await module._ingest_triggers()
+
+    fake_client.create_case.assert_awaited_once()
+    case = fake_client.create_case.await_args.args[0]
+    assert case["underlying_verdict"] == "vrd-breach-only"
+    assert case["service"] == "fraud-detect"
+    assert "reversal_rate" in case["briefing"]
+    assert "0.08" in case["briefing"]
+
+
+async def test_case_create_failure_does_not_crash_cycle(fake_client, config):
+    """If core rejects POST /cases, the cycle continues and the incident
+    proceeds through the agent pipeline. Bench may not see this incident
+    but the verdict chain is still correct."""
+    snap = _snapshot(parent_ids=["vrd-breach-x"])
+    fake_client.get_assessments = AsyncMock(return_value=_ok_result([snap]))
+    fake_client.get_verdicts = AsyncMock(return_value=_ok_result([]))
+    fake_client.get_manifest = AsyncMock(
+        return_value=_ok_result({"name": "fraud-detect", "tier": "critical"})
+    )
+    fake_client.create_case = AsyncMock(return_value=_err_result(status=503))
+
+    module = RespondModule(client=fake_client, config=config)
+    # Must not raise.
+    await module._ingest_triggers()
+
+    # Incident is still opened despite case-create failure.
+    assert len(module._incidents) == 1
+
+
+async def test_snapshot_with_no_parent_ids_skips_case_creation(fake_client, config):
+    """If a snapshot has no triggering breach verdict (cold start, post-restart,
+    or future snapshot kind without QUALITY_SCORE events), the incident still
+    opens but no case is created. case.underlying_verdict must anchor on a
+    verdict id so bench's lineage walk resolves; using the snapshot's
+    assessment id would 404 on GET /verdicts/{id}/ancestors."""
+    snap = _snapshot(parent_ids=[])  # No triggering breach
+    fake_client.get_assessments = AsyncMock(return_value=_ok_result([snap]))
+    fake_client.get_verdicts = AsyncMock(return_value=_ok_result([]))
+    fake_client.get_manifest = AsyncMock(
+        return_value=_ok_result({"name": "fraud-detect", "tier": "critical"})
+    )
+    fake_client.create_case = AsyncMock(return_value=_ok_result({"id": "x"}))
+
+    module = RespondModule(client=fake_client, config=config)
+    await module._ingest_triggers()
+
+    # Incident is opened …
+    assert len(module._incidents) == 1
+    # … but no case was created (no verdict to anchor on).
+    fake_client.create_case.assert_not_awaited()
+
+
+async def test_case_id_derived_from_incident_id(fake_client, config):
+    """Case id is deterministically derived from incident id so a replay
+    can dedup via 409 rather than creating duplicates."""
+    snap = _snapshot(parent_ids=["vrd-breach-x"])
+    fake_client.get_assessments = AsyncMock(return_value=_ok_result([snap]))
+    fake_client.get_verdicts = AsyncMock(return_value=_ok_result([]))
+    fake_client.get_manifest = AsyncMock(
+        return_value=_ok_result({"name": "fraud-detect", "tier": "critical"})
+    )
+    fake_client.create_case = AsyncMock(return_value=_ok_result({"id": "case-x"}))
+
+    module = RespondModule(client=fake_client, config=config)
+    await module._ingest_triggers()
+
+    inc_id = next(iter(module._incidents))
+    case = fake_client.create_case.await_args.args[0]
+    assert case["id"] == f"case-{inc_id}"

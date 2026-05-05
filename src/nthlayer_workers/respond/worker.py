@@ -457,12 +457,47 @@ class RespondModule:
         triage agent's severity derivation is grounded in declared tier rather
         than a hardcoded placeholder.
         """
-        affected = (snap.get("data") or {}).get("affected_services") or [
-            (snap.get("data") or {}).get("domain", {}).get("service") or "unknown"
+        data = snap.get("data") or {}
+        affected = data.get("affected_services") or [
+            data.get("domain", {}).get("service") or "unknown"
         ]
         tiers = await self._resolve_tiers(affected)
         ctx = open_from_snapshot(snap, self.config, tiers=tiers)
         self._incidents[ctx.id] = ctx
+
+        # Eager case creation (opensrm-saun.1.2). See _create_case_for_incident
+        # for the design rationale.
+        #
+        # Anchor must be a verdict id so bench's lineage walk via
+        # GET /verdicts/{id}/ancestors resolves; assessment ids would 404.
+        # Skip case creation if the snapshot has no triggering breach verdict
+        # (cold-start, post-restart with empty session window, or future
+        # snapshot kinds without QUALITY_SCORE events). The incident still
+        # opens — operator just won't see a row in the bench queue until
+        # the breach-fallback path or a later signal creates one. Logged so
+        # operators can spot the gap.
+        breach_ids = data.get("parent_ids") or []
+        if not breach_ids:
+            logger.warning(
+                "respond_case_create_skipped_no_anchor",
+                incident_id=ctx.id,
+                snapshot_id=snap.get("id"),
+            )
+            return ctx.id
+        service = data.get("domain", {}).get("service") or affected[0]
+        environment = data.get("domain", {}).get("environment") or "production"
+        briefing = (
+            data.get("nl_summary", {}).get("summary")
+            if isinstance(data.get("nl_summary"), dict)
+            else None
+        ) or f"Correlation snapshot: {data.get('event_count', 0)} event(s) on {service}"
+        await self._create_case_for_incident(
+            ctx,
+            underlying_verdict=breach_ids[0],
+            service=service,
+            environment=environment,
+            briefing=briefing,
+        )
         return ctx.id
 
     async def _open_incident_from_breach(self, breach: dict) -> str:
@@ -475,7 +510,72 @@ class RespondModule:
         tiers = await self._resolve_tiers([service])
         ctx = open_from_breach(breach, self.config, tiers=tiers)
         self._incidents[ctx.id] = ctx
+
+        # Eager case creation (opensrm-saun.1.2). Anchor on the breach
+        # verdict directly — this is the fallback path so there's no
+        # snapshot to anchor on, and the breach is the canonical signal
+        # that triggered respond.
+        breach_data = breach.get("data") or {}
+        slo_name = breach_data.get("slo_name", "unknown")
+        # Quality_breach verdicts are emitted by measure as raw dicts (no
+        # judgment.reasoning). Briefing is composed from breach.data fields
+        # — richer content lands once the triage verdict completes and the
+        # bench brief logic walks descendants.
+        briefing = (
+            f"{slo_name} breach on {service}: "
+            f"{breach_data.get('current_value', '?')} vs target "
+            f"{breach_data.get('target', '?')}"
+        )
+        await self._create_case_for_incident(
+            ctx,
+            underlying_verdict=breach["id"],
+            service=service,
+            environment="production",
+            briefing=briefing,
+        )
         return ctx.id
+
+    async def _create_case_for_incident(
+        self,
+        ctx: IncidentContext,
+        *,
+        underlying_verdict: str,
+        service: str,
+        environment: str,
+        briefing: str,
+    ) -> None:
+        """Eagerly POST a case to core when an incident opens.
+
+        Design choice — eager (not lazy): cases are created as soon as
+        respond knows about an incident, not after triage produces a
+        verdict. Operators want incidents in the bench queue immediately
+        so they can see what the system is working on; richer briefing
+        content arrives later when the brief logic walks descendants of
+        ``case.underlying_verdict``.
+
+        Failure is non-fatal: if core rejects or is unreachable the cycle
+        continues and the incident proceeds through the agent pipeline.
+        Operators may not see this incident in the bench queue, but the
+        verdict chain is still correct.
+        """
+        case = {
+            "id": f"case-{ctx.id}",
+            "kind": "incident",
+            "created_at": ctx.created_at,
+            "underlying_verdict": underlying_verdict,
+            "service": service,
+            "blast_radius": environment,  # str, used by core's _derive_priority
+            "has_active_incident": True,
+            "briefing": briefing,
+        }
+        result = await self.client.create_case(case)
+        if not result.ok:
+            logger.warning(
+                "respond_case_create_failed",
+                incident_id=ctx.id,
+                status_code=result.status_code,
+                error=result.error,
+            )
 
     async def _resolve_tiers(self, services: list[str]) -> dict[str, str]:
         """Fetch tiers for the given services from core's manifest catalogue.

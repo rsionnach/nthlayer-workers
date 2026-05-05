@@ -43,7 +43,9 @@ async def submit_verdict_to_core(
         component="respond",
         deployment_id=deployment_id,
     )
-    result = await client.submit_verdict(envelope["data"])
+    # Submit the full envelope; core auto-detects via top-level
+    # ``specversion`` and unwraps before validation (opensrm-saun.1.2).
+    result = await client.submit_verdict(envelope)
     if not result.ok:
         logger.warning(
             "respond_verdict_submit_failed",
