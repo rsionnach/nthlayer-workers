@@ -110,6 +110,9 @@ class TierPromotionChecker:
             },
             producer={"system": "nthlayer-measure"},
         )
+        # opensrm-saun.1.2: typed column. Tier promotion is an autonomy
+        # change in measure's vocabulary (per NTHLAYER-MEASURE-v1 §9).
+        verdict.verdict_type = "autonomy_change"
         self._verdict_store.put(verdict)
         logger.warning(
             "Tier promotion: %s promoted from %s to %s (failure rate %.0f%%, threshold %.0f%%)",

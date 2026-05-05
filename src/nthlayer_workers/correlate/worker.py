@@ -16,6 +16,7 @@ from typing import Any
 import structlog
 
 from nthlayer_common.api_client import CoreAPIClient
+from nthlayer_common.cloudevents import wrap_assessment
 
 from nthlayer_workers.correlate.session import (
     CorrelationDomain,
@@ -149,6 +150,14 @@ class CorrelateSessionModule:
         now = datetime.now(timezone.utc)
         reason = window.close_reason(now, self.gap_seconds, self.max_duration_seconds)
 
+        # Verdict IDs of QUALITY_SCORE events that triggered this snapshot.
+        # respond reads this via open_from_snapshot to anchor cases on the
+        # underlying breach verdict (opensrm-saun.1.2 case-creation work).
+        # SitRepEvent.id is the verdict id directly (see verdict_to_event).
+        trigger_verdict_ids = [
+            e.id for e in window.events if e.type == EventType.QUALITY_SCORE
+        ]
+
         snapshot_data = {
             "domain": {
                 "service": window.domain.service,
@@ -167,6 +176,11 @@ class CorrelateSessionModule:
             # "default" for v1.5 — assessments don't carry environment.
             # v2 adds "manifest" and "event" sources.
             "environment_source": "default",
+            # parent_ids: triggering breach verdicts. Read by
+            # respond.worker_helpers.open_from_snapshot for incident
+            # context lineage and by respond's case-creation path for
+            # the case's underlying_verdict anchor.
+            "parent_ids": trigger_verdict_ids,
         }
 
         # P3-D.3: NL summary — non-blocking, 5s timeout
@@ -181,7 +195,7 @@ class CorrelateSessionModule:
             "data": snapshot_data,
         }
 
-        result = await self.client.submit_assessment(assessment)
+        result = await self.client.submit_assessment(wrap_assessment(assessment, component="correlate"))
         if not result.ok:
             logger.warning(
                 "correlate_snapshot_submit_failed",
@@ -392,7 +406,7 @@ class CorrelateTopologyModule:
                 "drift_detected": True,
             },
         }
-        await self.client.submit_assessment(assessment)
+        await self.client.submit_assessment(wrap_assessment(assessment, component="correlate"))
 
     async def get_state(self) -> dict:
         return {}
@@ -578,7 +592,7 @@ class CorrelateContractModule:
                     "divergence_count": len(divergences),
                 },
             }
-            result = await self.client.submit_assessment(assessment)
+            result = await self.client.submit_assessment(wrap_assessment(assessment, component="correlate"))
             if not result.ok:
                 logger.warning(
                     "contract_divergence_submit_failed",

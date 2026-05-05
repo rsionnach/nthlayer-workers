@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import structlog
 
 from nthlayer_common.api_client import CoreAPIClient
+from nthlayer_common.cloudevents import wrap_assessment
 from nthlayer_common.manifest.models import SLODefinition
 
 from nthlayer_workers.observe.assessment import create, to_dict
@@ -91,7 +92,7 @@ class ObserveCollectModule:
             all_results[service] = results
             assessments = results_to_assessments(results, service)
             for assessment in assessments:
-                submit_result = await self.client.submit_assessment(to_dict(assessment))
+                submit_result = await self.client.submit_assessment(wrap_assessment(to_dict(assessment), component="observe"))
                 if submit_result.ok:
                     slo_assessment_ids.append(assessment.id)
                 else:
@@ -130,7 +131,7 @@ class ObserveCollectModule:
                     "parent_ids": slo_assessment_ids,
                 },
             )
-            await self.client.submit_assessment(to_dict(portfolio_assessment))
+            await self.client.submit_assessment(wrap_assessment(to_dict(portfolio_assessment), component="observe"))
 
     async def get_state(self) -> dict:
         return {}
@@ -188,7 +189,7 @@ class ObserveDriftModule:
                 "summary": result.summary,
                 "recommendation": result.recommendation,
             })
-            await self.client.submit_assessment(to_dict(assessment))
+            await self.client.submit_assessment(wrap_assessment(to_dict(assessment), component="observe"))
 
     async def get_state(self) -> dict:
         return {}
@@ -263,7 +264,7 @@ class ObserveTopologyModule:
                 "direct_downstream_count": len(result.direct_downstream),
                 "recommendation": result.recommendation,
             })
-            await self.client.submit_assessment(to_dict(assessment))
+            await self.client.submit_assessment(wrap_assessment(to_dict(assessment), component="observe"))
 
     async def get_state(self) -> dict:
         return {}

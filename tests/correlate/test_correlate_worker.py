@@ -101,6 +101,7 @@ class TestProcessCycle:
         # Window force-closed by trigger, snapshot emitted
         client.submit_assessment.assert_awaited_once()
         submitted = client.submit_assessment.call_args[0][0]
+        submitted = submitted.get('data', submitted)
         assert submitted["kind"] == "correlation_snapshot"
         assert submitted["service"] == "fraud-detect"
         assert "nl_summary" in submitted["data"]  # P3-D.3 wiring

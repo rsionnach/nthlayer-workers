@@ -15,6 +15,7 @@ from typing import Any
 import structlog
 
 from nthlayer_common.api_client import CoreAPIClient
+from nthlayer_common.cloudevents import wrap_assessment
 
 logger = structlog.get_logger()
 
@@ -185,7 +186,7 @@ class LearnOutcomeModule:
                 "producer_system": verdict.get("producer", {}).get("system"),
             },
         }
-        result = await self.client.submit_assessment(assessment)
+        result = await self.client.submit_assessment(wrap_assessment(assessment, component="learn"))
         if not result.ok:
             logger.warning("calibration_signal_submit_failed", verdict_id=verdict.get("id"))
 
@@ -303,7 +304,7 @@ class LearnRetrospectiveModule:
             },
         }
 
-        result = await self.client.submit_assessment(assessment)
+        result = await self.client.submit_assessment(wrap_assessment(assessment, component="learn"))
         if not result.ok:
             logger.warning("retrospective_submit_failed", service=service, error=result.error)
             return False

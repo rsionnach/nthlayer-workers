@@ -111,7 +111,7 @@ class TestEvaluation:
         client.get_manifests = AsyncMock(return_value=_manifest_with_judgment_slos())
         submitted = []
         client.submit_assessment = AsyncMock(
-            side_effect=lambda a: (submitted.append(a), APIResult(ok=True, status_code=201, data={}))[1]
+            side_effect=lambda a: (submitted.append(a.get('data', a)), APIResult(ok=True, status_code=201, data={}))[1]
         )
         client.submit_verdict = AsyncMock(return_value=APIResult(ok=True, status_code=201, data={}))
 
@@ -134,7 +134,7 @@ class TestEvaluation:
         client.get_manifests = AsyncMock(return_value=_manifest_with_judgment_slos())
         submitted = []
         client.submit_assessment = AsyncMock(
-            side_effect=lambda a: (submitted.append(a), APIResult(ok=True, status_code=201, data={}))[1]
+            side_effect=lambda a: (submitted.append(a.get('data', a)), APIResult(ok=True, status_code=201, data={}))[1]
         )
         client.submit_verdict = AsyncMock(return_value=APIResult(ok=True, status_code=201, data={}))
 
@@ -179,7 +179,7 @@ class TestBreachTransitions:
         client.submit_assessment = AsyncMock(return_value=APIResult(ok=True, status_code=201, data={}))
         verdicts = []
         client.submit_verdict = AsyncMock(
-            side_effect=lambda v: (verdicts.append(v), APIResult(ok=True, status_code=201, data={}))[1]
+            side_effect=lambda v: (verdicts.append(v.get('data', v)), APIResult(ok=True, status_code=201, data={}))[1]
         )
 
         module = MeasureModule(client=client, prometheus_url="http://prom:9090")
@@ -202,7 +202,7 @@ class TestBreachTransitions:
         client.submit_assessment = AsyncMock(return_value=APIResult(ok=True, status_code=201, data={}))
         verdicts = []
         client.submit_verdict = AsyncMock(
-            side_effect=lambda v: (verdicts.append(v), APIResult(ok=True, status_code=201, data={}))[1]
+            side_effect=lambda v: (verdicts.append(v.get('data', v)), APIResult(ok=True, status_code=201, data={}))[1]
         )
 
         # Pre-set state: already breaching
@@ -256,7 +256,7 @@ class TestAutonomyGovernance:
         client.submit_assessment = AsyncMock(return_value=APIResult(ok=True, status_code=201, data={}))
         verdicts = []
         client.submit_verdict = AsyncMock(
-            side_effect=lambda v: (verdicts.append(v), APIResult(ok=True, status_code=201, data={}))[1]
+            side_effect=lambda v: (verdicts.append(v.get('data', v)), APIResult(ok=True, status_code=201, data={}))[1]
         )
 
         module = MeasureModule(client=client, prometheus_url="http://prom:9090")
@@ -280,7 +280,7 @@ class TestAutonomyGovernance:
         client.submit_assessment = AsyncMock(return_value=APIResult(ok=True, status_code=201, data={}))
         verdicts = []
         client.submit_verdict = AsyncMock(
-            side_effect=lambda v: (verdicts.append(v), APIResult(ok=True, status_code=201, data={}))[1]
+            side_effect=lambda v: (verdicts.append(v.get('data', v)), APIResult(ok=True, status_code=201, data={}))[1]
         )
 
         module = MeasureModule(client=client, prometheus_url="http://prom:9090")
@@ -307,7 +307,7 @@ class TestRebreachAfterRecovery:
         client.submit_assessment = AsyncMock(return_value=APIResult(ok=True, status_code=201, data={}))
         verdicts = []
         client.submit_verdict = AsyncMock(
-            side_effect=lambda v: (verdicts.append(v), APIResult(ok=True, status_code=201, data={}))[1]
+            side_effect=lambda v: (verdicts.append(v.get('data', v)), APIResult(ok=True, status_code=201, data={}))[1]
         )
 
         module = MeasureModule(client=client, prometheus_url="http://prom:9090")

@@ -83,6 +83,7 @@ class TestOutcomeCycle:
         # Calibration signal should also be emitted
         client.submit_assessment.assert_awaited_once()
         submitted = client.submit_assessment.call_args[0][0]
+        submitted = submitted.get('data', submitted)
         assert submitted["kind"] == "calibration_signal"
 
     async def test_resolution_via_expiry(self):
@@ -134,7 +135,7 @@ class TestOutcomeCycle:
         client.resolve_outcome = AsyncMock(return_value=APIResult(ok=True, status_code=201, data={}))
         submitted = []
         client.submit_assessment = AsyncMock(
-            side_effect=lambda a: (submitted.append(a), APIResult(ok=True, status_code=201, data={}))[1]
+            side_effect=lambda a: (submitted.append(a.get('data', a)), APIResult(ok=True, status_code=201, data={}))[1]
         )
 
         module = LearnOutcomeModule(client=client)
@@ -194,7 +195,7 @@ class TestOutcomeCycle:
         client.resolve_outcome = AsyncMock(return_value=APIResult(ok=True, status_code=201, data={}))
         submitted = []
         client.submit_assessment = AsyncMock(
-            side_effect=lambda a: (submitted.append(a), APIResult(ok=True, status_code=201, data={}))[1]
+            side_effect=lambda a: (submitted.append(a.get('data', a)), APIResult(ok=True, status_code=201, data={}))[1]
         )
 
         module = LearnOutcomeModule(client=client)
@@ -297,7 +298,7 @@ class TestRetrospectiveCycle:
         ]))
         submitted = []
         client.submit_assessment = AsyncMock(
-            side_effect=lambda a: (submitted.append(a), APIResult(ok=True, status_code=201, data={}))[1]
+            side_effect=lambda a: (submitted.append(a.get('data', a)), APIResult(ok=True, status_code=201, data={}))[1]
         )
 
         module = LearnRetrospectiveModule(client=client)
@@ -331,7 +332,7 @@ class TestRetrospectiveCycle:
         ]))
         submitted = []
         client.submit_assessment = AsyncMock(
-            side_effect=lambda a: (submitted.append(a), APIResult(ok=True, status_code=201, data={}))[1]
+            side_effect=lambda a: (submitted.append(a.get('data', a)), APIResult(ok=True, status_code=201, data={}))[1]
         )
 
         module = LearnRetrospectiveModule(client=client)
@@ -368,7 +369,7 @@ class TestRetrospectiveCycle:
         client.get_verdicts = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[]))
         submitted = []
         client.submit_assessment = AsyncMock(
-            side_effect=lambda a: (submitted.append(a), APIResult(ok=True, status_code=201, data={}))[1]
+            side_effect=lambda a: (submitted.append(a.get('data', a)), APIResult(ok=True, status_code=201, data={}))[1]
         )
 
         module = LearnRetrospectiveModule(client=client)

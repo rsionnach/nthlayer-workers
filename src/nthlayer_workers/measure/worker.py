@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 import structlog
 
 from nthlayer_common.api_client import CoreAPIClient
+from nthlayer_common.cloudevents import wrap_assessment, wrap_verdict
 from nthlayer_common.providers import PrometheusProvider
 
 logger = structlog.get_logger()
@@ -135,7 +136,9 @@ class MeasureModule:
                         "current_value": current_value,
                     },
                 }
-                await self.client.submit_verdict(breach_verdict)
+                await self.client.submit_verdict(
+                    wrap_verdict(breach_verdict, component="measure")
+                )
 
             # Phase 3: Governance — severity-based, fully deterministic (no LLM in v1.5)
             # Process per-service: count breaching SLOs, determine action
@@ -185,7 +188,9 @@ class MeasureModule:
                             "reason": f"Autonomy reduced: {len(breaching_keys)} SLO(s) breaching",
                         },
                     }
-                    await self.client.submit_verdict(verdict)
+                    await self.client.submit_verdict(
+                        wrap_verdict(verdict, component="measure")
+                    )
 
             # Clear breach state for recovered SLOs.
             # Intentionally does NOT restore _autonomy_levels — ratchet is one-way.
@@ -254,7 +259,9 @@ class MeasureModule:
                 "window": slo.get("window", "30d"),
             },
         }
-        result = await self.client.submit_assessment(assessment)
+        result = await self.client.submit_assessment(
+            wrap_assessment(assessment, component="measure")
+        )
         if not result.ok:
             logger.warning("measure_assessment_submit_failed",
                            service=service, slo=slo_name)

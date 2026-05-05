@@ -106,7 +106,7 @@ class TestContractCycle:
         client.get_manifests = AsyncMock(return_value=_manifest_with_contracts())
         submitted = []
         client.submit_assessment = AsyncMock(
-            side_effect=lambda a: (submitted.append(a), APIResult(ok=True, status_code=201, data={"id": "x"}))[1]
+            side_effect=lambda a: (submitted.append(a.get("data", a)), APIResult(ok=True, status_code=201, data={"id": "x"}))[1]
         )
 
         module = CorrelateContractModule(client=client, prometheus_url="http://prom:9090")
