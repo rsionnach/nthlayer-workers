@@ -132,6 +132,10 @@ class AgentBase(ABC):
             producer={"system": "nthlayer-respond", "model": self._model},
             metadata=metadata,
         )
+        # Typed column for filtering (opensrm-saun.1.2). Matches subject.type
+        # for respond agents — both are the role label, but verdict_type is
+        # the queryable typed column whereas subject.type is a display field.
+        v.verdict_type = self.role.value
 
         # Wire lineage (existing) + parent_ids (P3-E.1: cross-module ancestry)
         v.lineage.context = list(context.trigger_verdict_ids)
