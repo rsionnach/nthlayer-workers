@@ -122,11 +122,10 @@ class SLOMetricCollector:
         try:
             sli_value = await provider.get_sli_value(query)
 
-            # PrometheusProvider.get_sli_value returns 0.0 for both
-            # "empty result set" and "value is 0.0". We treat 0.0 as a
-            # valid measurement (total outage = EXHAUSTED) rather than
-            # misclassifying it as NO_DATA. True no-data requires the
-            # provider to return None (future nthlayer-common change).
+            if sli_value is None:
+                result.status = "NO_DATA"
+                return result
+
             result.current_sli = sli_value * 100
             error_rate = 1.0 - sli_value
             result.burned_minutes = window_minutes * error_rate

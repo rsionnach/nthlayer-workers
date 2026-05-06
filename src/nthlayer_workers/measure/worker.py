@@ -234,6 +234,10 @@ class MeasureModule:
             logger.debug("measure_prometheus_failed", service=service, slo=slo_name)
             return
 
+        if current_value is None:
+            logger.debug("measure_no_data", service=service, slo=slo_name)
+            return
+
         # Determine breach: for judgment SLOs, SLI >= target means healthy
         # (inverted from classical: reversal_rate SLI is 1 - reversal_rate,
         # so SLI >= target means rate is below threshold)

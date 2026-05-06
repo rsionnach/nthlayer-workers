@@ -362,6 +362,25 @@ class TestFailureModes:
         module = MeasureModule(client=client, prometheus_url="http://prom:9090")
         await module.process_cycle()  # should not crash
 
+    @patch("nthlayer_workers.measure.worker.PrometheusProvider")
+    async def test_no_data_skips_evaluation(self, mock_prov_cls):
+        """Provider returning None (no Prometheus data) skips evaluation rather than emitting a phantom breach."""
+        mock_prov = AsyncMock()
+        mock_prov.get_sli_value = AsyncMock(return_value=None)
+        mock_prov.aclose = AsyncMock()
+        mock_prov_cls.return_value = mock_prov
+
+        client = AsyncMock()
+        client.get_manifests = AsyncMock(return_value=_manifest_with_judgment_slos())
+        client.submit_assessment = AsyncMock()
+        client.submit_verdict = AsyncMock()
+
+        module = MeasureModule(client=client, prometheus_url="http://prom:9090")
+        await module.process_cycle()
+
+        client.submit_assessment.assert_not_called()
+        client.submit_verdict.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Helpers

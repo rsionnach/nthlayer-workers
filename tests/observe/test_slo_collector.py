@@ -83,13 +83,7 @@ class TestSLOMetricCollector:
 
     @patch("nthlayer_workers.observe.slo.collector.PrometheusProvider")
     async def test_collect_zero_sli_treated_as_total_outage(self, mock_provider_cls, availability_slo):
-        """sli_value=0.0 is a total outage, not no-data.
-
-        PrometheusProvider.get_sli_value() returns 0.0 for both empty
-        result sets and actual 0% availability. We treat 0.0 as valid
-        data (EXHAUSTED) to avoid silently suppressing total outages.
-        See opensrm-e1gk for the underlying provider fix.
-        """
+        """sli_value=0.0 is a real measurement (total outage), distinct from no-data."""
         mock_provider = AsyncMock()
         mock_provider.get_sli_value = AsyncMock(return_value=0.0)
         mock_provider.aclose = AsyncMock()
@@ -100,6 +94,22 @@ class TestSLOMetricCollector:
 
         assert results[0].status == "EXHAUSTED"
         assert results[0].current_sli == 0.0
+        assert results[0].error is None
+
+    @patch("nthlayer_workers.observe.slo.collector.PrometheusProvider")
+    async def test_collect_none_sli_yields_no_data(self, mock_provider_cls, availability_slo):
+        """Provider returning None (empty Prometheus result) yields NO_DATA, not EXHAUSTED."""
+        mock_provider = AsyncMock()
+        mock_provider.get_sli_value = AsyncMock(return_value=None)
+        mock_provider.aclose = AsyncMock()
+        mock_provider_cls.return_value = mock_provider
+
+        collector = SLOMetricCollector("http://prom:9090")
+        results = await collector.collect([availability_slo])
+
+        assert results[0].status == "NO_DATA"
+        assert results[0].current_sli is None
+        assert results[0].burned_minutes is None
         assert results[0].error is None
 
     @patch("nthlayer_workers.observe.slo.collector.PrometheusProvider")
