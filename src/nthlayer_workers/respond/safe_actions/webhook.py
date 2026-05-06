@@ -1,7 +1,14 @@
 """Webhook dispatcher for safe action execution bindings.
 
-Renders {{variable}} templates, resolves ${ENV_VAR} secrets,
-makes HTTP calls, and optionally verifies results via PromQL.
+Resolves ``${ENV_VAR}`` secrets in the operator-supplied binding config,
+then renders ``{{variable}}`` placeholders with incident-supplied
+variables, then dispatches an HTTP call to an allowlisted host
+(opensrm-9uow.2). Optionally verifies the result via PromQL.
+
+Order is load-bearing: secrets are resolved BEFORE template rendering
+so that an incident-supplied variable value of ``${ANYTHING}`` is left
+as a literal in the rendered output rather than re-resolved as a
+secret reference.
 """
 from __future__ import annotations
 
@@ -11,10 +18,20 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Pattern matching a residual ``${VAR}`` reference. Used both to detect
+# pre-render injection attempts and to scrub secrets from response text.
+_SECRET_REF_PATTERN = re.compile(r"\$\{(\w+)\}")
+
+# Env var listing comma-separated allowed webhook hosts (host or host:port).
+# When unset, all webhook calls fail closed unless an allowlist is passed
+# explicitly to ``WebhookDispatcher``.
+_ALLOWLIST_ENV = "NTHLAYER_WEBHOOK_ALLOWLIST"
 
 
 @dataclass
@@ -65,13 +82,74 @@ def resolve_secrets(obj: Any) -> Any:
     return obj
 
 
+def _parse_allowlist(raw: str | None) -> set[str]:
+    """Parse a comma-separated allowlist string into a set of host[:port]."""
+    if not raw:
+        return set()
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def _host_is_allowlisted(url: str, allowlist: set[str]) -> bool:
+    """Return True iff the URL's host[:port] is in ``allowlist``."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if not parsed.hostname:
+        return False
+    candidate = parsed.hostname.lower()
+    if parsed.port is not None:
+        candidate_with_port = f"{candidate}:{parsed.port}"
+        return candidate in allowlist or candidate_with_port in allowlist
+    return candidate in allowlist
+
+
+def _has_unresolved_secret_ref(value: Any) -> bool:
+    """Return True if any string in the structure contains ``${VAR}``."""
+    if isinstance(value, str):
+        return bool(_SECRET_REF_PATTERN.search(value))
+    if isinstance(value, dict):
+        return any(_has_unresolved_secret_ref(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_has_unresolved_secret_ref(item) for item in value)
+    return False
+
+
 class WebhookDispatcher:
-    """Execute safe action bindings via HTTP webhooks."""
+    """Execute safe action bindings via HTTP webhooks (opensrm-9uow.2).
+
+    Hardening:
+
+    - URLs are checked against an allowlist of host[:port] entries; any
+      URL whose host is not allowlisted is rejected before the network
+      call. Default allowlist is empty (fail-closed); operators
+      configure via ``NTHLAYER_WEBHOOK_ALLOWLIST`` env var or by
+      passing ``allowlist=`` to the constructor.
+    - Variables (incident-supplied) are validated to contain no
+      ``${VAR}`` references before substitution. Secrets are resolved
+      from the binding config (operator-supplied) BEFORE template
+      rendering so an incident value cannot inject a secret reference.
+    - Response bodies never appear in the result; the ``detail`` field
+      carries only a generic success/failure message and HTTP status
+      code, to keep webhook server output (which may echo request data
+      including resolved secrets) out of downstream verdict metadata.
+    """
+
+    def __init__(self, allowlist: set[str] | None = None) -> None:
+        if allowlist is None:
+            allowlist = _parse_allowlist(os.environ.get(_ALLOWLIST_ENV))
+        self._allowlist = allowlist
 
     async def execute(
         self, binding: dict | str, variables: dict[str, str]
     ) -> ExecutionResult:
-        """Render templates, resolve secrets, make HTTP call, verify."""
+        """Render templates, resolve secrets, dispatch, optionally verify.
+
+        See class docstring for the secret-vs-template ordering and the
+        allowlist contract.
+        """
         if binding == "stub" or not binding:
             target = variables.get("service", variables.get("target", "unknown"))
             return ExecutionResult(
@@ -79,13 +157,38 @@ class WebhookDispatcher:
                 detail=f"Stub execution for {target} (no binding configured).",
             )
 
-        rendered = render_binding_templates(binding, variables)
+        # Reject incident-supplied variables that look like secret references.
+        # Variables flow into URLs and bodies via render_binding_templates,
+        # and a value like ``${SOME_KEY}`` would then be visually
+        # indistinguishable from a legitimate operator-supplied secret
+        # reference if the order were reversed.
+        for key, value in variables.items():
+            if isinstance(value, str) and _SECRET_REF_PATTERN.search(value):
+                return ExecutionResult(
+                    success=False,
+                    detail=f"variable {key!r} contains a forbidden ${{...}} reference",
+                )
+
+        # Resolve secrets in the operator-controlled binding FIRST.
         try:
-            rendered = resolve_secrets(rendered)
+            resolved = resolve_secrets(binding)
         except ValueError as exc:
             return ExecutionResult(success=False, detail=str(exc))
 
+        # Render incident-supplied variables. Any residual ``${...}`` in
+        # the output is left as a literal — never re-resolved.
+        rendered = render_binding_templates(resolved, variables)
+
         url = rendered.get("url", "")
+        if not _host_is_allowlisted(url, self._allowlist):
+            return ExecutionResult(
+                success=False,
+                detail=(
+                    "webhook host not allowlisted (configure "
+                    f"{_ALLOWLIST_ENV} env var)"
+                ),
+            )
+
         headers = rendered.get("headers", {})
         body = rendered.get("body")
         timeout = int(rendered.get("timeout", 30))
@@ -104,7 +207,14 @@ class WebhookDispatcher:
     async def _call_webhook(
         self, url, headers, body, timeout, retry_config
     ) -> ExecutionResult:
-        """Make HTTP POST with retry logic."""
+        """Make HTTP POST with retry logic.
+
+        Response bodies are NOT propagated into ``detail`` — a
+        misconfigured echo-server-style webhook could otherwise reflect
+        request data (including resolved secrets) back into downstream
+        verdict metadata. ``detail`` carries only HTTP status code and
+        attempt information.
+        """
         attempts = retry_config.get("attempts", 1)
         backoff = retry_config.get("backoff", [1])
         last_error = ""
@@ -121,16 +231,18 @@ class WebhookDispatcher:
                         return ExecutionResult(
                             success=True,
                             status_code=resp.status_code,
-                            detail=resp.text[:500],
+                            detail=f"webhook returned {resp.status_code}",
                         )
                     resp.raise_for_status()
                 except httpx.HTTPStatusError as exc:
-                    last_error = f"HTTP {exc.response.status_code}: {exc.response.text[:200]}"
+                    last_error = f"HTTP {exc.response.status_code}"
                     last_status = exc.response.status_code
                 except httpx.TimeoutException:
                     last_error = f"Timeout after {timeout}s"
-                except Exception as exc:
-                    last_error = str(exc)
+                except Exception:
+                    # Exception strings from httpx may include the URL or
+                    # other request context. Use a generic message.
+                    last_error = "webhook call failed"
 
                 if attempt < attempts - 1:
                     delay = backoff[min(attempt, len(backoff) - 1)]
