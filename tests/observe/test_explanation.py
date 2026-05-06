@@ -14,8 +14,14 @@ def _make_slo_assessment(
     status: str = "HEALTHY",
     burned_minutes: float = 100.0,
     total_budget_minutes: float = 1440.0,
-    current_sli: float = 0.998,
-    objective: float = 0.999,
+    # observe/collector emits current_sli + objective in 0-100 percentage range
+    # (collector multiplies sli_value by 100; YAML target uses the same
+    # convention, e.g. availability target=99.9). Ratio fixtures (0.998/0.999)
+    # were stale — they pre-dated the opensrm-ol4 ExplanationEngine fix that
+    # repointed the formatter at the percentage convention. See opensrm-pa2w
+    # for the cross-subsystem divergence (observe=percentage, measure=ratio).
+    current_sli: float = 99.8,
+    objective: float = 99.9,
 ):
     return create_assessment(
         kind="slo_status",
@@ -107,7 +113,7 @@ class TestExplanationEngine:
 
     def test_causes_when_sli_below_target(self) -> None:
         store = MemoryAssessmentStore()
-        store.put(_make_slo_assessment(current_sli=0.995, objective=0.999))
+        store.put(_make_slo_assessment(current_sli=99.5, objective=99.9))
         results = ExplanationEngine().explain_service("svc", store)
         assert any("below target" in c for c in results[0].causes)
 
