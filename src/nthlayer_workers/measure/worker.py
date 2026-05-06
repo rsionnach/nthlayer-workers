@@ -238,16 +238,20 @@ class MeasureModule:
             logger.debug("measure_no_data", service=service, slo=slo_name)
             return
 
+        # Scale Prometheus SLI (always 0.0-1.0 ratio) to the canonical
+        # 0-100 percentage convention used for SLO targets (opensrm-5fff.1).
+        current_pct = current_value * 100
+
         # Determine breach: for judgment SLOs, SLI >= target means healthy
         # (inverted from classical: reversal_rate SLI is 1 - reversal_rate,
-        # so SLI >= target means rate is below threshold)
-        status = "healthy" if current_value >= target else "breach"
+        # so SLI >= target means rate is below threshold).
+        status = "healthy" if current_pct >= target else "breach"
         current_status[slo_key] = status
 
         now = datetime.now(timezone.utc)
         assessment_id = f"jse-{service}-{slo_name}-{uuid.uuid4().hex[:8]}"
         evaluation_ids[slo_key] = assessment_id
-        evaluation_ids[f"__val__{slo_key}"] = current_value  # for severity classification
+        evaluation_ids[f"__val__{slo_key}"] = current_pct  # for severity classification (percentage)
 
         assessment = {
             "id": assessment_id,
@@ -258,7 +262,7 @@ class MeasureModule:
                 "slo_name": slo_name,
                 "slo_type": slo.get("judgment_type"),
                 "target": target,
-                "current_value": round(current_value, 6),
+                "current_value": round(current_pct, 6),
                 "status": status,
                 "window": slo.get("window", "30d"),
             },
@@ -406,13 +410,18 @@ def classify_severity(
 def _classify_budget_consumption(target: float, current_value: float) -> str:
     """Classify by error budget consumption percentage.
 
-    budget_consumption = (target - value) / (1 - target) × 100
-    <200% = low, 200-500% = high, >500% = critical
+    Inputs are in 0-100 percentage convention (canonical, opensrm-5fff.1).
+    For target=98.5 and current_value=92.0:
+      error_budget_pct = 100 - 98.5 = 1.5 (percentage points of budget)
+      breach_pct       = 98.5 - 92.0 = 6.5 (percentage points consumed)
+      consumption      = 6.5 / 1.5 * 100 = 433%
+
+    <200% = low, 200-500% = high, >500% = critical.
     """
-    budget = 1.0 - target
-    if budget <= 0:
-        return "critical"  # target=1.0 means zero budget, any miss is critical
-    consumption = (target - current_value) / budget * 100
+    error_budget_pct = 100.0 - target
+    if error_budget_pct <= 0:
+        return "critical"  # target=100 means zero budget, any miss is critical
+    consumption = (target - current_value) / error_budget_pct * 100
     if consumption < 200:
         return "low"
     if consumption < 500:
@@ -424,7 +433,9 @@ def _classify_variance(target: float, current_value: float) -> str:
     """Classify segments breach by variance ratio.
 
     Precondition: current_value < target (caller verified breach).
-    <2x = low, 2-5x = high, >5x = critical
+    Inputs are in 0-100 percentage convention; the ratio is unitless so
+    the computation is identical in both conventions.
+    <2x = low, 2-5x = high, >5x = critical.
     """
     if target <= 0:
         return "high"
@@ -437,13 +448,15 @@ def _classify_variance(target: float, current_value: float) -> str:
 
 
 def _classify_calibration(target: float, current_value: float) -> str:
-    """Classify calibration breach by delta.
+    """Classify calibration breach by delta in percentage points.
 
-    <0.1 = low, 0.1-0.3 = high, >0.3 = critical
+    Inputs are in 0-100 percentage convention; thresholds scaled
+    accordingly (10x the prior ratio thresholds).
+    <10pp = low, 10-30pp = high, >30pp = critical.
     """
     delta = abs(current_value - target)
-    if delta < 0.1:
+    if delta < 10:
         return "low"
-    if delta < 0.3:
+    if delta < 30:
         return "high"
     return "critical"

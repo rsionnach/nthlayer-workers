@@ -23,7 +23,7 @@ def _manifest_with_judgment_slos():
             "slos": [
                 {
                     "name": "reversal_rate",
-                    "target": 0.985,
+                    "target": 98.5,  # 0-100 percentage canonical (opensrm-5fff.1)
                     "slo_type": "availability",
                     "window": "2m",
                     "judgment_type": "reversal_rate",
@@ -449,33 +449,87 @@ class TestReduceAutonomy:
 
 
 class TestClassifySeverity:
+    """Severity classification (opensrm-5fff.1: 0-100 percentage convention)."""
+
     def test_budget_consumption_low(self):
-        # target=0.985, value=0.98 → (0.985-0.98)/(1-0.985)*100 = 33% → low
-        assert classify_severity("reversal_rate", 0.985, 0.98) == "low"
+        # target=98.5, value=98.0 → (98.5-98.0)/(100-98.5)*100 = 33% → low
+        assert classify_severity("reversal_rate", 98.5, 98.0) == "low"
 
     def test_budget_consumption_high(self):
-        # target=0.985, value=0.92 → 433% → high
-        assert classify_severity("reversal_rate", 0.985, 0.92) == "high"
+        # target=98.5, value=92.0 → 433% → high
+        assert classify_severity("reversal_rate", 98.5, 92.0) == "high"
 
     def test_budget_consumption_critical(self):
-        # target=0.985, value=0.90 → 567% → critical
-        assert classify_severity("reversal_rate", 0.985, 0.90) == "critical"
+        # target=98.5, value=90.0 → 567% → critical
+        assert classify_severity("reversal_rate", 98.5, 90.0) == "critical"
 
     def test_stability_is_high(self):
-        assert classify_severity("stability", 1.0, 0.0) == "high"
+        assert classify_severity("stability", 100.0, 0.0) == "high"
 
     def test_calibration_low(self):
-        assert classify_severity("calibration", 0.5, 0.55) == "low"
+        # delta = |55-50| = 5pp → low (<10pp)
+        assert classify_severity("calibration", 50.0, 55.0) == "low"
 
     def test_calibration_high(self):
-        assert classify_severity("calibration", 0.5, 0.7) == "high"
+        # delta = |70-50| = 20pp → high (10-30pp)
+        assert classify_severity("calibration", 50.0, 70.0) == "high"
 
     def test_calibration_critical(self):
-        assert classify_severity("calibration", 0.5, 0.9) == "critical"
+        # delta = |90-50| = 40pp → critical (>30pp)
+        assert classify_severity("calibration", 50.0, 90.0) == "critical"
 
-    def test_budget_consumption_target_one_is_critical(self):
-        # target=1.0 means zero error budget — any miss is critical
-        assert classify_severity("reversal_rate", 1.0, 0.99) == "critical"
+    def test_budget_consumption_target_one_hundred_is_critical(self):
+        # target=100 means zero error budget — any miss is critical
+        assert classify_severity("reversal_rate", 100.0, 99.0) == "critical"
 
     def test_unknown_type_defaults_high(self):
-        assert classify_severity("custom_type", 0.99, 0.5) == "high"
+        assert classify_severity("custom_type", 99.0, 50.0) == "high"
+
+
+class TestFraudDetectSeverityRegression:
+    """Regression test for the original opensrm-5fff bug.
+
+    Pre-migration: fraud-detect's reversal_rate target was 98.5 (percentage)
+    but ``_classify_budget_consumption`` used ratio arithmetic
+    (``budget = 1.0 - target``). With target=98.5, budget = -97.5, hit the
+    negative-budget guard, and returned 'critical' for every breach
+    regardless of severity. Operator visibility of severity gradation
+    was lost.
+
+    Post-migration: with canonical 0-100 percentage convention, the same
+    target=98.5 produces ``error_budget_pct = 1.5``. Severity gradation
+    works:
+
+    | current_value (% no-override rate) | breach magnitude | severity |
+    |---|---|---|
+    | 98.0 (target - 0.5pp)              | 33% consumption  | low      |
+    | 92.0 (target - 6.5pp)              | 433% consumption | high     |
+    | 90.0 (target - 8.5pp)              | 567% consumption | critical |
+
+    These specific gradations are the load-bearing assertions: if anyone
+    re-introduces the convention divergence, this test fails loudly.
+    """
+
+    TARGET = 98.5  # fraud-detect reversal_rate target post-xte
+
+    def test_minor_breach_is_low(self):
+        # 0.5pp breach → 33% budget consumption → low
+        assert classify_severity("reversal_rate", self.TARGET, 98.0) == "low"
+
+    def test_moderate_breach_is_high(self):
+        # 6.5pp breach → 433% budget consumption → high
+        assert classify_severity("reversal_rate", self.TARGET, 92.0) == "high"
+
+    def test_severe_breach_is_critical(self):
+        # 8.5pp breach → 567% budget consumption → critical
+        assert classify_severity("reversal_rate", self.TARGET, 90.0) == "critical"
+
+    def test_gradation_is_distinguishable(self):
+        # The pre-migration bug collapsed all three to 'critical'.
+        # Post-migration, the three magnitudes produce three distinct severities.
+        severities = {
+            classify_severity("reversal_rate", self.TARGET, 98.0),
+            classify_severity("reversal_rate", self.TARGET, 92.0),
+            classify_severity("reversal_rate", self.TARGET, 90.0),
+        }
+        assert severities == {"low", "high", "critical"}

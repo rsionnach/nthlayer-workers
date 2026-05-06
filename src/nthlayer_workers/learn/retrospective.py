@@ -246,8 +246,9 @@ def _generate_recommendations(
             target = custom.get("target")
             current = custom.get("current_value")
             service = v.subject.ref or "unknown"
-            target_str = f"{target * 100:.1f}%" if target else "target"
-            current_str = f"{current * 100:.1f}%" if current else "current"
+            # target/current stored in 0-100 percentage convention (opensrm-5fff.1).
+            target_str = f"{target:.1f}%" if target else "target"
+            current_str = f"{current:.1f}%" if current else "current"
             recs.append({
                 "type": "slo_gate",
                 "detail": (

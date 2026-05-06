@@ -15,8 +15,9 @@ def build_breach_blocks(verdict) -> tuple[list[dict], str]:
     consecutive = custom.get("consecutive")
     confidence = verdict.judgment.confidence
 
-    current_pct = f"{current * 100:.1f}%" if current is not None else "?"
-    target_pct = f"{target * 100:.1f}%" if target is not None else "?"
+    # target and current are stored in 0-100 percentage convention (opensrm-5fff.1).
+    current_pct = f"{current:.1f}%" if current is not None else "?"
+    target_pct = f"{target:.1f}%" if target is not None else "?"
 
     text = f"\u26a0 SLO breach: {service} {slo_name} {current_pct} (target <{target_pct})"
 
