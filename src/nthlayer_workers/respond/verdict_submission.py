@@ -43,8 +43,8 @@ async def submit_verdict_to_core(
         component="respond",
         deployment_id=deployment_id,
     )
-    # Submit the full envelope; core auto-detects via top-level
-    # ``specversion`` and unwraps before validation (opensrm-saun.1.2).
+    # Submit full envelope; core auto-detects and unwraps.
+    # See docs/superpowers/decisions/envelope-contract-auto-detect-to-mandatory.md
     result = await client.submit_verdict(envelope)
     if not result.ok:
         logger.warning(

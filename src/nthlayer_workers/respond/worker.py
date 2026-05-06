@@ -465,17 +465,10 @@ class RespondModule:
         ctx = open_from_snapshot(snap, self.config, tiers=tiers)
         self._incidents[ctx.id] = ctx
 
-        # Eager case creation (opensrm-saun.1.2). See _create_case_for_incident
-        # for the design rationale.
-        #
-        # Anchor must be a verdict id so bench's lineage walk via
-        # GET /verdicts/{id}/ancestors resolves; assessment ids would 404.
-        # Skip case creation if the snapshot has no triggering breach verdict
-        # (cold-start, post-restart with empty session window, or future
-        # snapshot kinds without QUALITY_SCORE events). The incident still
-        # opens — operator just won't see a row in the bench queue until
-        # the breach-fallback path or a later signal creates one. Logged so
-        # operators can spot the gap.
+        # Eager case creation: anchor on the breach verdict id so bench's
+        # lineage walk resolves; skip silently when the snapshot has no
+        # parent_ids (logged for operator visibility).
+        # See docs/superpowers/decisions/eager-case-creation.md
         breach_ids = data.get("parent_ids") or []
         if not breach_ids:
             logger.warning(
@@ -511,10 +504,9 @@ class RespondModule:
         ctx = open_from_breach(breach, self.config, tiers=tiers)
         self._incidents[ctx.id] = ctx
 
-        # Eager case creation (opensrm-saun.1.2). Anchor on the breach
-        # verdict directly — this is the fallback path so there's no
-        # snapshot to anchor on, and the breach is the canonical signal
-        # that triggered respond.
+        # Fallback path: anchor directly on the breach verdict (no snapshot
+        # exists when correlate is degraded).
+        # See docs/superpowers/decisions/eager-case-creation.md
         breach_data = breach.get("data") or {}
         slo_name = breach_data.get("slo_name", "unknown")
         # Quality_breach verdicts are emitted by measure as raw dicts (no

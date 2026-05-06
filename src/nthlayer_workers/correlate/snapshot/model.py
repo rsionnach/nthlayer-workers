@@ -3,16 +3,11 @@
 Used by: the `serve` and `replay` CLI subcommands (continuous snapshot generation).
 See also: reasoning.py which serves the `correlate` subcommand (live triggered).
 
-Output shape (opensrm-saun.1.2.1): correlation_snapshot **assessments**, not
-verdicts. ``correlation_snapshot`` is in ASSESSMENT_KINDS per the v1.5
-architectural decision (verdicts are decisions, assessments are continuous
-observations). The hot-path worker (correlate/worker.py) emits the same
-shape via ``submit_assessment``; this module aligns the cold-path CLI with
-that primitive.
-
-Returns ``list[Assessment]`` (the dataclass from observe/assessment.py),
-which means an ``assessment_store`` argument can be a real
-``SQLiteAssessmentStore`` — its ``.put()`` accepts the dataclass directly.
+Returns ``list[Assessment]`` (correlation_snapshot is an assessment, not a
+verdict). The hot-path worker emits the same shape via submit_assessment;
+this module aligns the cold-path CLI with that primitive.
+See docs/superpowers/decisions/verdict-assessment-taxonomy-boundary.md
+See docs/superpowers/decisions/legacy-cli-maintenance-mode.md
 """
 from __future__ import annotations
 

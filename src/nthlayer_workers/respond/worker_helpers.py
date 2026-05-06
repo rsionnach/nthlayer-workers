@@ -50,6 +50,11 @@ def open_from_snapshot(
     domain = data.get("domain") or {}
     service = domain.get("service") or "unknown"
 
+    # parent_ids are the underlying breach verdict ids; trigger_ids prepends
+    # the snapshot id but downstream case-creation anchors on the breach so
+    # the bench's verdict-only ancestry walk resolves.
+    # See docs/superpowers/decisions/verdict-assessment-taxonomy-boundary.md
+    # See docs/superpowers/decisions/eager-case-creation.md
     parent_ids = list(data.get("parent_ids") or [])
     trigger_ids = [snap["id"], *parent_ids]
     now = datetime.now(timezone.utc).isoformat()

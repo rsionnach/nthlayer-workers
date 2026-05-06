@@ -151,9 +151,11 @@ class CorrelateSessionModule:
         reason = window.close_reason(now, self.gap_seconds, self.max_duration_seconds)
 
         # Verdict IDs of QUALITY_SCORE events that triggered this snapshot.
-        # respond reads this via open_from_snapshot to anchor cases on the
-        # underlying breach verdict (opensrm-saun.1.2 case-creation work).
-        # SitRepEvent.id is the verdict id directly (see verdict_to_event).
+        # respond's open_from_snapshot reads parent_ids to anchor cases on a
+        # verdict id (snapshots are assessments; assessment ids would 404 on
+        # the bench's verdict-ancestors lineage walk).
+        # See docs/superpowers/decisions/verdict-assessment-taxonomy-boundary.md
+        # See docs/superpowers/decisions/eager-case-creation.md
         trigger_verdict_ids = [
             e.id for e in window.events if e.type == EventType.QUALITY_SCORE
         ]

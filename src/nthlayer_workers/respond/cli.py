@@ -250,14 +250,13 @@ def _build_incident_context(
     if trigger_source in ("nthlayer-correlate", "sitrep"):
         trigger_verdict_ids: list[str] = []
         if no_model:
-            # opensrm-saun.1.2.1: emit a mock correlation_snapshot assessment
-            # rather than a "correlation"-typed pseudo-verdict. The
-            # trigger_verdict_ids variable name is preserved (it's used as
-            # parent_ids on respond's first emitted verdict — the lineage
-            # bridge), but the id is now an assessment id (csn-*) reflecting
-            # the canonical primitive. verdict_store.put() is skipped because
-            # this is an assessment, not a verdict; replay mode doesn't
-            # exercise the bench lineage-walk path.
+            # Emit a mock correlation_snapshot assessment id (csn-*) — the
+            # variable name trigger_verdict_ids is preserved for backwards
+            # compatibility, but snapshots are assessments, not verdicts.
+            # Replay mode doesn't exercise bench lineage-walk; verdict_store
+            # write is skipped.
+            # See docs/superpowers/decisions/verdict-assessment-taxonomy-boundary.md
+            # See docs/superpowers/decisions/legacy-cli-maintenance-mode.md
             import uuid as _uuid
             mock_id = f"csn-{scenario['id']}-{_uuid.uuid4().hex[:8]}"
             trigger_verdict_ids.append(mock_id)

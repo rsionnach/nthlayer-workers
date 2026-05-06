@@ -188,9 +188,9 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
                     "consecutive": r.consecutive,
                 }},
             )
-            # opensrm-saun.1.2: typed column. Breach → quality_breach
-            # (matches the worker module's emission). Non-breach is just
-            # an evaluation observation, not a decision worth typing.
+            # Typed column matches the worker module's emission. Non-breach
+            # is an observation, not a typed decision.
+            # See docs/superpowers/decisions/hot-path-vs-cli-side-effect-ownership.md
             if r.breach:
                 v.verdict_type = "quality_breach"
             verdict_store.put(v)
