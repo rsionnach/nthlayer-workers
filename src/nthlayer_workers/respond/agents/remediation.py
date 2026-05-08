@@ -8,6 +8,7 @@ from pathlib import Path
 
 from nthlayer_common.prompts import extract_confidence, load_prompt, render_user_prompt
 from nthlayer_workers.respond.agents.base import AgentBase
+from nthlayer_workers.respond.agents.response_models import RemediationResponse
 from nthlayer_workers.respond.safe_actions.registry import SafeActionRegistry
 from nthlayer_workers.respond.types import (
     AgentRole,
@@ -54,6 +55,7 @@ class RemediationAgent(AgentBase):
 
     role = AgentRole.REMEDIATION
     default_timeout = 30
+    response_model = RemediationResponse
 
     def __init__(
         self,

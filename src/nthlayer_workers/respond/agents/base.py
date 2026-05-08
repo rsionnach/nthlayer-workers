@@ -11,6 +11,8 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import structlog
+from nthlayer_common.llm_structured import structured_call_with_usage
+from nthlayer_common.telemetry import emit_llm_event
 from nthlayer_common.verdicts import create as verdict_create, Verdict
 from nthlayer_workers.respond.types import AgentRole, IncidentContext
 
@@ -28,6 +30,10 @@ class AgentBase(ABC):
     # Subclasses MUST declare these class-level attributes.
     role: AgentRole
     default_timeout: int = 30
+    # Pydantic response model for the structured call (P3-E.2). When set,
+    # ``execute`` routes through ``_call_model_structured`` (Instructor +
+    # validation retry + OTel cost event) rather than the raw text path.
+    response_model: type | None = None
 
     # ------------------------------------------------------------------ #
     # Construction                                                         #
@@ -83,6 +89,50 @@ class AgentBase(ABC):
             timeout=self._timeout,
         )
         return result.text
+
+    async def _call_model_structured(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type,
+        max_retries: int = 3,
+    ) -> str:
+        """Call the LLM via Instructor (P3-E.2) and return validated JSON.
+
+        Uses ``structured_call_with_usage`` so we can emit an OTel
+        ``nthlayer.llm.call`` event with token counts (cost
+        accounting). Instructor's ``max_retries`` retries the LLM on
+        validation failure — when the model returns malformed JSON or a
+        type-mismatched payload, the wrapper resubmits before raising.
+
+        Returns the validated model serialised to JSON, so subclasses'
+        existing ``parse_response`` (which accepts a JSON string and
+        produces a dataclass result) can be reused without rewrite.
+        """
+        provider = self._model.split("/", 1)[0] if "/" in self._model else "unknown"
+        caller = f"respond.{self.role.value}"
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                structured_call_with_usage,
+                system=system_prompt,
+                user=user_prompt,
+                response_model=response_model,
+                model=self._model,
+                max_tokens=self._max_tokens,
+                timeout=self._timeout,
+                max_retries=max_retries,
+            ),
+            timeout=self._timeout,
+        )
+        emit_llm_event(
+            model=self._model,
+            provider=provider,
+            caller=caller,
+            input_tokens=result.usage.input_tokens,
+            output_tokens=result.usage.output_tokens,
+            success=True,
+        )
+        return result.data.model_dump_json()
 
     # ------------------------------------------------------------------ #
     # Transport: verdict emission                                          #
@@ -505,7 +555,12 @@ class AgentBase(ABC):
         """
         try:
             system, user = self.build_prompt(context)
-            response = await self._call_model(system, user)
+            if self.response_model is not None:
+                response = await self._call_model_structured(
+                    system, user, self.response_model
+                )
+            else:
+                response = await self._call_model(system, user)
             body_preview = response if len(response) <= 800 else response[:800].rsplit(" ", 1)[0] + "..."
             log.info("agent_response", role=self.role.value,
                      response_length=len(response), body=body_preview)

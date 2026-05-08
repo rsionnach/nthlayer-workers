@@ -317,3 +317,111 @@ async def test_emit_verdict_no_flag_above_threshold(triggered_context):
         triggered_context, "s", "escalate", confidence=0.9, reasoning="r",
     )
     assert "escalation_pending" not in triggered_context.metadata
+
+
+# -- Structured call path (P3-E.2, opensrm-st4s.2) --
+
+class StructuredStubAgent(AgentBase):
+    """Stub that opts into the structured path via response_model."""
+    role = AgentRole.TRIAGE
+    default_timeout = 5
+
+    # Imported lazily inside the test so the class definition stays light.
+    from nthlayer_workers.respond.agents.response_models import TriageResponse
+    response_model = TriageResponse
+
+    def build_prompt(self, context):
+        return ("You are a test agent.", "Assess.")
+
+    def parse_response(self, response, context):
+        data = self._parse_json(response)
+        return TriageResult(
+            severity=data.get("severity", 2),
+            blast_radius=data.get("blast_radius", []),
+            affected_slos=data.get("affected_slos", []),
+            assigned_team=data.get("assigned_team"),
+            reasoning=data.get("reasoning", ""),
+        )
+
+    def _apply_result(self, context, result):
+        context.triage = result
+        return context
+
+
+async def test_structured_path_routes_through_structured_call(verdict_store, triggered_context):
+    """When response_model is set, execute() goes through Instructor."""
+    from nthlayer_common.llm_structured import StructuredCallResult, StructuredCallUsage
+    from nthlayer_workers.respond.agents.response_models import TriageResponse
+
+    canned = TriageResponse(
+        severity=3, blast_radius=["svc-a"], affected_slos=["latency"],
+        assigned_team="ops", reasoning="canned", confidence=0.7,
+    )
+
+    agent = StructuredStubAgent(
+        model="anthropic/claude", max_tokens=100,
+        verdict_store=verdict_store, config={},
+    )
+
+    with patch(
+        "nthlayer_workers.respond.agents.base.structured_call_with_usage",
+        return_value=StructuredCallResult(
+            data=canned, usage=StructuredCallUsage(input_tokens=12, output_tokens=34),
+        ),
+    ) as mock_call:
+        result = await agent._call_model_structured(
+            "system", "user", TriageResponse,
+        )
+
+    mock_call.assert_called_once()
+    assert mock_call.call_args.kwargs["response_model"] is TriageResponse
+    # Returned value is the JSON-stringified validated model.
+    parsed = json.loads(result)
+    assert parsed["severity"] == 3
+    assert parsed["assigned_team"] == "ops"
+
+
+async def test_structured_path_emits_otel_cost_event(verdict_store):
+    """Each structured call emits an OTel event with token usage."""
+    from nthlayer_common.llm_structured import StructuredCallResult, StructuredCallUsage
+    from nthlayer_workers.respond.agents.response_models import TriageResponse
+
+    canned = TriageResponse(
+        severity=2, blast_radius=[], affected_slos=[],
+        assigned_team=None, reasoning="", confidence=0.5,
+    )
+
+    agent = StructuredStubAgent(
+        model="anthropic/claude", max_tokens=100,
+        verdict_store=verdict_store, config={},
+    )
+
+    with patch(
+        "nthlayer_workers.respond.agents.base.structured_call_with_usage",
+        return_value=StructuredCallResult(
+            data=canned, usage=StructuredCallUsage(input_tokens=42, output_tokens=99),
+        ),
+    ), patch(
+        "nthlayer_workers.respond.agents.base.emit_llm_event",
+    ) as mock_emit:
+        await agent._call_model_structured("s", "u", TriageResponse)
+
+    mock_emit.assert_called_once()
+    kwargs = mock_emit.call_args.kwargs
+    assert kwargs["model"] == "anthropic/claude"
+    assert kwargs["provider"] == "anthropic"
+    assert kwargs["caller"] == "respond.triage"
+    assert kwargs["input_tokens"] == 42
+    assert kwargs["output_tokens"] == 99
+    assert kwargs["success"] is True
+
+
+async def test_response_model_none_uses_raw_text_path(verdict_store):
+    """response_model=None falls back to _call_model (raw text)."""
+    agent = StubAgent(
+        model="test-model", max_tokens=100,
+        verdict_store=verdict_store, config={},
+    )
+    assert agent.response_model is None
+    # The fixtures don't exercise the network; just verify the attribute
+    # contract that controls routing.

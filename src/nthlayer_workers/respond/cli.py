@@ -222,6 +222,11 @@ def _build_replay_agents(
         ),
     }
     if no_model:
+        # Replay mode patches the raw text path. Force agents off the
+        # P3-E.2 structured path (Instructor + real HTTP) so the canned
+        # JSON responses below are picked up via _call_model.
+        for agent in agents_map.values():
+            agent.response_model = None
         agents_map[AgentRole.TRIAGE]._call_model = _make_mock_call_model(
             mock_responses.get("triage"))
         agents_map[AgentRole.INVESTIGATION]._call_model = _make_mock_call_model(

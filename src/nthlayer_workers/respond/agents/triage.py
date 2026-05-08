@@ -9,6 +9,7 @@ from typing import Any
 from nthlayer_common.prompts import extract_confidence, load_prompt, render_user_prompt
 
 from nthlayer_workers.respond.agents.base import AgentBase
+from nthlayer_workers.respond.agents.response_models import TriageResponse
 from nthlayer_workers.respond.types import AgentRole, IncidentContext, TriageResult
 
 _PROMPT_PATH = Path(__file__).parent.parent.parent.parent / "prompts" / "triage.yaml"
@@ -22,6 +23,7 @@ class TriageAgent(AgentBase):
 
     role = AgentRole.TRIAGE
     default_timeout = 15
+    response_model = TriageResponse
 
     # ------------------------------------------------------------------ #
     # Judgment interface                                                   #
