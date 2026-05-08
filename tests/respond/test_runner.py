@@ -258,3 +258,89 @@ class TestEscalationRunner:
         await runner._execute_step(state, step, _make_payload())
 
         mock_slack.send_to_channel.assert_called_once()
+
+
+# -- Backend failure isolation (opensrm-st4s.4) --
+
+class TestBackendFailureIsolation:
+    """Backend failures don't kill escalation steps (opensrm-st4s.4)."""
+
+    @pytest.mark.asyncio
+    async def test_backend_raising_does_not_propagate(self):
+        """A backend that raises is caught; the runner records a failure result."""
+        bad_backend = AsyncMock()
+        bad_backend.send.side_effect = RuntimeError("backend imploded")
+
+        runner = EscalationRunner(
+            backends={"slack_dm": bad_backend},
+            oncall_config=_make_oncall_config(),
+        )
+        state = await runner.start_escalation(
+            "INC-FAIL-001",
+            _make_payload(incident_id="INC-FAIL-001"),
+            [EscalationStep(after=timedelta(0), notify="slack_dm")],
+        )
+
+        # No exception escaped; state captures the failure.
+        assert len(state.notifications_sent) == 1
+        result = state.notifications_sent[0]
+        assert isinstance(result, NotificationResult)
+        assert result.delivered is False
+        assert "RuntimeError" in (result.error or "")
+        assert "backend imploded" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_one_backend_failure_does_not_block_subsequent_steps(self):
+        """Step 0's backend raises; step 1's backend still fires when due."""
+        bad_slack = AsyncMock()
+        bad_slack.send.side_effect = Exception("slack down")
+
+        good_ntfy = AsyncMock()
+        good_ntfy.send.return_value = NotificationResult(
+            delivered=True, channel="ntfy", recipient="Alice",
+            timestamp=datetime.now(timezone.utc),
+            message_id="ntfy-1", error=None,
+        )
+
+        runner = EscalationRunner(
+            backends={"slack_dm": bad_slack, "ntfy": good_ntfy},
+            oncall_config=_make_oncall_config(),
+        )
+        # Both steps due immediately.
+        steps = [
+            EscalationStep(after=timedelta(0), notify="slack_dm"),
+            EscalationStep(after=timedelta(0), notify="ntfy"),
+        ]
+        state = await runner.start_escalation(
+            "INC-MIXED-001", _make_payload(incident_id="INC-MIXED-001"), steps
+        )
+
+        assert len(state.notifications_sent) == 2
+        # Slack step: failure result captured.
+        assert state.notifications_sent[0].delivered is False
+        assert state.notifications_sent[0].channel == "slack_dm"
+        # ntfy step: succeeded despite the slack failure.
+        assert state.notifications_sent[1].delivered is True
+        assert state.notifications_sent[1].channel == "ntfy"
+
+    @pytest.mark.asyncio
+    async def test_slack_channel_step_backend_failure_isolated(self):
+        """slack_channel step swallowing a backend exception still records the failure."""
+        bad_slack = AsyncMock()
+        bad_slack.send_to_channel.side_effect = Exception("api 500")
+
+        runner = EscalationRunner(
+            backends={"slack_dm": bad_slack},
+            oncall_config=_make_oncall_config(),
+            slack_channel="#oncall",
+        )
+        steps = [EscalationStep(after=timedelta(0), notify="slack_channel")]
+        state = await runner.start_escalation(
+            "INC-CHAN-FAIL", _make_payload(incident_id="INC-CHAN-FAIL"), steps
+        )
+
+        assert len(state.notifications_sent) == 1
+        result = state.notifications_sent[0]
+        assert result.delivered is False
+        assert result.channel == "slack_channel"
+        assert "api 500" in (result.error or "")

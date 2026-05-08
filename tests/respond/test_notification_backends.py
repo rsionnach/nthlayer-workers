@@ -399,3 +399,118 @@ class TestNtfyBackend:
         headers = mock_client.post.call_args.kwargs.get("headers", {})
         assert headers.get("Priority") == "high"  # default fallback
         assert headers.get("Tags") == "warning"  # default fallback
+
+
+# -- Slack threading (opensrm-st4s.4) --
+
+class TestSlackThreading:
+    """Repeat sends for the same incident thread under the original message."""
+
+    @pytest.mark.asyncio
+    async def test_first_send_no_thread_ts(self):
+        mock_client = AsyncMock()
+        mock_client.post_message.return_value = "ts-1"
+        backend = SlackNotificationBackend(client=mock_client)
+        await backend.send(_make_recipient(), _make_payload())
+        kwargs = mock_client.post_message.call_args.kwargs
+        assert kwargs.get("thread_ts") is None
+
+    @pytest.mark.asyncio
+    async def test_second_send_threads_under_first(self):
+        mock_client = AsyncMock()
+        mock_client.post_message.side_effect = ["ts-anchor", "ts-reply"]
+        backend = SlackNotificationBackend(client=mock_client)
+        recipient = _make_recipient()
+        payload = _make_payload()
+
+        first = await backend.send(recipient, payload)
+        second = await backend.send(recipient, payload)
+
+        assert first.message_id == "ts-anchor"
+        assert second.message_id == "ts-reply"
+        # Second call must thread under the first.
+        second_kwargs = mock_client.post_message.call_args_list[1].kwargs
+        assert second_kwargs["thread_ts"] == "ts-anchor"
+
+    @pytest.mark.asyncio
+    async def test_different_incidents_independent_threads(self):
+        mock_client = AsyncMock()
+        mock_client.post_message.side_effect = ["ts-A", "ts-B", "ts-A2"]
+        backend = SlackNotificationBackend(client=mock_client)
+        recipient = _make_recipient()
+
+        await backend.send(recipient, _make_payload(incident_id="INC-A"))
+        await backend.send(recipient, _make_payload(incident_id="INC-B"))
+        await backend.send(recipient, _make_payload(incident_id="INC-A"))
+
+        kwargs_list = mock_client.post_message.call_args_list
+        # First send for INC-A: no thread.
+        assert kwargs_list[0].kwargs.get("thread_ts") is None
+        # First send for INC-B: no thread (separate incident).
+        assert kwargs_list[1].kwargs.get("thread_ts") is None
+        # Second send for INC-A: threads under ts-A, NOT ts-B.
+        assert kwargs_list[2].kwargs["thread_ts"] == "ts-A"
+
+    @pytest.mark.asyncio
+    async def test_channel_post_threads_repeat_sends(self):
+        mock_client = AsyncMock()
+        mock_client.post_message.side_effect = ["ch-anchor", "ch-reply"]
+        backend = SlackNotificationBackend(client=mock_client)
+        payload = _make_payload()
+
+        await backend.send_to_channel("#oncall", payload)
+        await backend.send_to_channel("#oncall", payload)
+
+        kwargs_list = mock_client.post_message.call_args_list
+        assert kwargs_list[0].kwargs.get("thread_ts") is None
+        assert kwargs_list[1].kwargs["thread_ts"] == "ch-anchor"
+
+    @pytest.mark.asyncio
+    async def test_channel_thread_reply_omits_at_here(self):
+        """Thread replies must not re-page the channel via @here."""
+        mock_client = AsyncMock()
+        mock_client.post_message.side_effect = ["ch-anchor", "ch-reply"]
+        backend = SlackNotificationBackend(client=mock_client)
+        payload = _make_payload()
+
+        await backend.send_to_channel("#oncall", payload)
+        await backend.send_to_channel("#oncall", payload)
+
+        first_text = mock_client.post_message.call_args_list[0].kwargs["text"]
+        reply_text = mock_client.post_message.call_args_list[1].kwargs["text"]
+        assert "<!here>" in first_text
+        assert "<!here>" not in reply_text
+
+    @pytest.mark.asyncio
+    async def test_dm_and_channel_threads_tracked_independently(self):
+        """A DM thread and a channel thread for the same incident are separate."""
+        mock_client = AsyncMock()
+        mock_client.post_message.side_effect = ["dm-anchor", "ch-anchor"]
+        backend = SlackNotificationBackend(client=mock_client)
+        payload = _make_payload(incident_id="INC-X")
+
+        await backend.send(_make_recipient(), payload)
+        await backend.send_to_channel("#oncall", payload)
+
+        # Both posts started fresh threads; neither piggybacks on the other.
+        kwargs_list = mock_client.post_message.call_args_list
+        assert kwargs_list[0].kwargs.get("thread_ts") is None
+        assert kwargs_list[1].kwargs.get("thread_ts") is None
+
+    @pytest.mark.asyncio
+    async def test_failed_first_send_does_not_anchor_thread(self):
+        """If the first send fails, the next send tries a fresh top-level message."""
+        mock_client = AsyncMock()
+        mock_client.post_message.side_effect = [Exception("rate limit"), "ts-recovered"]
+        backend = SlackNotificationBackend(client=mock_client)
+        recipient = _make_recipient()
+        payload = _make_payload()
+
+        first = await backend.send(recipient, payload)
+        second = await backend.send(recipient, payload)
+
+        assert first.delivered is False
+        assert second.delivered is True
+        # Second call: no thread_ts (the failed first never anchored).
+        second_kwargs = mock_client.post_message.call_args_list[1].kwargs
+        assert second_kwargs.get("thread_ts") is None

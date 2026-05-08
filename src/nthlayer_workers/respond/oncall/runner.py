@@ -132,12 +132,20 @@ class EscalationRunner:
         if step.notify == "slack_channel":
             if self._slack_channel and "slack_dm" in self.backends:
                 slack = self.backends["slack_dm"]
-                result = await slack.send_to_channel(self._slack_channel, payload)
+                result = await self._safe_send(
+                    state.incident_id,
+                    step.notify,
+                    self._slack_channel,
+                    slack.send_to_channel,
+                    self._slack_channel,
+                    payload,
+                )
                 state.notifications_sent.append(result)
                 logger.info(
                     "escalation_step_sent",
                     step=step.notify,
                     channel=self._slack_channel,
+                    delivered=result.delivered,
                 )
             return
 
@@ -164,7 +172,14 @@ class EscalationRunner:
             )
             return
 
-        result = await backend.send(recipient, payload)
+        result = await self._safe_send(
+            state.incident_id,
+            step.notify,
+            recipient.name,
+            backend.send,
+            recipient,
+            payload,
+        )
         state.notifications_sent.append(result)
 
         logger.info(
@@ -174,6 +189,46 @@ class EscalationRunner:
             delivered=result.delivered,
             error=result.error,
         )
+
+    async def _safe_send(
+        self,
+        incident_id: str,
+        channel: str,
+        recipient_name: str,
+        send_fn: Any,
+        *args: Any,
+    ) -> Any:
+        """Invoke a backend send and convert exceptions to NotificationResult.
+
+        Backends are contract-bound to return ``NotificationResult`` even
+        on transport failure (Slack/ntfy already do this), but a defensive
+        wrapper here means a future backend bug or unhandled exception
+        cannot kill the escalation step (opensrm-st4s.4: backend failure
+        non-blocking).
+        """
+        try:
+            return await send_fn(*args)
+        except Exception as exc:
+            logger.warning(
+                "escalation_backend_raised",
+                incident_id=incident_id,
+                channel=channel,
+                recipient=recipient_name,
+                error=str(exc),
+                exc_type=type(exc).__name__,
+            )
+            from nthlayer_workers.respond.notification_backends.protocol import (
+                NotificationResult,
+            )
+
+            return NotificationResult(
+                delivered=False,
+                channel=channel,
+                recipient=recipient_name,
+                timestamp=datetime.now(timezone.utc),
+                message_id=None,
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
     def _cancel_task(self, incident_id: str) -> None:
         """Cancel the background loop task for an incident."""

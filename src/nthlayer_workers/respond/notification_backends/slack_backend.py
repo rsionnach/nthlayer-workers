@@ -28,28 +28,45 @@ class SlackNotificationBackend:
 
     Messages include interactive Acknowledge/Escalate buttons via
     Slack Block Kit when ``payload.requires_ack`` is True.
+
+    **Threading (opensrm-st4s.4)**: per-(incident_id, channel) we track the
+    first-message timestamp and pass it as ``thread_ts`` on every
+    subsequent send for the same incident in the same channel. This
+    keeps escalation follow-ups under the original incident message
+    rather than spamming the channel timeline. DMs and channel posts
+    track threads independently because the Slack API treats them as
+    separate channels.
     """
 
     def __init__(self, client: Any) -> None:  # Any = SlackWebClient or compatible
         self._client = client
+        # Per-(incident_id, channel) → message_ts of the first send.
+        # Used to thread subsequent messages.
+        self._thread_anchors: dict[tuple[str, str], str] = {}
 
     async def send(
         self, recipient: RosterMember, payload: NotificationPayload
     ) -> NotificationResult:
-        """Send a DM to the recipient."""
+        """Send a DM to the recipient (threaded for repeat sends)."""
         blocks = _build_incident_blocks(payload)
         fallback = f"{SEVERITY_EMOJI.get(payload.severity, '')} {payload.title}"
+        thread_key = (payload.incident_id, recipient.slack_id)
+        thread_ts = self._thread_anchors.get(thread_key)
 
         try:
             message_ts = await self._client.post_message(
                 channel=recipient.slack_id,
                 blocks=blocks,
                 text=fallback,
+                thread_ts=thread_ts,
             )
+            if thread_ts is None and message_ts:
+                self._thread_anchors[thread_key] = message_ts
             logger.debug(
                 "slack_dm_sent",
                 recipient=recipient.name,
                 incident_id=payload.incident_id,
+                threaded=thread_ts is not None,
             )
             return NotificationResult(
                 delivered=True,
@@ -77,20 +94,32 @@ class SlackNotificationBackend:
     async def send_to_channel(
         self, channel: str, payload: NotificationPayload
     ) -> NotificationResult:
-        """Post to a Slack channel with @here."""
-        blocks = _build_incident_blocks(payload, include_at_here=True)
-        fallback = f"<!here> {SEVERITY_EMOJI.get(payload.severity, '')} {payload.title}"
+        """Post to a Slack channel with @here (threaded for repeat sends)."""
+        thread_key = (payload.incident_id, channel)
+        thread_ts = self._thread_anchors.get(thread_key)
+        # @here is only meaningful on the original post — replies in the
+        # thread shouldn't re-page the whole channel.
+        include_at_here = thread_ts is None
+        blocks = _build_incident_blocks(payload, include_at_here=include_at_here)
+        if include_at_here:
+            fallback = f"<!here> {SEVERITY_EMOJI.get(payload.severity, '')} {payload.title}"
+        else:
+            fallback = f"{SEVERITY_EMOJI.get(payload.severity, '')} {payload.title}"
 
         try:
             message_ts = await self._client.post_message(
                 channel=channel,
                 blocks=blocks,
                 text=fallback,
+                thread_ts=thread_ts,
             )
+            if thread_ts is None and message_ts:
+                self._thread_anchors[thread_key] = message_ts
             logger.debug(
                 "slack_channel_sent",
                 channel=channel,
                 incident_id=payload.incident_id,
+                threaded=thread_ts is not None,
             )
             return NotificationResult(
                 delivered=True,
