@@ -344,3 +344,134 @@ class TestBackendFailureIsolation:
         assert result.delivered is False
         assert result.channel == "slack_channel"
         assert "api 500" in (result.error or "")
+
+
+# -- Missed-ack escalation flow (opensrm-st4s.5) --
+
+class TestMissedAckEscalation:
+    """When the on-call doesn't ACK in time, the runner advances to the next step."""
+
+    @pytest.mark.asyncio
+    async def test_step_progression_via_execute_step(self):
+        """Driving _execute_step in sequence walks through all steps in order.
+
+        This is the runner-level mirror of the EscalationState test
+        ``test_exhausted_when_all_steps_done``: the runner is what
+        actually dispatches the resolver→backend→state path. Verifies
+        steps fire in declared order, each to the right backend.
+        """
+        slack = AsyncMock()
+        slack.send.return_value = NotificationResult(
+            delivered=True, channel="slack_dm", recipient="Alice",
+            timestamp=datetime.now(timezone.utc), message_id="ts-1", error=None,
+        )
+        ntfy = AsyncMock()
+        ntfy.send.return_value = NotificationResult(
+            delivered=True, channel="ntfy", recipient="Alice",
+            timestamp=datetime.now(timezone.utc), message_id="ntfy-1", error=None,
+        )
+        runner = EscalationRunner(
+            backends={"slack_dm": slack, "ntfy": ntfy},
+            oncall_config=_make_oncall_config(),
+        )
+
+        steps = [
+            EscalationStep(after=timedelta(0), notify="slack_dm"),
+            EscalationStep(after=timedelta(minutes=5), notify="ntfy"),
+            EscalationStep(after=timedelta(minutes=10), notify="slack_dm",
+                           target="next_oncall"),
+        ]
+        state = EscalationState(
+            incident_id="INC-MISS-ACK",
+            started_at=datetime.now(timezone.utc),
+            steps=steps,
+        )
+
+        # Step 0 fires (slack_dm to primary).
+        await runner._execute_step(state, steps[0], _make_payload())
+        assert slack.send.call_count == 1
+        assert ntfy.send.call_count == 0
+
+        # No ACK → step 1 (ntfy) fires when due.
+        await runner._execute_step(state, steps[1], _make_payload())
+        assert ntfy.send.call_count == 1
+
+        # No ACK → step 2 (next_oncall) fires.
+        await runner._execute_step(state, steps[2], _make_payload())
+        assert slack.send.call_count == 2
+
+        # All three steps recorded a result.
+        assert len(state.notifications_sent) == 3
+
+    @pytest.mark.asyncio
+    async def test_ack_after_step_zero_prevents_step_one(self):
+        """ACK after step 0 fires marks status ACKNOWLEDGED; subsequent next_due_step is None."""
+        slack = AsyncMock()
+        slack.send.return_value = NotificationResult(
+            delivered=True, channel="slack_dm", recipient="Alice",
+            timestamp=datetime.now(timezone.utc), message_id="ts-1", error=None,
+        )
+        runner = EscalationRunner(
+            backends={"slack_dm": slack},
+            oncall_config=_make_oncall_config(),
+        )
+
+        steps = [
+            EscalationStep(after=timedelta(0), notify="slack_dm"),
+            EscalationStep(after=timedelta(minutes=5), notify="slack_dm"),
+        ]
+        state = await runner.start_escalation(
+            "INC-ACK", _make_payload(incident_id="INC-ACK"), steps,
+        )
+
+        # First step fired at start_escalation.
+        assert slack.send.call_count == 1
+        assert state.status == EscalationStatus.ACTIVE
+
+        # Operator acknowledges.
+        await runner.acknowledge("INC-ACK", "Alice")
+        assert state.status == EscalationStatus.ACKNOWLEDGED
+
+        # next_due_step now returns None even when the second step's
+        # delay has elapsed — ACK halts further escalation.
+        future = state.started_at + timedelta(minutes=10)
+        assert state.next_due_step(future) is None
+        # Backend was not called a second time.
+        assert slack.send.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_state_is_exhausted_after_all_steps_with_no_ack(self):
+        """Driving every step without ACK → status transitions to EXHAUSTED on the next poll."""
+        slack = AsyncMock()
+        slack.send.return_value = NotificationResult(
+            delivered=True, channel="slack_dm", recipient="Alice",
+            timestamp=datetime.now(timezone.utc), message_id="ts-1", error=None,
+        )
+        runner = EscalationRunner(
+            backends={"slack_dm": slack},
+            oncall_config=_make_oncall_config(),
+        )
+
+        steps = [
+            EscalationStep(after=timedelta(0), notify="slack_dm"),
+            EscalationStep(after=timedelta(minutes=5), notify="slack_dm"),
+        ]
+        state = EscalationState(
+            incident_id="INC-EXHAUST",
+            started_at=datetime.now(timezone.utc),
+            steps=steps,
+        )
+
+        # Drive the poll-and-dispatch loop manually with time advanced
+        # past every step's delay. Mirrors the runner's _run_loop:
+        # next_due_step advances the step index, _execute_step dispatches.
+        now = state.started_at + timedelta(minutes=20)
+        while True:
+            step = state.next_due_step(now)
+            if step is None:
+                break
+            await runner._execute_step(state, step, _make_payload())
+
+        # Final next_due_step set EXHAUSTED.
+        assert state.status == EscalationStatus.EXHAUSTED
+        assert slack.send.call_count == 2

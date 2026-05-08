@@ -396,3 +396,64 @@ class TestResolveOncallEdgeCases:
 
         assert isinstance(result, OnCallResult)
         assert result.source == "rotation"
+
+
+# -- Cross-timezone resolution (opensrm-st4s.5) --
+
+class TestResolveOncallCrossTimezone:
+    """`now` in UTC must produce the correct rotation when config is in another zone."""
+
+    def test_dublin_config_with_utc_now_deterministic(self):
+        """Same instant produces identical primary regardless of how `now` is expressed."""
+        config = _make_config(tz="Europe/Dublin", handoff="monday 09:00")
+        # 2026-08-03 is a Monday. 11:00 UTC = 12:00 Dublin (BST).
+        now_utc = datetime(2026, 8, 3, 11, 0, tzinfo=timezone.utc)
+        now_dublin = now_utc.astimezone(ZoneInfo("Europe/Dublin"))
+
+        result_utc = resolve_oncall(config, now_utc)
+        result_dublin = resolve_oncall(config, now_dublin)
+
+        # Same instant → same primary/secondary. The resolver normalises
+        # `now` into the configured timezone internally so both
+        # representations are equivalent inputs.
+        assert result_utc.primary.name == result_dublin.primary.name
+        assert result_utc.secondary.name == result_dublin.secondary.name
+        assert result_utc.source == "rotation"
+
+    def test_nyc_config_with_utc_now_deterministic(self):
+        """America/New_York config also consistent across `now` representations."""
+        config = _make_config(tz="America/New_York", handoff="monday 09:00")
+        now_utc = datetime(2026, 8, 3, 14, 0, tzinfo=timezone.utc)  # EDT 10:00
+        now_nyc = now_utc.astimezone(ZoneInfo("America/New_York"))
+
+        result_utc = resolve_oncall(config, now_utc)
+        result_nyc = resolve_oncall(config, now_nyc)
+
+        assert result_utc.primary.name == result_nyc.primary.name
+        assert result_utc.secondary.name == result_nyc.secondary.name
+        assert result_utc.source == "rotation"
+
+    def test_handoff_returned_in_config_timezone(self):
+        """rotation_handoff is returned in the configured timezone, not UTC."""
+        config = _make_config(tz="Europe/Dublin", handoff="monday 09:00")
+        now_utc = datetime(2026, 8, 3, 11, 0, tzinfo=timezone.utc)
+        result = resolve_oncall(config, now_utc)
+        # ZoneInfo("Europe/Dublin") attaches; offset is +0100 (BST) in August.
+        assert result.rotation_handoff.tzinfo is not None
+        assert "Dublin" in str(result.rotation_handoff.tzinfo) or \
+               result.rotation_handoff.utcoffset().total_seconds() != 0
+
+    def test_dst_transition_handoff_lookup(self):
+        """Handoff resolution still works around DST transitions.
+
+        Europe/Dublin transitions to BST at 01:00 UTC on the last
+        Sunday of March. The Monday after that should still resolve
+        cleanly (the resolver uses _find_last_handoff in the local
+        timezone — Dublin DST adjustments are handled by ZoneInfo).
+        """
+        config = _make_config(tz="Europe/Dublin", handoff="monday 09:00")
+        # 2026-03-30 (post-DST-spring-forward) Monday 12:00 UTC.
+        now_utc = datetime(2026, 3, 30, 12, 0, tzinfo=timezone.utc)
+        result = resolve_oncall(config, now_utc)
+        assert result.source == "rotation"
+        assert result.primary.name in {"Alice", "Bob", "Charlie"}
