@@ -55,6 +55,23 @@ class TestSnapshotSummaryModel:
         )
         assert len(s.notable_omissions) == 2
 
+    def test_confidence_default_zero(self):
+        s = SnapshotSummary(summary="Brief.")
+        assert s.confidence == 0.0
+
+    def test_confidence_in_range_accepted(self):
+        SnapshotSummary(summary="x", confidence=0.0)
+        SnapshotSummary(summary="x", confidence=0.5)
+        SnapshotSummary(summary="x", confidence=1.0)
+
+    def test_confidence_above_one_rejected(self):
+        with pytest.raises(Exception):
+            SnapshotSummary(summary="x", confidence=1.5)
+
+    def test_confidence_negative_rejected(self):
+        with pytest.raises(Exception):
+            SnapshotSummary(summary="x", confidence=-0.1)
+
 
 class TestSelectSampleEvents:
     def test_basic_selection(self):
@@ -108,6 +125,7 @@ class TestGenerateSummary:
         mock_call.return_value = SnapshotSummary(
             summary="fraud-detect experienced 3 SLO breaches over 2 minutes.",
             notable_omissions=["no trace data available"],
+            confidence=0.7,
         )
 
         snapshot_data = {
@@ -124,6 +142,8 @@ class TestGenerateSummary:
         assert result is not None
         assert "fraud-detect" in result["summary"]
         assert "no trace data" in result["notable_omissions"][0]
+        assert result["confidence"] == 0.7
+        assert 0.0 <= result["confidence"] <= 1.0
 
     @patch("nthlayer_workers.correlate.summary.structured_call")
     async def test_timeout_returns_none(self, mock_call):

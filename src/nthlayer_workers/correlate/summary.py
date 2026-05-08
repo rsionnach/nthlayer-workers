@@ -25,7 +25,10 @@ SYSTEM_PROMPT = (
     "Describe what happened in 2-4 sentences. Be specific about services, "
     "metrics, and timeline. Do NOT speculate about root cause — describe "
     "observations only. If you lack context to be specific, say what's "
-    "missing in notable_omissions."
+    "missing in notable_omissions. Provide a confidence score from 0.0 to "
+    "1.0 reflecting how grounded the summary is in the evidence: 1.0 means "
+    "every claim cites a sample event; 0.0 means the summary is generic. "
+    "When notable_omissions is non-empty, confidence should drop accordingly."
 )
 
 SUMMARY_TIMEOUT = 5.0  # seconds
@@ -35,11 +38,14 @@ class SnapshotSummary(BaseModel):
     """Operator-legible summary of a correlation window.
 
     2-4 sentences describing what happened. No root-cause speculation —
-    summary describes observations, not conclusions.
+    summary describes observations, not conclusions. Confidence reflects
+    how grounded the summary is in the supplied sample events
+    (opensrm-w7q.3 acceptance: 0.0-1.0).
     """
 
     summary: str = Field(max_length=500)
     notable_omissions: list[str] = Field(default_factory=list)
+    confidence: float = Field(ge=0.0, le=1.0, default=0.0)
 
 
 async def generate_summary(
@@ -72,6 +78,7 @@ async def generate_summary(
         return {
             "summary": result.summary,
             "notable_omissions": result.notable_omissions,
+            "confidence": result.confidence,
         }
     except Exception as e:
         _record_failure(e, snapshot_data.get("domain", {}).get("service", "unknown"), model)
