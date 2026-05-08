@@ -122,3 +122,151 @@ class TestExplanationEngine:
         store.put(_make_slo_assessment())
         results = ExplanationEngine().explain_service("svc", store)
         assert isinstance(results[0], BudgetExplanation)
+
+
+# -- Drift-enriched causes (opensrm-pku) --
+
+def _make_drift_assessment(
+    service: str = "svc",
+    slo_name: str = "availability",
+    pattern: str = "stable",
+    severity: str = "info",
+    slope_per_week: float = 0.0,
+    days_until_exhaustion: int | None = None,
+):
+    return create_assessment(
+        kind="drift_signal",
+        service=service,
+        data={
+            "slo_name": slo_name,
+            "severity": severity,
+            "pattern": pattern,
+            "slope_per_week": slope_per_week,
+            "days_until_exhaustion": days_until_exhaustion,
+            "current_budget": 0.5,
+            "summary": "stub",
+            "recommendation": "stub",
+        },
+    )
+
+
+class TestExplanationDriftCauses:
+    """ExplanationEngine surfaces drift-pattern context in causes (opensrm-pku)."""
+
+    def test_no_drift_signal_preserves_existing_causes(self) -> None:
+        store = MemoryAssessmentStore()
+        store.put(_make_slo_assessment(percent_consumed=85.0, status="CRITICAL"))
+        results = ExplanationEngine().explain_service("svc", store)
+        # Existing 80%-consumption cause still present; nothing added.
+        assert any("80%" in c for c in results[0].causes)
+        assert not any("drift" in c.lower() for c in results[0].causes)
+
+    def test_gradual_decline_adds_cause(self) -> None:
+        store = MemoryAssessmentStore()
+        store.put(_make_slo_assessment(slo_name="availability"))
+        store.put(_make_drift_assessment(
+            slo_name="availability",
+            pattern="gradual_decline",
+            slope_per_week=-0.0042,
+        ))
+        results = ExplanationEngine().explain_service("svc", store)
+        assert any("declining" in c.lower() and "%/week" in c for c in results[0].causes)
+
+    def test_step_change_down_adds_cause(self) -> None:
+        store = MemoryAssessmentStore()
+        store.put(_make_slo_assessment(slo_name="availability"))
+        store.put(_make_drift_assessment(
+            slo_name="availability",
+            pattern="step_change_down",
+            slope_per_week=-0.012,
+        ))
+        results = ExplanationEngine().explain_service("svc", store)
+        assert any("step-change" in c.lower() and "deploy" in c.lower()
+                   for c in results[0].causes)
+
+    def test_projected_exhaustion_appended_when_set(self) -> None:
+        store = MemoryAssessmentStore()
+        store.put(_make_slo_assessment(slo_name="availability"))
+        store.put(_make_drift_assessment(
+            slo_name="availability",
+            pattern="gradual_decline",
+            slope_per_week=-0.005,
+            days_until_exhaustion=21,
+        ))
+        results = ExplanationEngine().explain_service("svc", store)
+        assert any("Projected exhaustion in 21 days" in c for c in results[0].causes)
+
+    def test_projected_exhaustion_skipped_when_none(self) -> None:
+        store = MemoryAssessmentStore()
+        store.put(_make_slo_assessment(slo_name="availability"))
+        store.put(_make_drift_assessment(
+            slo_name="availability",
+            pattern="gradual_decline",
+            slope_per_week=-0.003,
+            days_until_exhaustion=None,
+        ))
+        results = ExplanationEngine().explain_service("svc", store)
+        assert not any("Projected exhaustion" in c for c in results[0].causes)
+
+    def test_stable_pattern_adds_no_drift_cause(self) -> None:
+        store = MemoryAssessmentStore()
+        store.put(_make_slo_assessment(slo_name="availability"))
+        store.put(_make_drift_assessment(
+            slo_name="availability", pattern="stable", slope_per_week=0.0,
+        ))
+        results = ExplanationEngine().explain_service("svc", store)
+        assert not any("drift" in c.lower() or "step-change" in c.lower()
+                       or "Projected exhaustion" in c for c in results[0].causes)
+
+    def test_volatile_pattern_adds_cause(self) -> None:
+        store = MemoryAssessmentStore()
+        store.put(_make_slo_assessment(slo_name="availability"))
+        store.put(_make_drift_assessment(
+            slo_name="availability", pattern="volatile", slope_per_week=0.0,
+        ))
+        results = ExplanationEngine().explain_service("svc", store)
+        assert any("variance" in c.lower() or "unstable" in c.lower()
+                   for c in results[0].causes)
+
+    def test_drift_matched_per_slo_name(self) -> None:
+        """Drift for SLO A must not enrich SLO B's explanation."""
+        store = MemoryAssessmentStore()
+        store.put(_make_slo_assessment(slo_name="availability"))
+        store.put(_make_slo_assessment(slo_name="latency"))
+        store.put(_make_drift_assessment(
+            slo_name="availability",
+            pattern="step_change_down",
+            slope_per_week=-0.01,
+        ))
+        results = ExplanationEngine().explain_service("svc", store)
+        avail = next(r for r in results if r.slo_name == "availability")
+        lat = next(r for r in results if r.slo_name == "latency")
+        assert any("step-change" in c.lower() for c in avail.causes)
+        assert not any("step-change" in c.lower() for c in lat.causes)
+
+    def test_drift_query_bounded_to_service(self) -> None:
+        """Drift signals from another service must not bleed into svc's causes."""
+        store = MemoryAssessmentStore()
+        store.put(_make_slo_assessment(service="svc", slo_name="availability"))
+        store.put(_make_drift_assessment(
+            service="other", slo_name="availability",
+            pattern="step_change_down", slope_per_week=-0.05,
+        ))
+        results = ExplanationEngine().explain_service("svc", store)
+        assert not any("step-change" in c.lower() for c in results[0].causes)
+
+    def test_latest_drift_wins_per_slo(self) -> None:
+        """Multiple drift_signal assessments for the same SLO use the most recent."""
+        store = MemoryAssessmentStore()
+        store.put(_make_slo_assessment(slo_name="availability"))
+        # Older first, newer second — store iteration is desc, so newer first.
+        store.put(_make_drift_assessment(
+            slo_name="availability", pattern="gradual_decline", slope_per_week=-0.001,
+        ))
+        store.put(_make_drift_assessment(
+            slo_name="availability", pattern="step_change_down", slope_per_week=-0.05,
+        ))
+        results = ExplanationEngine().explain_service("svc", store)
+        # Newer (step_change_down) wins; gradual_decline cause should not appear.
+        assert any("step-change" in c.lower() for c in results[0].causes)
+        assert not any("gradually declining" in c.lower() for c in results[0].causes)

@@ -1,6 +1,10 @@
 """ExplanationEngine — build human-readable budget explanations from assessments.
 
 Deterministic. No LLM. Pure arithmetic on assessment data.
+
+Enriches budget causes with drift-pattern context (opensrm-pku):
+gradual decline / step change / projected exhaustion are surfaced
+alongside the SLI gap and budget consumption percentages.
 """
 from __future__ import annotations
 
@@ -22,6 +26,25 @@ _STATUS_SEVERITY = {
     "UNKNOWN": "info",
 }
 
+# Drift pattern enum values (lowercase string per DriftPattern.value) →
+# cause-string templates. ``{slope_pct}`` is filled in with the
+# slope_per_week value (already a fraction, multiplied by 100 here).
+# STABLE produces no cause — no signal worth surfacing.
+_DRIFT_PATTERN_CAUSE = {
+    "gradual_decline":
+        "Budget gradually declining at {slope_pct:.2f}%/week (drift detected)",
+    "gradual_improvement":
+        "Budget gradually improving at {slope_pct:.2f}%/week",
+    "step_change_down":
+        "Step-change budget drop detected — likely recent deploy or config change",
+    "step_change_up":
+        "Step-change budget increase detected",
+    "seasonal":
+        "Seasonal budget pattern detected — review window/time-of-day correlation",
+    "volatile":
+        "High budget variance detected — unstable trend",
+}
+
 
 class ExplanationEngine:
     """Build budget explanations from the assessment store."""
@@ -32,7 +55,12 @@ class ExplanationEngine:
         store: AssessmentStore,
         slo_filter: str | None = None,
     ) -> list[BudgetExplanation]:
-        """Build explanations for a service from latest slo_status assessments."""
+        """Build explanations for a service from latest slo_status assessments.
+
+        Enriches each explanation's ``causes`` with drift context where
+        a recent ``drift_signal`` assessment exists for the same SLO
+        (opensrm-pku).
+        """
         assessments = store.query(
             AssessmentFilter(service=service, kind="slo_status", limit=0)
         )
@@ -49,9 +77,38 @@ class ExplanationEngine:
         if slo_filter:
             latest = [a for a in latest if a.data.get("slo_name") == slo_filter]
 
-        return [self._explain_slo(service, a) for a in latest]
+        drift_by_slo = self._latest_drift_by_slo(service, store)
 
-    def _explain_slo(self, service: str, assessment: Assessment) -> BudgetExplanation:
+        return [
+            self._explain_slo(service, a, drift_by_slo.get(a.data.get("slo_name", "unknown")))
+            for a in latest
+        ]
+
+    def _latest_drift_by_slo(
+        self, service: str, store: AssessmentStore
+    ) -> dict[str, dict]:
+        """Return ``{slo_name: drift_data}`` for the latest drift_signal per SLO.
+
+        Bounded to ``service`` and ``kind="drift_signal"`` so the query is
+        cheap. ``limit=0`` returns the full set; we dedupe to the latest
+        per-SLO ourselves (the assessment store sorts desc by timestamp).
+        """
+        results: dict[str, dict] = {}
+        drift_assessments = store.query(
+            AssessmentFilter(service=service, kind="drift_signal", limit=0)
+        )
+        for a in drift_assessments:
+            slo_name = a.data.get("slo_name")
+            if slo_name and slo_name not in results:
+                results[slo_name] = a.data
+        return results
+
+    def _explain_slo(
+        self,
+        service: str,
+        assessment: Assessment,
+        drift: dict | None = None,
+    ) -> BudgetExplanation:
         data = assessment.data
         slo_name = data.get("slo_name", "unknown")
         status = data.get("status", "UNKNOWN")
@@ -94,6 +151,20 @@ class ExplanationEngine:
             causes.append(
                 f"Current SLI ({sli:.2f}%) is {gap:.2f}pp below target ({obj:.2f}%)"
             )
+
+        # Drift-derived causes (opensrm-pku). Skipped silently when no drift
+        # signal has been recorded for this SLO yet (e.g. cold start).
+        if drift is not None:
+            pattern = drift.get("pattern")
+            template = _DRIFT_PATTERN_CAUSE.get(pattern)
+            if template is not None:
+                slope_per_week = drift.get("slope_per_week", 0.0) or 0.0
+                causes.append(template.format(slope_pct=slope_per_week * 100))
+            days_until = drift.get("days_until_exhaustion")
+            if isinstance(days_until, int) and days_until >= 0:
+                causes.append(
+                    f"Projected exhaustion in {days_until} days at current trend"
+                )
 
         # Actions
         actions: list[str] = []
