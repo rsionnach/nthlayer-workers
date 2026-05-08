@@ -375,3 +375,127 @@ class TestExtractServiceSLOs:
     def test_skips_slo_missing_target(self):
         manifests = [{"name": "svc", "slos": [{"name": "avail"}]}]
         assert _extract_service_slos(manifests) == []
+
+
+# -- Happy-path: drift + topology submit assessments via core API (opensrm-8jd.2) --
+
+class TestDriftCycleHappyPath:
+    """ObserveDriftModule produces drift_signal assessments via core API."""
+
+    @patch("nthlayer_workers.observe.drift.DriftAnalyzer")
+    async def test_drift_signal_submitted(self, mock_analyzer_cls):
+        """A successful drift analysis submits a drift_signal assessment."""
+        from datetime import datetime
+        from nthlayer_workers.observe.drift.models import (
+            DriftMetrics, DriftPattern, DriftProjection, DriftResult, DriftSeverity,
+        )
+
+        mock_analyzer = AsyncMock()
+        mock_analyzer.analyze = AsyncMock(return_value=DriftResult(
+            service_name="fraud-detect",
+            tier="critical",
+            slo_name="availability",
+            window="30d",
+            analyzed_at=datetime(2026, 5, 8),
+            data_start=datetime(2026, 4, 8),
+            data_end=datetime(2026, 5, 8),
+            metrics=DriftMetrics(
+                slope_per_day=-0.001, slope_per_week=-0.007, r_squared=0.85,
+                current_budget=0.005, budget_at_window_start=0.05,
+                variance=0.0001, data_points=720,
+            ),
+            projection=DriftProjection(
+                days_until_exhaustion=14, projected_budget_30d=-0.02,
+                projected_budget_60d=-0.05, projected_budget_90d=-0.08, confidence=0.85,
+            ),
+            pattern=DriftPattern.GRADUAL_DECLINE,
+            severity=DriftSeverity.WARN,
+            summary="Budget declining 0.7%/week",
+            recommendation="Investigate trend",
+            exit_code=1,
+        ))
+        mock_analyzer_cls.return_value = mock_analyzer
+
+        client = AsyncMock()
+        client.get_manifests = AsyncMock(return_value=_manifest_response())
+        submitted = []
+        client.submit_assessment = AsyncMock(
+            side_effect=lambda envelope: (
+                submitted.append(envelope), APIResult(ok=True, status_code=201, data={})
+            )[1]
+        )
+
+        module = ObserveDriftModule(client=client, prometheus_url="http://prom:9090")
+        await module.process_cycle()
+
+        # Each drift target produces one drift_signal assessment.
+        assert client.submit_assessment.await_count >= 1
+        # Pull the assessment data out of the CloudEvents envelope.
+        first_envelope = submitted[0]
+        data = first_envelope.get("data", first_envelope)
+        assert data.get("kind") == "drift_signal"
+        assert data.get("service") == "fraud-detect"
+        assert data.get("data", {}).get("pattern") == "gradual_decline"
+        assert data.get("data", {}).get("severity") == "warn"
+
+    @patch("nthlayer_workers.observe.drift.DriftAnalyzer")
+    async def test_drift_analysis_error_is_swallowed(self, mock_analyzer_cls):
+        """DriftAnalysisError on one target doesn't abort the cycle."""
+        from nthlayer_workers.observe.drift import DriftAnalysisError
+
+        mock_analyzer = AsyncMock()
+        mock_analyzer.analyze = AsyncMock(side_effect=DriftAnalysisError("no data"))
+        mock_analyzer_cls.return_value = mock_analyzer
+
+        client = AsyncMock()
+        client.get_manifests = AsyncMock(return_value=_manifest_response())
+        client.submit_assessment = AsyncMock()
+
+        module = ObserveDriftModule(client=client, prometheus_url="http://prom:9090")
+        await module.process_cycle()  # No exception escapes.
+
+        # No assessment submitted because every target failed.
+        client.submit_assessment.assert_not_awaited()
+
+
+class TestTopologyCycleHappyPath:
+    """ObserveTopologyModule produces dependency_graph assessments via core API."""
+
+    @patch("nthlayer_workers.observe.dependencies.providers.prometheus.PrometheusDepProvider")
+    @patch("nthlayer_workers.observe.dependencies.DependencyDiscovery")
+    async def test_dependency_graph_submitted(self, mock_disco_cls, _mock_prov_cls):
+        """A successful topology cycle submits a dependency_graph assessment per service."""
+        from nthlayer_common.dependency_models import BlastRadiusResult
+
+        mock_disco = AsyncMock()
+        mock_disco.add_provider = lambda p: None  # sync, no-op
+        mock_disco.build_graph = AsyncMock(return_value={"nodes": [], "edges": []})
+        mock_disco.calculate_blast_radius = lambda svc, graph: BlastRadiusResult(
+            service=svc,
+            total_services_affected=3,
+            critical_services_affected=1,
+            risk_level="medium",
+            direct_downstream=["downstream-a", "downstream-b"],
+            recommendation="Review downstream coupling",
+        )
+        mock_disco_cls.return_value = mock_disco
+
+        client = AsyncMock()
+        client.get_manifests = AsyncMock(return_value=_manifest_response())
+        submitted = []
+        client.submit_assessment = AsyncMock(
+            side_effect=lambda envelope: (
+                submitted.append(envelope), APIResult(ok=True, status_code=201, data={})
+            )[1]
+        )
+
+        module = ObserveTopologyModule(client=client, prometheus_url="http://prom:9090")
+        await module.process_cycle()
+
+        assert client.submit_assessment.await_count >= 1
+        first = submitted[0]
+        data = first.get("data", first)
+        assert data.get("kind") == "dependency_graph"
+        assert data.get("service") == "fraud-detect"
+        assert data.get("data", {}).get("risk_level") == "medium"
+        assert data.get("data", {}).get("total_services_affected") == 3
