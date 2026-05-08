@@ -111,19 +111,33 @@ class AgentBase(ABC):
         """
         provider = self._model.split("/", 1)[0] if "/" in self._model else "unknown"
         caller = f"respond.{self.role.value}"
-        result = await asyncio.wait_for(
-            asyncio.to_thread(
-                structured_call_with_usage,
-                system=system_prompt,
-                user=user_prompt,
-                response_model=response_model,
-                model=self._model,
-                max_tokens=self._max_tokens,
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    structured_call_with_usage,
+                    system=system_prompt,
+                    user=user_prompt,
+                    response_model=response_model,
+                    model=self._model,
+                    max_tokens=self._max_tokens,
+                    timeout=self._timeout,
+                    max_retries=max_retries,
+                ),
                 timeout=self._timeout,
-                max_retries=max_retries,
-            ),
-            timeout=self._timeout,
-        )
+            )
+        except Exception as exc:
+            # Cost-accounting parity with the success path: failed
+            # structured calls (network error, exhausted Instructor
+            # retries, timeout) still emit an OTel event so the
+            # operator-facing telemetry shows the attempt.
+            emit_llm_event(
+                model=self._model,
+                provider=provider,
+                caller=caller,
+                success=False,
+                error=type(exc).__name__,
+            )
+            raise
         emit_llm_event(
             model=self._model,
             provider=provider,

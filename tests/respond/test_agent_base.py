@@ -425,3 +425,31 @@ async def test_response_model_none_uses_raw_text_path(verdict_store):
     assert agent.response_model is None
     # The fixtures don't exercise the network; just verify the attribute
     # contract that controls routing.
+
+
+async def test_structured_path_emits_otel_event_on_failure(verdict_store):
+    """Failed structured calls also emit an OTel event (cost-accounting parity)."""
+    from nthlayer_common.llm import LLMError
+    from nthlayer_workers.respond.agents.response_models import TriageResponse
+
+    agent = StructuredStubAgent(
+        model="anthropic/claude", max_tokens=100,
+        verdict_store=verdict_store, config={},
+    )
+
+    with patch(
+        "nthlayer_workers.respond.agents.base.structured_call_with_usage",
+        side_effect=LLMError("boom", provider="anthropic", model="claude"),
+    ), patch(
+        "nthlayer_workers.respond.agents.base.emit_llm_event",
+    ) as mock_emit:
+        with pytest.raises(LLMError):
+            await agent._call_model_structured("s", "u", TriageResponse)
+
+    mock_emit.assert_called_once()
+    kwargs = mock_emit.call_args.kwargs
+    assert kwargs["success"] is False
+    assert kwargs["error"] == "LLMError"
+    assert kwargs["caller"] == "respond.triage"
+    # Token fields are absent on failure (no usage data available).
+    assert "input_tokens" not in kwargs or kwargs["input_tokens"] is None
