@@ -89,7 +89,9 @@ src/nthlayer_workers/
       communication.py  # CommunicationAgent(AgentBase): role=COMMUNICATION, default_timeout=20, response_model=CommunicationResponse (P3-E.2); two-phase: Phase 1 (remediation is None) drafts initial status update; Phase 2 (remediation set) drafts resolution update; parse_response accepts both "updates" and "messages" arrays, synthesizes flat update from title/impact_description/current_status/summary/message when no structured array; _apply_result appends Phase 2 updates (.extend) rather than replacing Phase 1
       remediation.py  # RemediationAgent(AgentBase): role=REMEDIATION, default_timeout=30, response_model=RemediationResponse (P3-E.2); constructor accepts safe_action_registry: SafeActionRegistry | None (None = worker mode pending P3-E.3); approval ratchet — registry.requires_approval=True can never be downgraded by model; rejects hallucinated actions (not in registry) → proposed_action=None + requires_human_approval=True; None-registry path (opensrm-saun.1.3): when registry is None, parse_response preserves proposed_action but forces requires_human_approval=True + logs warning — _post_execute guard (self._registry is not None) prevents AttributeError; parse_response accepts "proposed_action"/"recommended_action"/"action" and "target"/"target_service" field name aliases; _build_metadata(result) → {"custom": {"proposed_action": result.proposed_action, "target": result.target}} (both keys always present — None disambiguates rejected/missing from absent); _build_degraded_metadata() → {"custom": {"proposed_action": None, "target": None}} (explicit None so brief renders "manual intervention required" without inferring degradation from absence); Bead 1 (structured remediation emission): these 4 sites emit structured fields read by bench brief for recommended_action/recommended_target
     notification_backends/
+      slack_backend.py  # SlackNotificationBackend: send() (DM) + send_to_channel() (channel post with @here); threading (opensrm-st4s.4): _thread_anchors: dict[tuple[incident_id, channel], str] tracks first successful message_ts per (incident_id, channel); subsequent sends pass stored ts as thread_ts; DM thread key=(incident_id, slack_id), channel thread key=(incident_id, channel) — independent; @here suppressed on thread replies (include_at_here = thread_ts is None, so re-paging doesn't defeat threading); failed first-send does not anchor (next attempt restarts top-level); _build_incident_blocks(payload, *, include_at_here=False) builds Block Kit; SEVERITY_EMOJI lookup dict {1→red, 2→orange, 3→yellow, 4→blue}
     oncall/
+      runner.py  # EscalationRunner: start_escalation → fires due steps immediately → background _run_loop; _execute_step routes all backend.send / send_to_channel calls through _safe_send wrapper (opensrm-st4s.4) which catches any uncaught exception and converts to NotificationResult(delivered=False, error="<exc_type>: <msg>") — belt-and-braces so a future backend bug cannot kill the escalation step; _safe_send(incident_id, channel, recipient_name, send_fn, *args); acknowledge() cancels background task; slack_channel step uses backends["slack_dm"] for send_to_channel (channel name resolved from _slack_channel)
     safe_actions/
     sre/
   learn/            # LLM-powered retrospective analysis, calibration signals, retention
@@ -169,7 +171,7 @@ uv run ruff check src/ tests/
 uv pip install -e .
 ```
 
-Test suite baseline: 1398 passed, 17 skipped (all legacy with bead reference), 0 failed, 0 errors.
+Test suite baseline: 1446 passed, 17 skipped (all legacy with bead reference), 0 failed, 0 errors.
 <!-- END AUTO-MANAGED -->
 
 <!-- AUTO-MANAGED: ci -->
