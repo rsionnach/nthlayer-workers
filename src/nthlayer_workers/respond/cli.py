@@ -266,8 +266,11 @@ def _build_incident_context(
             mock_id = f"csn-{scenario['id']}-{_uuid.uuid4().hex[:8]}"
             trigger_verdict_ids.append(mock_id)
         else:
-            print("nthlayer-correlate must be installed for correlation-triggered scenarios: "
-                  "pip install -e ../nthlayer-correlate")
+            # Correlation-triggered scenarios in non-replay mode require a
+            # running correlate worker (the standalone nthlayer-correlate
+            # repo was consolidated into nthlayer-workers 2026-04-26).
+            print("Correlation-triggered scenarios require a running "
+                  "nthlayer-workers correlate module, or use --no-model.")
             sys.exit(1)
 
         topology = {
