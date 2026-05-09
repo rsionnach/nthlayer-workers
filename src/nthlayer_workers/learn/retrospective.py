@@ -4,9 +4,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from nthlayer_learn.core import create, link
-from nthlayer_learn.models import Verdict
-from nthlayer_learn.store import VerdictStore, VerdictFilter
+from nthlayer_common.verdicts.core import create, link
+from nthlayer_common.verdicts.models import Verdict
+from nthlayer_common.verdicts.store import VerdictStore, VerdictFilter
 
 
 def build_retrospective(

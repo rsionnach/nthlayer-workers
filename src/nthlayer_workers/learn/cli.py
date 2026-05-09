@@ -7,9 +7,9 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 
-from nthlayer_learn.serialise import to_dict
-from nthlayer_learn.sqlite_store import SQLiteVerdictStore
-from nthlayer_learn.store import AccuracyFilter, VerdictFilter
+from nthlayer_common.verdicts.serialise import to_dict
+from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
+from nthlayer_common.verdicts.store import AccuracyFilter, VerdictFilter
 
 _DURATION_RE = re.compile(r"^(\d+)(s|m|h|d|w)$")
 
