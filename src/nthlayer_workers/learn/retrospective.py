@@ -2,11 +2,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
+import structlog
+
+from nthlayer_common.manifest import ManifestLoadError, load_manifest
+from nthlayer_common.outcomes import (
+    compute_financial_impact,
+    estimate_decisions_in_window,
+)
 from nthlayer_common.verdicts.core import create, link
 from nthlayer_common.verdicts.models import Verdict
 from nthlayer_common.verdicts.store import VerdictStore, VerdictFilter
+
+log = structlog.get_logger(__name__)
 
 
 def build_retrospective(
@@ -75,11 +85,17 @@ def build_retrospective(
         if root_causes:
             root_cause = root_causes[0]
 
-    # Compute decisions affected (count evaluation verdicts with breach=True)
-    decisions_affected = sum(
-        1 for v in evaluation_verdicts
-        if (getattr(v.metadata, "custom", {}) or {}).get("breach")
-    )
+    # Compute decisions affected (count evaluation verdicts with breach=True),
+    # both as the incident-wide total and broken down per service so the
+    # financial-impact path attributes breaches to the right cost figure.
+    breach_counts_by_service: dict[str, int] = {}
+    for v in evaluation_verdicts:
+        custom = getattr(v.metadata, "custom", {}) or {}
+        if not custom.get("breach"):
+            continue
+        svc = v.subject.service or v.subject.ref or "unknown"
+        breach_counts_by_service[svc] = breach_counts_by_service.get(svc, 0) + 1
+    decisions_affected = sum(breach_counts_by_service.values())
 
     # Build blast radius from correlation and incident metadata
     blast_radius = []
@@ -91,7 +107,7 @@ def build_retrospective(
 
     # Financial impact (if specs available)
     financial_impact = _compute_financial_impact(
-        blast_radius, duration_minutes, specs_dir
+        blast_radius, duration_minutes, breach_counts_by_service, specs_dir,
     )
 
     # Generate recommendations
@@ -181,52 +197,125 @@ def _parse_ts(ts: Any) -> datetime:
 def _compute_financial_impact(
     blast_radius: list,
     duration_minutes: float,
+    breach_counts_by_service: dict[str, int],
     specs_dir: str | None,
 ) -> dict | None:
-    """Compute estimated financial impact from spec outcomes blocks."""
+    """Compute spec § 1 financial impact across blast-radius services.
+
+    For each service in ``blast_radius`` whose manifest carries an
+    ``outcomes`` block, attribute that service's per-service breach
+    count (metric path) or fall back to ``estimated_daily_decisions``
+    prorated to incident duration (spec_estimate path). Sum across
+    services that share a currency; mixed-currency manifests are
+    skipped with a warning.
+    """
     if not specs_dir or not blast_radius:
         return None
 
-    from pathlib import Path
-    import yaml
+    if duration_minutes <= 0 and not breach_counts_by_service:
+        # No duration signal AND no breach-derived metric path — both
+        # estimators return nothing; surface why instead of silently
+        # dropping the financial_impact field.
+        log.warning(
+            "financial_impact_skipped_no_duration_or_metrics",
+            specs_dir=specs_dir,
+        )
+        return None
 
     specs_path = Path(specs_dir)
     if not specs_path.is_dir():
         return None
 
-    total_cost = 0.0
+    affected_services = {
+        s.get("service", s) if isinstance(s, dict) else s
+        for s in blast_radius
+    }
+
+    total_estimated = 0.0
+    total_decisions = 0
+    currency: str | None = None
+    aggregate_source: str | None = None
+    # Dedup duplicate manifests for the same service (template forks,
+    # environment overlays under one specs_dir would otherwise be
+    # double-counted).
+    seen_services: set[str] = set()
+
     for spec_file in specs_path.glob("*.yaml"):
         try:
-            raw = yaml.safe_load(spec_file.read_text())
-        except Exception:
+            manifest = load_manifest(str(spec_file))
+        except ManifestLoadError:
             continue
-        if not isinstance(raw, dict):
+        if manifest.name not in affected_services:
+            continue
+        if manifest.name in seen_services:
+            log.warning(
+                "financial_impact_duplicate_manifest_skipped",
+                service=manifest.name,
+                spec_file=str(spec_file),
+            )
+            continue
+        if manifest.outcomes is None:
+            seen_services.add(manifest.name)
+            continue
+        seen_services.add(manifest.name)
+
+        # Metric path: this service's own breach count. Falls back to
+        # spec_estimate when the service produced no breach evaluations.
+        service_breaches = breach_counts_by_service.get(manifest.name, 0)
+        if service_breaches > 0:
+            decisions = service_breaches
+            this_source = "metric"
+        else:
+            estimate = estimate_decisions_in_window(
+                manifest.outcomes,
+                window=timedelta(minutes=duration_minutes),
+            )
+            if estimate is None:
+                continue
+            decisions = estimate
+            this_source = "spec_estimate"
+
+        impact = compute_financial_impact(
+            manifest.outcomes,
+            decisions_affected=decisions,
+            failure_mode="false_negative",
+            volume_source=this_source,
+        )
+        if impact is None:
             continue
 
-        service = raw.get("metadata", {}).get("name", "")
-        affected_services = [
-            s.get("service", s) if isinstance(s, dict) else s
-            for s in blast_radius
-        ]
-        if service not in affected_services:
-            continue
+        if currency is None:
+            currency = impact.currency
+            aggregate_source = this_source
+        else:
+            if currency != impact.currency:
+                log.warning(
+                    "financial_impact_currency_mismatch_skipped",
+                    service=manifest.name,
+                    aggregate_currency=currency,
+                    service_currency=impact.currency,
+                )
+                continue
+            if aggregate_source != this_source:
+                # Mixed metric + spec_estimate paths in one aggregate
+                # are legitimate; tag conservatively.
+                aggregate_source = "spec_estimate"
 
-        outcomes = raw.get("spec", {}).get("outcomes", {})
-        if not outcomes:
-            continue
+        total_estimated += impact.estimated
+        total_decisions += impact.decisions_affected
 
-        # Simple model: revenue_per_minute * duration * error_rate
-        rpm = outcomes.get("revenue_per_minute", 0)
-        total_cost += rpm * duration_minutes
-
-    if total_cost <= 0:
+    # currency is None means no service contributed a figure; cost=0
+    # declared in spec is a legitimate "no exposure" answer that should
+    # still report (currency, decisions, estimated=0).
+    if currency is None:
         return None
 
     return {
-        "estimated": round(total_cost, 2),
-        "currency": "USD",
-        "failure_mode": "service_degradation",
-        "volume_source": "spec.outcomes.revenue_per_minute",
+        "estimated": round(total_estimated, 2),
+        "currency": currency,
+        "decisions_affected": total_decisions,
+        "failure_mode": "false_negative",
+        "volume_source": aggregate_source,
     }
 
 
