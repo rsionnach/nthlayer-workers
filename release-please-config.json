@@ -1,0 +1,28 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "python",
+  "include-v-in-tag": true,
+  "packages": {
+    ".": {
+      "package-name": "nthlayer-workers",
+      "release-type": "python",
+      "include-component-in-tag": false,
+      "draft": false,
+      "prerelease": false,
+      "extra-files": []
+    }
+  },
+  "changelog-sections": [
+    {"type": "feat", "section": "Features"},
+    {"type": "fix", "section": "Bug Fixes"},
+    {"type": "perf", "section": "Performance Improvements"},
+    {"type": "deps", "section": "Dependencies"},
+    {"type": "refactor", "section": "Code Refactoring", "hidden": false},
+    {"type": "docs", "section": "Documentation", "hidden": false},
+    {"type": "test", "hidden": true},
+    {"type": "ci", "hidden": true},
+    {"type": "chore", "hidden": true},
+    {"type": "build", "hidden": true},
+    {"type": "style", "hidden": true}
+  ]
+}
