@@ -30,6 +30,12 @@ def _walk_modules() -> list[str]:
 
     names = [PACKAGE_NAME]
     for module_info in pkgutil.walk_packages(paths, prefix=f"{PACKAGE_NAME}."):
+        # Skip __main__ entry-point modules — convention is they
+        # parse argparse at module top level which SystemExits on
+        # bare import. Tracked under opensrm-a5fv for the proper
+        # `if __name__ == "__main__":` guard.
+        if module_info.name.endswith(".__main__"):
+            continue
         names.append(module_info.name)
     return names
 
