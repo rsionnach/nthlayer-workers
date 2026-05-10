@@ -6,6 +6,53 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [1.6.0](https://github.com/rsionnach/nthlayer-workers/compare/v1.5.0...v1.6.0) (2026-05-10)
+
+
+### Features
+
+* **correlate:** add confidence field to SnapshotSummary (P3-D.3) ([25a3481](https://github.com/rsionnach/nthlayer-workers/commit/25a348110a7d09d9cc785f5289665562b4af38db))
+* **correlate:** migrate cold-path CLI from pseudo-verdicts to assessments (opensrm-saun.1.2.1) ([14a46a7](https://github.com/rsionnach/nthlayer-workers/commit/14a46a77dd05436d19b539a18241fe1ad442b099))
+* **correlate:** verdict chain correlation analyzer (opensrm-jmy.3) ([5b2a5df](https://github.com/rsionnach/nthlayer-workers/commit/5b2a5df445453ad847428a302b50b6d9c448ca7c))
+* **explain:** enrich budget causes with drift assessment data ([57a767d](https://github.com/rsionnach/nthlayer-workers/commit/57a767d7c96d988fa89de1e59d3b6e8249143519))
+* **learn:** SpecRecommendation engine — Learn → Spec MVP (opensrm-jmy.2) ([c6f0d94](https://github.com/rsionnach/nthlayer-workers/commit/c6f0d94d8f2bd59bff41831406025ca7c44cd248))
+* **learn:** wire spec § 1 financial impact into retrospectives (opensrm-jmy.1) ([2e3312d](https://github.com/rsionnach/nthlayer-workers/commit/2e3312db32e121c19b50253bde2ca7c182bd570b))
+* **respond:** eager case creation + saun.1.2 cleanup ([0aede6e](https://github.com/rsionnach/nthlayer-workers/commit/0aede6e407299e96ec03fd4abcf5844f1df196b4))
+* **respond:** Instructor-backed structured agent calls (P3-E.2) ([0a52c11](https://github.com/rsionnach/nthlayer-workers/commit/0a52c116a69fca8f8648a034a6779f22b62203b8))
+* **respond:** Slack threading + backend-failure isolation (P3-E.4) ([3fe0b4a](https://github.com/rsionnach/nthlayer-workers/commit/3fe0b4a9d8e1c1489c59958a5408637664f92b62))
+* **workers:** saun.1.2 wire-format alignment across all worker modules ([f998699](https://github.com/rsionnach/nthlayer-workers/commit/f998699e2319fbfc20af975bae7a7e67553cddaf))
+
+
+### Bug Fixes
+
+* **respond/remediation:** None-registry safety guard (opensrm-saun.1.3) ([9e770a2](https://github.com/rsionnach/nthlayer-workers/commit/9e770a280174fa8993a0f8c245cff40057785168))
+* **respond:** emit OTel event on structured-call failure (R5 follow-up) ([2f436c5](https://github.com/rsionnach/nthlayer-workers/commit/2f436c5e9fe21bc9107e6f1f3fbbad85f7b4c332))
+* **respond:** replace stale ../nthlayer-correlate path in error message ([69221da](https://github.com/rsionnach/nthlayer-workers/commit/69221da27e30f5de53d0c766a9bad995820aee3c))
+* **respond:** set verdict_type on emitted verdicts (opensrm-saun.1.2) ([8d53e13](https://github.com/rsionnach/nthlayer-workers/commit/8d53e130c504566b0f7257f39d402335364e42f1))
+* **safe-actions:** SSRF allowlist, injection guard, response opacity ([cd4330b](https://github.com/rsionnach/nthlayer-workers/commit/cd4330bda77d94b7090c589b7d91d1d468d83911))
+* **workers:** handle None from get_sli_value as no-data ([7bbcad8](https://github.com/rsionnach/nthlayer-workers/commit/7bbcad8b02646fa067bb9e839c5191f8a1b62f3f))
+
+
+### Code Refactoring
+
+* **measure:** adopt 0-100 percentage canonical convention ([713faeb](https://github.com/rsionnach/nthlayer-workers/commit/713faeb45fe0d0509e9c390c8f9676d694825418))
+
+
+### Documentation
+
+* add README — Tier 2 consolidated worker runtime overview ([548355f](https://github.com/rsionnach/nthlayer-workers/commit/548355fbfcfef66d4289638b8f7455d33aa59c01))
+* **CLAUDE.md:** catalogue retrospective financial impact wiring (opensrm-jmy.1) ([a1f0a28](https://github.com/rsionnach/nthlayer-workers/commit/a1f0a28e0e8ee030d56d255e1cc79e119c27104a))
+* **CLAUDE.md:** document drift-enriched ExplanationEngine ([0cd1ee2](https://github.com/rsionnach/nthlayer-workers/commit/0cd1ee26dbb77c70ee07a207a43e7509b4352641))
+* **CLAUDE.md:** document Instructor-backed agent structure ([ade2f46](https://github.com/rsionnach/nthlayer-workers/commit/ade2f461f1e1894e8d72d1bd083a0e0f8fdcdca8))
+* **CLAUDE.md:** document opensrm-5fff.1 percentage convention in measure entries ([3be5fcc](https://github.com/rsionnach/nthlayer-workers/commit/3be5fcc0455b2ab8b351ffb36e499be278baf5f1))
+* **CLAUDE.md:** document Slack threading + _safe_send dispatcher wrapper ([4f72d5c](https://github.com/rsionnach/nthlayer-workers/commit/4f72d5c87685dbd1fd8f3382d700b01a37e43e66))
+* **CLAUDE.md:** document SnapshotSummary confidence field + tests ([a214c47](https://github.com/rsionnach/nthlayer-workers/commit/a214c47d4ba02efc53dba6aaee786ef7d2556bdd))
+* **CLAUDE.md:** document SpecRecommendation engine + RM.7 import fix ([052a64e](https://github.com/rsionnach/nthlayer-workers/commit/052a64e8721c142fe321953d8c989f85586243f8))
+* **CLAUDE.md:** document st4s.5 on-call test coverage ([c63fef7](https://github.com/rsionnach/nthlayer-workers/commit/c63fef7628946c195b931f798824ff03d25dc79c))
+* **CLAUDE.md:** document test_collect_none_sli_yields_no_data ([a98f07b](https://github.com/rsionnach/nthlayer-workers/commit/a98f07ba909c3667409904197ab1bbd5f75e7091))
+* **CLAUDE.md:** expand test_explanation.py inventory entry ([8231265](https://github.com/rsionnach/nthlayer-workers/commit/82312657dbcab16f6bfecdb882635b42028f9565))
+* **comments:** inline pointers to saun.1.2 decision corpus ([6370bcd](https://github.com/rsionnach/nthlayer-workers/commit/6370bcdf23fdf40b3737a2fac79abd7754779cbf))
+
 ## v1.5.0 — 2026-05-03
 
 First lockstep release with the rest of the v1.5 ecosystem. Phase 5
