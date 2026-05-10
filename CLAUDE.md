@@ -114,6 +114,10 @@ src/registry/
   safe-actions.yaml # Safe action policy: 5 actions each with risk/requires_approval/cooldown_seconds/target_type/applicable_to/not_applicable_to/blast_radius/estimated_recovery/binding; rollback (high, requires_approval, ArgoCD webhook binding), scale_up (low, no approval, stub, not applicable to ai-gate — AI gate failures are judgment quality issues not capacity), disable_feature_flag (medium, requires_approval, stub), reduce_autonomy (low, no approval, target_type=agent, ai-gate only, stub — autonomy ratchet is one-way safe), pause_pipeline (medium, requires_approval, stub); enforcement logic (novel action rejection, approval ratchet, applicability checks) stays in Python — this file is policy only
 tests/
   test_runner.py    # ModuleRunner tests: TestModuleRegistration (register/multiple/protocol), TestRunnerCycle (interval, heartbeat, state_persisted, state_restored, none_on_no_prior_state, failure_does_not_crash, graceful_shutdown_persists); uses AsyncMock client, asyncio.wait_for 5s timeout
+  smoke/
+    __init__.py     # Package marker
+    test_imports.py # Walks every module under nthlayer_workers via pkgutil; asserts every __all__ symbol resolves
+    test_cli.py     # Asserts the nthlayer-workers console script is on PATH and --help exits 0 with non-empty stdout
   observe/
     test_observe_worker.py  # Tests all three modules + _drift_targets/_extract_service_slos helpers; TestCollectModuleProtocol (name="observe.collect", restore_state None, get_state→{}, satisfies WorkerModule protocol); TestCollectCycleHappyPath (2 slo_status + 1 portfolio = 3 submits, portfolio service="__portfolio__", portfolio.data.parent_ids==slo_ids); TestCollectCycleFailureModes (manifest_fetch_fails/empty_list → no crash, no submit); MUST patch SLOMetricCollector BEFORE constructing module — __post_init__ creates collector
     test_gate_adapter.py  # TestCoreAPIAssessmentStore: put_raises("read-only"), get_raises("not needed"), query_returns_assessments_on_success (APIResult ok=True → list[Assessment]), query_returns_empty_on_api_failure (APIResult ok=False → [])
@@ -193,6 +197,16 @@ Steps:
 
 First run: green, 44s.
 <!-- END AUTO-MANAGED -->
+
+## CI / Release pipeline
+
+nthlayer-workers uses `googleapis/release-please-action@v4`. On every push to `main`, release-please inspects Conventional Commits and maintains a release PR that bumps `pyproject.toml` and appends `CHANGELOG.md`. Config lives in `release-please-config.json` (package type `python`, `changelog-sections` filter) and `.release-please-manifest.json` (current version anchor). Commit taxonomy: `feat`/`fix`/`perf`/`deps`/`refactor`/`docs` surface in the changelog; `chore`/`test`/`ci`/`build`/`style` are hidden. When the release PR is merged, release-please creates the GitHub release tag and `release.yml` fires.
+
+`release.yml` includes a Docker-based smoke gate inserted between `twine check` and the PyPI publish action. A `python:3.11-slim` container mounts `dist/` and `tests/smoke/` read-only, installs the freshly-built wheel plus pytest, and runs the smoke suite. Stale `__all__` exports, missing runtime deps, and broken entry points are caught before the wheel reaches PyPI. Failure blocks publish. See `tests/smoke/` for the suite (catalogued in the Architecture section above).
+
+**Known trigger issue:** `release.yml` fires on `release: published`. The `GITHUB_TOKEN`-cascade-block means release-please-created releases do not trigger `release.yml` automatically, so today's release-please tag did NOT auto-publish to PyPI. Remediation: pivot to `push: tags: ['v*']` trigger or configure release-please with a PAT. See bead `opensrm-pdoe` for triage.
+
+Dependabot config (`.github/dependabot.yml`) declares two ecosystems — `uv` for `pyproject.toml` + `uv.lock`, and `github-actions` for workflow files — both on a Monday-morning Europe/Dublin schedule. Sibling `nthlayer-*` packages and dev deps are each grouped into a single weekly PR. Auto-merge policy (`.github/workflows/dependabot-automerge.yml`): external runtime patch and dev patch/minor auto-merge; sibling packages and any major bump require review.
 
 <!-- AUTO-MANAGED: conventions -->
 ## Conventions
