@@ -161,12 +161,66 @@ def _add_recommendations_subcommand(subparsers) -> None:
 
 
 def _cmd_recommendations(args: argparse.Namespace) -> None:
-    """Dispatch the recommendations subcommand."""
+    """Dispatch the recommendations subcommand (jmy.6)."""
+    import sys
+    from pathlib import Path
+    from nthlayer_workers.learn.recommendations import parse_plan_file
+    from nthlayer_workers.learn._apply import apply_recommendations, format_summary
+
     # Validation: --pr requires --apply-to
     if args.pr and not args.apply_to:
         raise SystemExit("error: --pr requires --apply-to")
-    # Stub body — full implementation in F2
-    print(f"recommendations subcommand stub: incident={args.incident} from={args.from_path}")
+
+    # Resolve input source
+    if args.from_path:
+        plan = parse_plan_file(Path(args.from_path))
+    else:
+        # --incident: fetch retrospective from core (out of scope for unit tests;
+        # real implementation requires CoreAPIClient.get_retrospective_for_incident —
+        # integration test G1 exercises this path explicitly).
+        plan = _build_plan_from_incident(args.incident)
+
+    # --output: write plan to file BEFORE --apply-to runs (per design § 4)
+    if args.output:
+        Path(args.output).write_text(plan.to_yaml())
+
+    # --apply-to: apply plan to specs directory
+    apply_result = None
+    if args.apply_to:
+        apply_result = apply_recommendations(
+            plan, Path(args.apply_to), force=args.force,
+        )
+        print(format_summary(apply_result), file=sys.stderr)
+
+    # --pr: create GitHub PR with manifest changes (full implementation in F3)
+    if args.pr:
+        _run_pr_path(plan, args, apply_result)
+
+    # Exit code: from apply if --apply-to was used, else 0
+    if apply_result is not None and apply_result.exit_code != 0:
+        raise SystemExit(apply_result.exit_code)
+
+
+def _build_plan_from_incident(incident_id: str):
+    """Stub: fetch retrospective from core and call analyze_incident.
+
+    Full implementation requires CoreAPIClient.get_retrospective_for_incident
+    (which may need adding to the client). Out of scope for the unit-test
+    surface; integration test G1 exercises this path explicitly per the
+    design's audited two-step framing.
+    """
+    raise NotImplementedError(
+        "fetching from --incident requires CoreAPIClient integration; "
+        "use --from <plan.yaml> for now (or run via integration test G1)"
+    )
+
+
+def _run_pr_path(plan, args, apply_result) -> None:
+    """Stub: create a GitHub PR with the applied manifest changes.
+
+    Full implementation in F3 (branch + commit + push + gh pr create).
+    """
+    raise NotImplementedError("--pr path implemented in F3")
 
 
 def main(argv: list[str] | None = None) -> None:
