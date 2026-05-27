@@ -164,3 +164,112 @@ class TestNormalizeScalar:
 
         assert normalize_scalar({"a": 1}) == {"a": 1}
         assert normalize_scalar([1, 2]) == [1, 2]
+
+
+class TestClassifyOutcome:
+    """Two-table state machine per jmy.6 design § 5 + § 7."""
+
+    @pytest.fixture
+    def rec_with_current(self):
+        """Recommendation modifying existing state (e.g. tighten_slo)."""
+        from nthlayer_workers.learn.recommendations import Recommendation
+        return Recommendation(
+            id="rec-deadbeef0123",
+            service="fraud-detect",
+            type="tighten_slo",
+            rationale="test",
+            field="spec.slos.judgment.target",
+            current_value=95.0,
+            proposed_value=98.5,
+        )
+
+    @pytest.fixture
+    def rec_without_current(self):
+        """Recommendation adding new state (e.g. add_deploy_gate)."""
+        from nthlayer_workers.learn.recommendations import Recommendation
+        return Recommendation(
+            id="rec-deadbeef0124",
+            service="fraud-detect",
+            type="add_deploy_gate",
+            rationale="test",
+            field="spec.deployment.gates.judgment",
+            current_value=None,
+            proposed_value={"enabled": True, "block_on": ["reversal_rate"]},
+        )
+
+    # 4 cells for "modifying existing" (current_value present)
+
+    def test_with_current_path_missing_target_path_missing(self, rec_with_current):
+        from nthlayer_workers.learn._yaml import classify_outcome, PATH_MISSING
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = classify_outcome(PATH_MISSING, rec_with_current)
+        assert result == OutcomeKind.TARGET_PATH_MISSING
+
+    def test_with_current_path_eq_proposed_already_applied(self, rec_with_current):
+        from nthlayer_workers.learn._yaml import classify_outcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = classify_outcome(98.5, rec_with_current)
+        assert result == OutcomeKind.ALREADY_APPLIED
+
+    def test_with_current_path_eq_current_apply_clean(self, rec_with_current):
+        from nthlayer_workers.learn._yaml import classify_outcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = classify_outcome(95.0, rec_with_current)
+        assert result == OutcomeKind.APPLY_CLEAN
+
+    def test_with_current_path_eq_other_drift_detected(self, rec_with_current):
+        from nthlayer_workers.learn._yaml import classify_outcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = classify_outcome(97.0, rec_with_current)
+        assert result == OutcomeKind.DRIFT_DETECTED
+
+    # 3 cells for "adding new" (current_value None)
+
+    def test_without_current_path_missing_apply_clean(self, rec_without_current):
+        from nthlayer_workers.learn._yaml import classify_outcome, PATH_MISSING
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = classify_outcome(PATH_MISSING, rec_without_current)
+        assert result == OutcomeKind.APPLY_CLEAN
+
+    def test_without_current_path_eq_proposed_already_applied(self, rec_without_current):
+        from nthlayer_workers.learn._yaml import classify_outcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = classify_outcome(
+            {"enabled": True, "block_on": ["reversal_rate"]},
+            rec_without_current,
+        )
+        assert result == OutcomeKind.ALREADY_APPLIED
+
+    def test_without_current_path_other_drift_detected(self, rec_without_current):
+        from nthlayer_workers.learn._yaml import classify_outcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = classify_outcome(
+            {"enabled": False, "block_on": []},
+            rec_without_current,
+        )
+        assert result == OutcomeKind.DRIFT_DETECTED
+
+    # Normalisation interactions
+
+    def test_normalisation_int_vs_float_drift(self, rec_with_current):
+        """Manifest has 98 (int); proposed is 98.5 (float). Different values → drift."""
+        from nthlayer_workers.learn._yaml import classify_outcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = classify_outcome(98, rec_with_current)
+        assert result == OutcomeKind.DRIFT_DETECTED
+
+    def test_normalisation_numeric_string_eq_proposed(self, rec_with_current):
+        """Manifest has '98.5' (string); proposed is 98.5 (float). Equivalent → already_applied."""
+        from nthlayer_workers.learn._yaml import classify_outcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = classify_outcome("98.5", rec_with_current)
+        assert result == OutcomeKind.ALREADY_APPLIED

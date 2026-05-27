@@ -11,6 +11,8 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 
+from nthlayer_workers.learn.recommendations import OutcomeKind, Recommendation
+
 
 # Singleton sentinel for "path doesn't resolve in this document".
 # Using a singleton object (not None) lets callers distinguish absent
@@ -138,3 +140,52 @@ def normalize_scalar(value: Any) -> Any:
             return value
 
     return value
+
+
+def classify_outcome(manifest_value: Any, rec: Recommendation) -> OutcomeKind:
+    """Two-table state machine from jmy.6 design § 5.
+
+    For recommendations WITH current_value (modifying existing):
+      manifest path missing       → target_path_missing
+      manifest path = proposed    → already_applied
+      manifest path = current     → apply_clean
+      manifest path = other       → drift_detected
+
+    For recommendations WITHOUT current_value (adding new):
+      manifest path missing       → apply_clean (create)
+      manifest path = proposed    → already_applied
+      manifest path = other       → drift_detected
+
+    Type-tolerant scalar comparison via normalize_scalar; structural
+    (dict/list) comparison is exact.
+    """
+    proposed_norm = _normalize_for_compare(rec.proposed_value)
+
+    if rec.current_value is None:
+        # Adding-new table
+        if manifest_value is PATH_MISSING:
+            return OutcomeKind.APPLY_CLEAN
+        if _normalize_for_compare(manifest_value) == proposed_norm:
+            return OutcomeKind.ALREADY_APPLIED
+        return OutcomeKind.DRIFT_DETECTED
+
+    # Modifying-existing table
+    if manifest_value is PATH_MISSING:
+        return OutcomeKind.TARGET_PATH_MISSING
+
+    current_norm = _normalize_for_compare(rec.current_value)
+    manifest_norm = _normalize_for_compare(manifest_value)
+
+    if manifest_norm == proposed_norm:
+        return OutcomeKind.ALREADY_APPLIED
+    if manifest_norm == current_norm:
+        return OutcomeKind.APPLY_CLEAN
+    return OutcomeKind.DRIFT_DETECTED
+
+
+def _normalize_for_compare(value: Any) -> Any:
+    """Normalise scalars; pass non-scalars through. For dict/list, the
+    caller's == does structural comparison."""
+    if isinstance(value, (dict, list)):
+        return value
+    return normalize_scalar(value)
