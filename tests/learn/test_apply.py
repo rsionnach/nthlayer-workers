@@ -257,3 +257,79 @@ class TestApplyAtomicity:
         assert "target: 98.5" in (tmp_path / "a-service.yaml").read_text()
         # b-service.yaml original content retained
         assert "target: 95.0" in (tmp_path / "b-service.yaml").read_text()
+
+
+class TestSummaryBuilder:
+    """End-of-run summary string format per jmy.6 § 6.2."""
+
+    def test_summary_applied_section(self):
+        from nthlayer_workers.learn._apply import (
+            ApplyResult, RecOutcome, format_summary,
+        )
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = ApplyResult(
+            applied=[
+                RecOutcome(
+                    id="rec-a3f8b2e1c9d4",
+                    service="fraud-detect",
+                    field="spec.slos.judgment.target",
+                    outcome=OutcomeKind.APPLY_CLEAN,
+                ),
+            ],
+        )
+        summary = format_summary(result)
+
+        assert "Applied: 1" in summary
+        assert "rec-a3f8b2e1c9d4" in summary
+        assert "fraud-detect" in summary
+        assert "spec.slos.judgment.target" in summary
+
+    def test_summary_skipped_section_with_drift_detail(self):
+        from nthlayer_workers.learn._apply import (
+            ApplyResult, RecOutcome, format_summary,
+        )
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = ApplyResult(
+            applied=[],
+            skipped=[
+                RecOutcome(
+                    id="rec-d5e8f2b6c9a1",
+                    service="notification",
+                    field="spec.slos.availability.target",
+                    outcome=OutcomeKind.DRIFT_DETECTED,
+                    detail="manifest current: 98.0\nrecommendation expected: 95.0\nproposed value: 99.0",
+                ),
+            ],
+        )
+        summary = format_summary(result)
+
+        assert "Skipped: 1" in summary
+        assert "drift_detected" in summary
+        assert "Re-run with --force" in summary or "--force rec-d5e8f2b6c9a1" in summary
+
+    def test_summary_exit_code_line(self):
+        from nthlayer_workers.learn._apply import (
+            ApplyResult, RecOutcome, format_summary,
+        )
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = ApplyResult(
+            applied=[
+                RecOutcome(id="rec-1", service="s", field="f", outcome=OutcomeKind.APPLY_CLEAN),
+            ],
+            skipped=[
+                RecOutcome(id="rec-2", service="s", field="f", outcome=OutcomeKind.DRIFT_DETECTED),
+            ],
+        )
+        summary = format_summary(result)
+        # exit_code == 1 (partial)
+        assert "Exit code: 1" in summary
+
+    def test_empty_plan_summary(self):
+        from nthlayer_workers.learn._apply import ApplyResult, format_summary
+
+        summary = format_summary(ApplyResult())
+        assert "Applied: 0" in summary
+        assert "Exit code: 0" in summary

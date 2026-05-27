@@ -195,6 +195,34 @@ def apply_recommendations(
     return result
 
 
+def format_summary(result: ApplyResult) -> str:
+    """Build the end-of-run summary string per jmy.6 design § 6.2."""
+    lines: list[str] = []
+
+    lines.append(f"Applied: {len(result.applied)} recommendation"
+                 f"{'s' if len(result.applied) != 1 else ''}")
+    for r in result.applied:
+        lines.append(f"  {r.id}  {r.service:<14} {r.field}")
+
+    if result.skipped:
+        lines.append("")
+        lines.append(f"Skipped: {len(result.skipped)} recommendation"
+                     f"{'s' if len(result.skipped) != 1 else ''}")
+        for r in result.skipped:
+            lines.append(f"  {r.id}  {r.service:<14} {r.outcome.value}")
+            if r.detail:
+                for detail_line in r.detail.splitlines():
+                    lines.append(f"    {detail_line}")
+            if r.outcome == OutcomeKind.DRIFT_DETECTED:
+                lines.append("")
+                lines.append(f"    Re-run with --force to apply {r.id} anyway.")
+
+    lines.append("")
+    lines.append(f"Exit code: {result.exit_code}")
+
+    return "\n".join(lines)
+
+
 def _walk_yaml_files(root: Path) -> Iterable[Path]:
     """Yield .yaml/.yml files under root, excluding hidden directories."""
     for path in root.rglob("*"):
