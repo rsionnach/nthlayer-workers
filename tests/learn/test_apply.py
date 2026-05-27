@@ -134,3 +134,126 @@ class TestApplyHappyPath:
         assert len(result.applied) == 0
         assert len(result.skipped) == 1
         assert result.skipped[0].outcome == OutcomeKind.MANIFEST_NOT_FOUND
+
+
+class TestApplyAtomicity:
+    """Atomic write phase: alphabetical order, failure isolation."""
+
+    def test_alphabetical_write_order(self, tmp_path):
+        """Files are written in alphabetical order, not encounter order."""
+        from nthlayer_workers.learn._apply import apply_recommendations
+        from nthlayer_workers.learn.recommendations import (
+            Recommendation, SpecRecommendation,
+        )
+        from datetime import datetime, timezone
+
+        # Seed two manifests
+        (tmp_path / "z-service.yaml").write_text(
+            "metadata:\n  name: z-service\n"
+            "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+        )
+        (tmp_path / "a-service.yaml").write_text(
+            "metadata:\n  name: a-service\n"
+            "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+        )
+
+        # Recommend changes; z-service first in plan, a-service second
+        plan = SpecRecommendation(
+            incident="inc-test",
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-z000",
+                    service="z-service",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+                Recommendation(
+                    id="rec-a000",
+                    service="a-service",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+            ],
+        )
+
+        result = apply_recommendations(plan, tmp_path)
+
+        # Both applied
+        assert len(result.applied) == 2
+        # modified_files in alphabetical order
+        names = [p.name for p in result.modified_files]
+        assert names == ["a-service.yaml", "z-service.yaml"]
+
+    def test_filename_based_failure_injection_isolates_failure(
+        self, tmp_path, monkeypatch,
+    ):
+        """Filename-based failure injection per jmy.6 design § 8."""
+        from nthlayer_workers.learn._apply import apply_recommendations
+        from nthlayer_workers.learn.recommendations import (
+            Recommendation, SpecRecommendation,
+        )
+        from datetime import datetime, timezone
+
+        # Seed two manifests
+        (tmp_path / "a-service.yaml").write_text(
+            "metadata:\n  name: a-service\n"
+            "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+        )
+        (tmp_path / "b-service.yaml").write_text(
+            "metadata:\n  name: b-service\n"
+            "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+        )
+
+        # Capture original write_text before monkeypatching
+        original_write_text = Path.write_text
+
+        def selective_fail(self, content, **kwargs):
+            if self.name == "b-service.yaml":
+                raise OSError("simulated write failure on b-service.yaml")
+            return original_write_text(self, content, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", selective_fail)
+
+        plan = SpecRecommendation(
+            incident="inc-test",
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-a000",
+                    service="a-service",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+                Recommendation(
+                    id="rec-b000",
+                    service="b-service",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+            ],
+        )
+
+        with pytest.raises(OSError, match="b-service.yaml"):
+            apply_recommendations(plan, tmp_path)
+
+        # a-service.yaml was modified before the write failure
+        assert "target: 98.5" in (tmp_path / "a-service.yaml").read_text()
+        # b-service.yaml original content retained
+        assert "target: 95.0" in (tmp_path / "b-service.yaml").read_text()
