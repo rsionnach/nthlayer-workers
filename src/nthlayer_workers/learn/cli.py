@@ -127,6 +127,48 @@ def _cmd_retrospective(args: argparse.Namespace) -> None:
         store.close()
 
 
+def _add_recommendations_subcommand(subparsers) -> None:
+    """Add the recommendations subcommand (jmy.6)."""
+    p = subparsers.add_parser(
+        "recommendations",
+        help="Inspect / apply Learn → Spec recommendations from a retrospective",
+    )
+
+    # Input source (mutually exclusive, one required)
+    input_group = p.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("--incident", help="Incident ID; fetches retrospective from core")
+    input_group.add_argument("--from", dest="from_path",
+                              help="Read a saved plan.yaml as input")
+
+    # Outputs (orthogonal, optional)
+    p.add_argument("--output", help="Write plan to this file before any apply")
+    p.add_argument("--apply-to", dest="apply_to",
+                    help="Apply plan to manifests in this specs directory")
+    p.add_argument("--pr", action="store_true",
+                    help="Create a GitHub PR with the manifest changes (requires --apply-to)")
+
+    # Modifiers
+    p.add_argument("--force", action="store_true",
+                    help="Override drift_detected skips (drift-only; per jmy.6 § 7)")
+    p.add_argument("--base", default="main",
+                    help="Base branch for --pr (default: main)")
+    p.add_argument("--draft", action="store_true",
+                    help="Create the PR as a draft")
+    p.add_argument("--specs-dir",
+                    help="For --output: include preview field per recommendation")
+
+    p.set_defaults(func=_cmd_recommendations)
+
+
+def _cmd_recommendations(args: argparse.Namespace) -> None:
+    """Dispatch the recommendations subcommand."""
+    # Validation: --pr requires --apply-to
+    if args.pr and not args.apply_to:
+        raise SystemExit("error: --pr requires --apply-to")
+    # Stub body — full implementation in F2
+    print(f"recommendations subcommand stub: incident={args.incident} from={args.from_path}")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="nthlayer-learn", description="Query verdict stores")
     sub = parser.add_subparsers(dest="command")
@@ -154,6 +196,9 @@ def main(argv: list[str] | None = None) -> None:
     retro.add_argument("--db", default="verdicts.db", help="Path to SQLite store")
     retro.add_argument("--decision-store", default=None, help="Path to decision record SQLite DB for content-addressed records")
 
+    # recommendations
+    _add_recommendations_subcommand(sub)
+
     args = parser.parse_args(argv)
 
     if args.command == "accuracy":
@@ -162,3 +207,5 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_list(args)
     elif args.command == "retrospective":
         _cmd_retrospective(args)
+    elif args.command == "recommendations":
+        _cmd_recommendations(args)
