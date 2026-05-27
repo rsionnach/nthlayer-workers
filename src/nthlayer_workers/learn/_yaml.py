@@ -84,3 +84,57 @@ def apply_at_path(doc: Any, dotted_path: str, value: Any) -> None:
         current = current[key]
 
     current[keys[-1]] = value
+
+
+class _BoolScalar:
+    """Opaque wrapper that keeps bool values distinct from numeric floats.
+
+    Python's bool subclasses int, so True == 1 and False == 0 at the
+    language level.  Wrapping in this sentinel lets callers assert that
+    normalize_scalar(True) != normalize_scalar(1) without fighting the
+    type hierarchy.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: bool) -> None:
+        self.value = value
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _BoolScalar) and self.value == other.value
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"_BoolScalar({self.value!r})"
+
+    def __hash__(self) -> int:
+        return hash((self.__class__, self.value))
+
+
+def normalize_scalar(value: Any) -> Any:
+    """Normalise scalars for type-tolerant equality comparison (jmy.6 § 6.1).
+
+    int(98) / float(98.0) / str("98") / str("98.0") all normalise to the
+    same float IFF they round-trip cleanly. Used by classify_outcome to
+    decide already_applied vs drift_detected against operator-authored
+    manifests where YAML quoting is the operator's stylistic choice.
+
+    Non-numeric scalars and non-scalar values pass through unchanged so
+    equality comparison can do its own structural check. Booleans are
+    NOT coerced to numeric (bool subclasses int in Python; we keep the
+    distinction by wrapping them in _BoolScalar).
+    """
+    # Booleans first — bool is a subclass of int, so isinstance(True, int) is True.
+    # Wrap in _BoolScalar so normalize_scalar(True) != normalize_scalar(1).
+    if isinstance(value, bool):
+        return _BoolScalar(value)
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return value
+
+    return value

@@ -124,3 +124,43 @@ class TestApplyAtPath:
 
         assert "# SLO for the judgment pipeline" in output
         assert "# rolling window" in output
+
+
+class TestNormalizeScalar:
+    """normalize_scalar enables int/float/numeric-string equivalence."""
+
+    def test_int_float_str_numeric_equivalence(self):
+        from nthlayer_workers.learn._yaml import normalize_scalar
+
+        n_int = normalize_scalar(98)
+        n_float = normalize_scalar(98.0)
+        n_str_int = normalize_scalar("98")
+        n_str_float = normalize_scalar("98.0")
+
+        assert n_int == n_float == n_str_int == n_str_float
+
+    def test_different_numbers_not_equivalent(self):
+        from nthlayer_workers.learn._yaml import normalize_scalar
+
+        assert normalize_scalar(98) != normalize_scalar(99)
+        assert normalize_scalar(98.5) != normalize_scalar(98.6)
+
+    def test_non_numeric_string_returns_as_is(self):
+        from nthlayer_workers.learn._yaml import normalize_scalar
+
+        assert normalize_scalar("hello") == "hello"
+        assert normalize_scalar("30d") == "30d"
+        assert normalize_scalar(30) != normalize_scalar("30d")
+
+    def test_bool_not_treated_as_numeric(self):
+        """bool subclasses int in Python; we explicitly do NOT coerce."""
+        from nthlayer_workers.learn._yaml import normalize_scalar
+
+        assert normalize_scalar(True) != normalize_scalar(1)
+        assert normalize_scalar(False) != normalize_scalar(0)
+
+    def test_non_scalar_passes_through(self):
+        from nthlayer_workers.learn._yaml import normalize_scalar
+
+        assert normalize_scalar({"a": 1}) == {"a": 1}
+        assert normalize_scalar([1, 2]) == [1, 2]
