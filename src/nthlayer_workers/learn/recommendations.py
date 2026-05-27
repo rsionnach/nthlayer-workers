@@ -35,9 +35,21 @@ engine here are the building blocks those follow-ups attach to.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
+
+
+def compute_rec_id(incident_id: str, rec_type: str, field: str) -> str:
+    """Deterministic rec id from (incident, type, field).
+
+    Format: rec-<12-char-lowercase-sha256-hex>. Stable across tool versions.
+    Algorithm pinned in jmy.6 design § 6.1 so future contributors don't
+    accidentally change the hash basis.
+    """
+    payload = f"{incident_id}|{rec_type}|{field}".encode("utf-8")
+    return "rec-" + hashlib.sha256(payload).hexdigest()[:12]
 
 import yaml
 
@@ -59,11 +71,13 @@ _TIGHTEN_SLO_BLEND = 0.5
 class Recommendation:
     """One proposed spec change in a SpecRecommendation document.
 
-    All fields except ``service``, ``type``, ``rationale``, and
+    All fields except ``id``, ``service``, ``type``, ``rationale``, and
     ``proposed_value`` are optional and only populated when the engine
-    has the inputs.
+    has the inputs. ``id`` is a deterministic rec-<12-char-sha256-hex>
+    computed via compute_rec_id(incident_id, type, field).
     """
 
+    id: str
     service: str
     type: str  # "tighten_slo" | "add_deploy_gate" | etc.
     rationale: str
@@ -165,9 +179,9 @@ def analyze_incident(
     evaluations = retrospective_data.get("evaluations") or []
     root_causes = incident_custom.get("root_causes") or []
 
-    for rec in _tighten_slo_recommendations(evaluations):
+    for rec in _tighten_slo_recommendations(evaluations, incident_id):
         recs.append(rec)
-    for rec in _add_deploy_gate_recommendations(evaluations, root_causes):
+    for rec in _add_deploy_gate_recommendations(evaluations, root_causes, incident_id):
         recs.append(rec)
 
     overall_confidence = (
@@ -185,6 +199,7 @@ def analyze_incident(
 
 def _tighten_slo_recommendations(
     evaluations: list[dict[str, Any]],
+    incident_id: str,
 ) -> list[Recommendation]:
     """Produce ``tighten_slo`` recommendations from breached judgment SLOs."""
     out: list[Recommendation] = []
@@ -211,10 +226,12 @@ def _tighten_slo_recommendations(
         if gap_fraction < _TIGHTEN_SLO_GAP_FRACTION:
             continue
         proposed = float(current) + (float(target) - float(current)) * _TIGHTEN_SLO_BLEND
+        field_path = f"spec.slos.{slo_name}.target"
         out.append(Recommendation(
+            id=compute_rec_id(incident_id, "tighten_slo", field_path),
             service=service,
             type="tighten_slo",
-            field=f"spec.slos.{slo_name}.target",
+            field=field_path,
             current_value=target,
             proposed_value=round(proposed, 2),
             rationale=(
@@ -237,6 +254,7 @@ def _tighten_slo_recommendations(
 def _add_deploy_gate_recommendations(
     evaluations: list[dict[str, Any]],
     root_causes: list[dict[str, Any]],
+    incident_id: str,
 ) -> list[Recommendation]:
     """Produce ``add_deploy_gate`` recommendations from change-shaped root causes.
 
@@ -295,10 +313,12 @@ def _add_deploy_gate_recommendations(
             evidence = [{"root_cause_type": rc.get("type")}]
             confidence = 0.4
 
+        gate_field = "spec.deployment.gates.judgment"
         out.append(Recommendation(
+            id=compute_rec_id(incident_id, "add_deploy_gate", gate_field),
             service=service,
             type="add_deploy_gate",
-            field="spec.deployment.gates.judgment",
+            field=gate_field,
             current_value=None,
             proposed_value={
                 "enabled": True,

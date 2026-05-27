@@ -58,6 +58,7 @@ class TestSpecRecommendationModel:
             confidence=0.8,
             recommendations=[
                 Recommendation(
+                    id="rec-test00000001",
                     service="svc-a", type="tighten_slo",
                     field="spec.slos.availability.target",
                     current_value=99.9, proposed_value=99.95,
@@ -82,6 +83,7 @@ class TestSpecRecommendationModel:
             confidence=0.5,
             recommendations=[
                 Recommendation(
+                    id="rec-test00000002",
                     service="svc", type="tighten_slo",
                     rationale="x", proposed_value=99.95,
                     # field, current_value, financial_impact, evidence omitted
@@ -281,3 +283,52 @@ class TestAnalyzeIncidentAggregate:
         for orig, lit in zip(result.recommendations, loaded["recommendations"]):
             assert orig.type == lit["type"]
             assert orig.service == lit["service"]
+
+
+# ---------------------------------------------------------------------------
+# jmy.6: deterministic rec-<12-char-sha256-hex> id
+# ---------------------------------------------------------------------------
+
+
+class TestRecommendationId:
+    """jmy.6: deterministic rec-<12-char-sha256-hex> id."""
+
+    def test_compute_id_is_deterministic(self):
+        from nthlayer_workers.learn.recommendations import compute_rec_id
+
+        id1 = compute_rec_id("inc-2026-05-21-001", "tighten_slo", "spec.slos.judgment.target")
+        id2 = compute_rec_id("inc-2026-05-21-001", "tighten_slo", "spec.slos.judgment.target")
+        assert id1 == id2
+
+    def test_compute_id_format(self):
+        from nthlayer_workers.learn.recommendations import compute_rec_id
+
+        rec_id = compute_rec_id("inc-2026-05-21-001", "tighten_slo", "spec.slos.judgment.target")
+        assert rec_id.startswith("rec-")
+        assert len(rec_id) == 16  # "rec-" + 12 hex chars
+        hex_part = rec_id[4:]
+        assert all(c in "0123456789abcdef" for c in hex_part)
+
+    def test_compute_id_changes_per_input(self):
+        from nthlayer_workers.learn.recommendations import compute_rec_id
+
+        base = compute_rec_id("inc-A", "tighten_slo", "spec.slos.judgment.target")
+        diff_incident = compute_rec_id("inc-B", "tighten_slo", "spec.slos.judgment.target")
+        diff_type = compute_rec_id("inc-A", "add_deploy_gate", "spec.slos.judgment.target")
+        diff_field = compute_rec_id("inc-A", "tighten_slo", "spec.slos.availability.target")
+
+        assert base != diff_incident
+        assert base != diff_type
+        assert base != diff_field
+
+    def test_recommendation_has_id_field(self):
+        from nthlayer_workers.learn.recommendations import Recommendation
+
+        rec = Recommendation(
+            id="rec-deadbeef0123",
+            service="fraud-detect",
+            type="tighten_slo",
+            rationale="test",
+            proposed_value=98.5,
+        )
+        assert rec.id == "rec-deadbeef0123"
