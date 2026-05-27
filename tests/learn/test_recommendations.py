@@ -67,8 +67,8 @@ class TestSpecRecommendationModel:
             ],
         )
         out = yaml.safe_load(s.to_yaml())
-        assert out["apiVersion"] == "opensrm.io/v1"
-        assert out["kind"] == "SpecRecommendation"
+        assert out["apiVersion"] == "nthlayer.io/learn/v1"
+        assert out["kind"] == "RecommendationPlan"
         assert out["metadata"]["incident"] == "INC-X"
         assert out["metadata"]["confidence"] == 0.8
         assert out["metadata"]["requires_human_review"] is True
@@ -332,3 +332,39 @@ class TestRecommendationId:
             proposed_value=98.5,
         )
         assert rec.id == "rec-deadbeef0123"
+
+
+# ---------------------------------------------------------------------------
+# jmy.6: apiVersion + kind rename for the plan-file artefact
+# ---------------------------------------------------------------------------
+
+
+class TestPlanArtefactRename:
+    """jmy.6: apiVersion + kind rename for the plan-file artefact."""
+
+    def test_to_yaml_emits_new_api_version(self):
+        from nthlayer_workers.learn.recommendations import SpecRecommendation, Recommendation
+        from datetime import datetime, timezone
+
+        sr = SpecRecommendation(
+            incident="inc-test",
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-deadbeef0123",
+                    service="fraud-detect",
+                    type="tighten_slo",
+                    rationale="test",
+                    proposed_value=98.5,
+                ),
+            ],
+        )
+
+        yaml_text = sr.to_yaml()
+        assert "apiVersion: nthlayer.io/learn/v1" in yaml_text
+        assert "kind: RecommendationPlan" in yaml_text
+        # Old strings absent
+        assert "opensrm.io/v1" not in yaml_text
+        assert "SpecRecommendation" not in yaml_text

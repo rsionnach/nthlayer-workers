@@ -132,8 +132,8 @@ class SpecRecommendation:
             d = {k: v for k, v in d.items() if v not in (None, [], "")}
             recs.append(d)
         return {
-            "apiVersion": "opensrm.io/v1",
-            "kind": "SpecRecommendation",
+            "apiVersion": "nthlayer.io/learn/v1",
+            "kind": "RecommendationPlan",
             "metadata": {
                 "incident": self.incident,
                 "generated_by": self.generated_by,
