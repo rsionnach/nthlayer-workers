@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap
 
 
 # Singleton sentinel for "path doesn't resolve in this document".
@@ -51,3 +52,35 @@ def resolve_path(doc: Any, dotted_path: str) -> Any:
             return PATH_MISSING
         current = current[key]
     return current
+
+
+def apply_at_path(doc: Any, dotted_path: str, value: Any) -> None:
+    """Write value at dotted_path; create missing intermediates as needed.
+
+    Modifies doc in place. Comments on sibling keys and intermediate
+    mappings are preserved (ruamel.yaml CommentedMap holds comments
+    on the parent node, not on the keys themselves).
+
+    Missing intermediate keys are created as CommentedMap instances
+    so subsequent operations against those keys round-trip cleanly.
+
+    Raises TypeError if a non-leaf path segment is already bound to
+    a non-mapping value (we won't silently overwrite scalars with
+    mappings — that's a structural change the engine doesn't produce).
+    """
+    if not dotted_path:
+        raise ValueError("apply_at_path requires a non-empty dotted_path")
+
+    keys = dotted_path.split(".")
+    current = doc
+    for key in keys[:-1]:
+        if key not in current:
+            current[key] = CommentedMap()
+        if not isinstance(current[key], dict):
+            raise TypeError(
+                f"cannot descend into non-mapping at {key!r} "
+                f"(found {type(current[key]).__name__})"
+            )
+        current = current[key]
+
+    current[keys[-1]] = value

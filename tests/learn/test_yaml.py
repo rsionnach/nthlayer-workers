@@ -47,3 +47,80 @@ class TestResolvePath:
         result = resolve_path(parsed_manifest, "")
         assert "metadata" in result
         assert "spec" in result
+
+
+class TestApplyAtPath:
+    """apply_at_path writes in-place; comments survive round-trip."""
+
+    def test_apply_at_existing_leaf(self):
+        from nthlayer_workers.learn._yaml import apply_at_path, get_yaml_round_trip
+        from io import StringIO
+
+        yaml = get_yaml_round_trip()
+        text = (
+            "spec:\n"
+            "  slos:\n"
+            "    judgment:\n"
+            "      target: 95.0  # current SLO target\n"
+        )
+        doc = yaml.load(text)
+
+        apply_at_path(doc, "spec.slos.judgment.target", 98.5)
+
+        buf = StringIO()
+        yaml.dump(doc, buf)
+        output = buf.getvalue()
+
+        # New value present
+        assert "target: 98.5" in output
+        # Old value gone
+        assert "target: 95.0" not in output
+        # Comment preserved
+        assert "# current SLO target" in output
+
+    def test_apply_at_missing_intermediate_creates(self):
+        from nthlayer_workers.learn._yaml import apply_at_path, get_yaml_round_trip
+        from io import StringIO
+
+        yaml = get_yaml_round_trip()
+        text = "spec:\n  slos:\n    reversal_rate:\n      target: 98.5\n"
+        doc = yaml.load(text)
+
+        # Path doesn't exist; apply creates intermediates
+        apply_at_path(doc, "spec.deployment.gates.judgment", {
+            "enabled": True,
+            "block_on": ["reversal_rate"],
+        })
+
+        buf = StringIO()
+        yaml.dump(doc, buf)
+        output = buf.getvalue()
+
+        assert "deployment:" in output
+        assert "gates:" in output
+        assert "judgment:" in output
+        assert "enabled: true" in output
+
+    def test_apply_at_path_preserves_sibling_comments(self):
+        from nthlayer_workers.learn._yaml import apply_at_path, get_yaml_round_trip
+        from io import StringIO
+
+        yaml = get_yaml_round_trip()
+        text = (
+            "spec:\n"
+            "  slos:\n"
+            "    # SLO for the judgment pipeline\n"
+            "    judgment:\n"
+            "      target: 95.0\n"
+            "      window: 30d  # rolling window\n"
+        )
+        doc = yaml.load(text)
+
+        apply_at_path(doc, "spec.slos.judgment.target", 98.5)
+
+        buf = StringIO()
+        yaml.dump(doc, buf)
+        output = buf.getvalue()
+
+        assert "# SLO for the judgment pipeline" in output
+        assert "# rolling window" in output
