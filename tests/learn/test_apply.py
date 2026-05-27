@@ -59,3 +59,78 @@ class TestResolveManifestPath:
 
         result = resolve_manifest_path("nonexistent-service", tmp_path)
         assert result is None
+
+
+class TestApplyHappyPath:
+    """apply_recommendations orchestration: happy path."""
+
+    def test_single_rec_applied(self, tmp_path):
+        from nthlayer_workers.learn._apply import apply_recommendations
+        from nthlayer_workers.learn.recommendations import (
+            Recommendation, SpecRecommendation, OutcomeKind,
+        )
+        from datetime import datetime, timezone
+
+        # Seed manifest
+        (tmp_path / "fraud-detect.yaml").write_text(
+            "metadata:\n  name: fraud-detect\n"
+            "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+        )
+        plan = SpecRecommendation(
+            incident="inc-test",
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-deadbeef0123",
+                    service="fraud-detect",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+            ],
+        )
+
+        result = apply_recommendations(plan, tmp_path)
+
+        assert len(result.applied) == 1
+        assert result.applied[0].id == "rec-deadbeef0123"
+        assert result.applied[0].outcome == OutcomeKind.APPLY_CLEAN
+        assert len(result.skipped) == 0
+        # Manifest file modified on disk
+        assert "target: 98.5" in (tmp_path / "fraud-detect.yaml").read_text()
+        assert "target: 95.0" not in (tmp_path / "fraud-detect.yaml").read_text()
+
+    def test_skipped_when_manifest_missing(self, tmp_path):
+        from nthlayer_workers.learn._apply import apply_recommendations
+        from nthlayer_workers.learn.recommendations import (
+            Recommendation, SpecRecommendation, OutcomeKind,
+        )
+        from datetime import datetime, timezone
+
+        # No manifest seeded
+        plan = SpecRecommendation(
+            incident="inc-test",
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-deadbeef0124",
+                    service="unknown-service",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+            ],
+        )
+
+        result = apply_recommendations(plan, tmp_path)
+        assert len(result.applied) == 0
+        assert len(result.skipped) == 1
+        assert result.skipped[0].outcome == OutcomeKind.MANIFEST_NOT_FOUND

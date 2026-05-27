@@ -11,10 +11,19 @@ Hidden directories excluded from the walk.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from io import StringIO
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import yaml as pyyaml  # lightweight read for the discovery walk only
+
+from nthlayer_workers.learn.recommendations import (
+    OutcomeKind, Recommendation, SpecRecommendation,
+)
+from nthlayer_workers.learn._yaml import (
+    apply_at_path, classify_outcome, get_yaml_round_trip, resolve_path,
+)
 
 
 def resolve_manifest_path(service: str, specs_dir: Path) -> Path | None:
@@ -50,6 +59,140 @@ def resolve_manifest_path(service: str, specs_dir: Path) -> Path | None:
             return path
 
     return None
+
+
+@dataclass
+class RecOutcome:
+    """One recommendation's outcome from apply_recommendations."""
+
+    id: str
+    service: str
+    field: str | None
+    outcome: OutcomeKind
+    detail: str = ""  # human-readable detail for skipped recs
+
+
+@dataclass
+class ApplyResult:
+    """Result of an apply_recommendations call."""
+
+    applied: list[RecOutcome] = field(default_factory=list)
+    skipped: list[RecOutcome] = field(default_factory=list)
+    modified_files: list[Path] = field(default_factory=list)
+
+    @property
+    def exit_code(self) -> int:
+        """Per jmy.6 design § 7 deterministic rule.
+
+        Empty plan → 0
+        All applied and each outcome is APPLY_CLEAN or ALREADY_APPLIED → 0
+        Any APPLY_CLEAN + any skipped → 1 (partial)
+        Zero APPLY_CLEAN + any skipped → 2 (complete failure)
+        """
+        # Empty plan → 0
+        if not self.applied and not self.skipped:
+            return 0
+        any_clean = any(
+            r.outcome == OutcomeKind.APPLY_CLEAN for r in self.applied
+        )
+        all_clean_or_idempotent = all(
+            r.outcome in (OutcomeKind.APPLY_CLEAN, OutcomeKind.ALREADY_APPLIED)
+            for r in self.applied
+        ) and not self.skipped
+        if all_clean_or_idempotent:
+            return 0
+        if any_clean and self.skipped:
+            return 1  # partial
+        return 2  # complete failure
+
+
+def apply_recommendations(
+    plan: SpecRecommendation,
+    specs_dir: Path,
+    *,
+    force: bool = False,
+) -> ApplyResult:
+    """Apply the plan's recommendations to manifests in specs_dir.
+
+    Two-phase: classify all recs first (in-memory), then write all
+    modified manifests atomically in alphabetical-by-path order.
+
+    --force normalises DRIFT_DETECTED into APPLY_CLEAN (recorded with
+    detail string so callers know the override occurred).
+    """
+    specs_dir = Path(specs_dir)
+    result = ApplyResult()
+    yaml = get_yaml_round_trip()
+
+    # Build {file_path: parsed_doc} cache so each unique manifest is
+    # read+parsed once even if multiple recs target it.
+    doc_cache: dict[Path, Any] = {}
+    modified_paths: set[Path] = set()
+
+    for rec in plan.recommendations:
+        # Resolve manifest
+        manifest_path = resolve_manifest_path(rec.service, specs_dir)
+        if manifest_path is None:
+            result.skipped.append(RecOutcome(
+                id=rec.id,
+                service=rec.service,
+                field=rec.field,
+                outcome=OutcomeKind.MANIFEST_NOT_FOUND,
+                detail=f"no manifest for service {rec.service!r} in {specs_dir}",
+            ))
+            continue
+
+        # Read + parse (cached)
+        if manifest_path not in doc_cache:
+            doc_cache[manifest_path] = yaml.load(manifest_path.read_text())
+        doc = doc_cache[manifest_path]
+
+        # Classify
+        manifest_value = resolve_path(doc, rec.field or "")
+        outcome = classify_outcome(manifest_value, rec)
+
+        if outcome == OutcomeKind.APPLY_CLEAN:
+            apply_at_path(doc, rec.field, rec.proposed_value)
+            modified_paths.add(manifest_path)
+            result.applied.append(RecOutcome(
+                id=rec.id,
+                service=rec.service,
+                field=rec.field,
+                outcome=outcome,
+            ))
+        elif outcome == OutcomeKind.ALREADY_APPLIED:
+            result.applied.append(RecOutcome(
+                id=rec.id,
+                service=rec.service,
+                field=rec.field,
+                outcome=outcome,
+            ))
+        elif outcome == OutcomeKind.DRIFT_DETECTED and force:
+            apply_at_path(doc, rec.field, rec.proposed_value)
+            modified_paths.add(manifest_path)
+            result.applied.append(RecOutcome(
+                id=rec.id,
+                service=rec.service,
+                field=rec.field,
+                outcome=OutcomeKind.APPLY_CLEAN,  # --force normalises to clean
+                detail="applied via --force despite drift",
+            ))
+        else:
+            result.skipped.append(RecOutcome(
+                id=rec.id,
+                service=rec.service,
+                field=rec.field,
+                outcome=outcome,
+            ))
+
+    # Write phase: alphabetical-by-path, atomic per-file
+    for path in sorted(modified_paths):
+        buf = StringIO()
+        yaml.dump(doc_cache[path], buf)
+        path.write_text(buf.getvalue())
+        result.modified_files.append(path)
+
+    return result
 
 
 def _walk_yaml_files(root: Path) -> Iterable[Path]:
