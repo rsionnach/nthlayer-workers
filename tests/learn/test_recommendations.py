@@ -393,3 +393,80 @@ class TestOutcomeKind:
 
         assert OutcomeKind.APPLY_CLEAN == "apply_clean"
         assert str(OutcomeKind.DRIFT_DETECTED) == "drift_detected"
+
+
+# ---------------------------------------------------------------------------
+# jmy.6: --from <plan.yaml> validation
+# ---------------------------------------------------------------------------
+
+
+class TestParsePlanFile:
+    """jmy.6: --from <plan.yaml> validation."""
+
+    def test_parse_plan_file_happy_path(self, tmp_path):
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation, parse_plan_file,
+        )
+        from datetime import datetime, timezone
+
+        original = SpecRecommendation(
+            incident="inc-test",
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[],
+        )
+        plan_path = tmp_path / "plan.yaml"
+        plan_path.write_text(original.to_yaml())
+
+        loaded = parse_plan_file(plan_path)
+        assert loaded.incident == "inc-test"
+        assert loaded.confidence == 0.7
+        assert loaded.requires_human_review is True
+
+    def test_parse_plan_file_unknown_api_version_raises(self, tmp_path):
+        from nthlayer_workers.learn.recommendations import (
+            parse_plan_file, PlanFileUnknownVersionError,
+        )
+
+        plan_path = tmp_path / "plan.yaml"
+        plan_path.write_text(
+            "apiVersion: opensrm.io/v999\n"
+            "kind: RecommendationPlan\n"
+            "metadata: {incident: x, generated_by: y, generated_at: '2026-01-01T00:00:00+00:00', confidence: 0.5, requires_human_review: true}\n"
+            "recommendations: []\n"
+        )
+
+        with pytest.raises(PlanFileUnknownVersionError, match="nthlayer.io/learn/v1"):
+            parse_plan_file(plan_path)
+
+    def test_parse_plan_file_missing_recommendations_key_raises(self, tmp_path):
+        from nthlayer_workers.learn.recommendations import (
+            parse_plan_file, PlanFileInvalidError,
+        )
+
+        plan_path = tmp_path / "plan.yaml"
+        plan_path.write_text(
+            "apiVersion: nthlayer.io/learn/v1\n"
+            "kind: RecommendationPlan\n"
+            "metadata: {incident: x, generated_by: y, generated_at: '2026-01-01T00:00:00+00:00', confidence: 0.5, requires_human_review: true}\n"
+        )
+
+        with pytest.raises(PlanFileInvalidError, match="recommendations"):
+            parse_plan_file(plan_path)
+
+    def test_parse_plan_file_non_list_recommendations_raises(self, tmp_path):
+        from nthlayer_workers.learn.recommendations import (
+            parse_plan_file, PlanFileInvalidError,
+        )
+
+        plan_path = tmp_path / "plan.yaml"
+        plan_path.write_text(
+            "apiVersion: nthlayer.io/learn/v1\n"
+            "kind: RecommendationPlan\n"
+            "metadata: {incident: x, generated_by: y, generated_at: '2026-01-01T00:00:00+00:00', confidence: 0.5, requires_human_review: true}\n"
+            "recommendations: not_a_list\n"
+        )
+
+        with pytest.raises(PlanFileInvalidError, match="recommendations must be a list"):
+            parse_plan_file(plan_path)
