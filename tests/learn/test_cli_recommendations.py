@@ -117,3 +117,99 @@ class TestApplyToFlag:
 
         # Manifest modified
         assert "target: 98.5" in (specs_dir / "fraud-detect.yaml").read_text()
+
+
+class TestPrPath:
+    """--pr drives pre-flight + branch + commit + push + gh pr create."""
+
+    def test_pr_path_happy(self, tmp_path, monkeypatch, capsys):
+        """End-to-end --pr with all git/gh subprocess calls stubbed."""
+        from nthlayer_workers.learn.cli import main
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation, Recommendation,
+        )
+        from datetime import datetime, timezone
+        import subprocess
+
+        # Seed manifest + plan
+        specs_dir = tmp_path / "specs"
+        specs_dir.mkdir()
+        (specs_dir / "fraud-detect.yaml").write_text(
+            "metadata:\n  name: fraud-detect\n"
+            "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+        )
+
+        plan = SpecRecommendation(
+            incident="inc-test",
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-deadbeef0123",
+                    service="fraud-detect",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+            ],
+        )
+        plan_in = tmp_path / "in.yaml"
+        plan_in.write_text(plan.to_yaml())
+
+        # Stub every subprocess.run invocation (gh + git)
+        captured: list = []
+        def fake_run(args, **kwargs):
+            captured.append(list(args))
+            # gh --version: success
+            if args[:2] == ["gh", "--version"]:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="gh 2.x", stderr="")
+            # gh auth status: success
+            if args[:3] == ["gh", "auth", "status"]:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="logged in", stderr="")
+            # git rev-parse --git-dir: success (simulate repo)
+            if "rev-parse" in args:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout=".git", stderr="")
+            # git remote get-url origin: success
+            if "remote" in args and "get-url" in args:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="git@github.com:org/repo.git", stderr="")
+            # branch checks: not exists
+            if "show-ref" in args:
+                return subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr="")
+            if "ls-remote" in args:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+            # All git commands (checkout, add, commit, push) succeed
+            if args[0] == "git":
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+            # gh pr create: success
+            if args[:3] == ["gh", "pr", "create"]:
+                return subprocess.CompletedProcess(
+                    args=args, returncode=0,
+                    stdout="https://github.com/org/repo/pull/99\n",
+                    stderr="",
+                )
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        # Run the CLI with --pr
+        with pytest.raises(SystemExit) as exc:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--pr",
+            ])
+        assert exc.value.code == 0
+
+        # Verify gh pr create was called
+        gh_pr_create_called = any(
+            list(c[:3]) == ["gh", "pr", "create"] for c in captured
+        )
+        assert gh_pr_create_called
+
+        # stdout contains PR URL
+        captured_out = capsys.readouterr()
+        assert "https://github.com/org/repo/pull/99" in captured_out.out
