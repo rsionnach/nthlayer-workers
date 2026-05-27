@@ -96,3 +96,93 @@ class TestPreflightChecks:
 
         with pytest.raises(PreflightError, match="branch_exists"):
             check_branch_available(tmp_path, "learn/recommendations/inc-test")
+
+
+class TestCreatePr:
+    """create_pr_via_gh: shell out to gh pr create, parse PRResult."""
+
+    def test_happy_path_returns_pr_url(self, monkeypatch, tmp_path):
+        from nthlayer_workers.learn._gh import create_pr_via_gh
+        import subprocess
+
+        result = subprocess.CompletedProcess(
+            args=["gh", "pr", "create"],
+            returncode=0,
+            stdout="https://github.com/org/repo/pull/42\n",
+            stderr="",
+        )
+        captured = {}
+
+        def fake_run(args, **kwargs):
+            captured["args"] = args
+            return result
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        pr = create_pr_via_gh(
+            title="Apply NthLayer recommendations from inc-test",
+            body="## Changes\n...",
+            branch="learn/recommendations/inc-test",
+            cwd=tmp_path,
+        )
+
+        assert pr.ok
+        assert pr.url == "https://github.com/org/repo/pull/42"
+        assert pr.number == 42
+        # Args include the expected flags
+        assert "--title" in captured["args"]
+        assert "--body" in captured["args"]
+        assert "--head" in captured["args"]
+        assert "--base" in captured["args"]
+
+    def test_base_and_draft_kwargs_flow_to_argv(self, monkeypatch, tmp_path):
+        from nthlayer_workers.learn._gh import create_pr_via_gh
+        import subprocess
+
+        result = subprocess.CompletedProcess(
+            args=["gh", "pr", "create"],
+            returncode=0,
+            stdout="https://github.com/org/repo/pull/99\n",
+            stderr="",
+        )
+        captured = {}
+
+        def fake_run(args, **kw):
+            captured.setdefault("args", args)
+            return result
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        create_pr_via_gh(
+            title="t", body="b",
+            branch="learn/recommendations/x",
+            cwd=tmp_path,
+            base="develop",
+            draft=True,
+        )
+
+        assert "develop" in captured["args"]
+        assert "--draft" in captured["args"]
+
+    def test_failure_returns_pr_result_with_error(self, monkeypatch, tmp_path):
+        from nthlayer_workers.learn._gh import create_pr_via_gh
+        import subprocess
+
+        result = subprocess.CompletedProcess(
+            args=["gh", "pr", "create"],
+            returncode=1,
+            stdout="",
+            stderr="GraphQL: pull request requires a base branch\n",
+        )
+        monkeypatch.setattr(subprocess, "run", lambda args, **kw: result)
+
+        pr = create_pr_via_gh(
+            title="t", body="b",
+            branch="learn/recommendations/x",
+            cwd=tmp_path,
+        )
+
+        assert not pr.ok
+        assert pr.url is None
+        assert pr.number is None
+        assert "GraphQL" in pr.error

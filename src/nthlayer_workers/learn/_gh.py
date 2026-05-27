@@ -7,9 +7,13 @@ and replaceable.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+
+_PR_URL_RE = re.compile(r"https://[^\s]+/pull/(\d+)")
 
 
 class PreflightError(RuntimeError):
@@ -109,3 +113,42 @@ def check_branch_available(specs_dir: Path, branch: str) -> None:
             f"branch_exists: branch {branch!r} already exists on origin. "
             f"Delete with 'git push origin --delete {branch}'."
         )
+
+
+def create_pr_via_gh(
+    *,
+    title: str,
+    body: str,
+    branch: str,
+    cwd: Path,
+    base: str = "main",
+    draft: bool = False,
+) -> PRResult:
+    """Create a PR via gh pr create. Returns PRResult on success or failure.
+
+    Does not raise on non-zero exit; PRResult.ok distinguishes
+    success/failure so the CLI can format an appropriate error.
+    """
+    args = [
+        "gh", "pr", "create",
+        "--title", title,
+        "--body", body,
+        "--head", branch,
+        "--base", base,
+    ]
+    if draft:
+        args.append("--draft")
+
+    result = subprocess.run(
+        args, cwd=cwd, capture_output=True, text=True, check=False,
+    )
+
+    if result.returncode != 0:
+        # Carry gh's stderr through verbatim for the operator-recovery message
+        return PRResult(url=None, number=None, error=result.stderr.strip())
+
+    # gh outputs the PR URL to stdout on success
+    url = result.stdout.strip()
+    match = _PR_URL_RE.search(url)
+    pr_number = int(match.group(1)) if match else None
+    return PRResult(url=url, number=pr_number, error=None)
