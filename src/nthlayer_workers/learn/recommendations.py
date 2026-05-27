@@ -38,6 +38,7 @@ import dataclasses
 import hashlib
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from enum import StrEnum
 from typing import Any
 
 
@@ -52,6 +53,23 @@ def compute_rec_id(incident_id: str, rec_type: str, field: str) -> str:
     return "rec-" + hashlib.sha256(payload).hexdigest()[:12]
 
 import yaml
+
+
+class OutcomeKind(StrEnum):
+    """Per-recommendation outcome from --apply-to evaluation (jmy.6 § 5).
+
+    Lives in recommendations.py (not _yaml.py) because outcomes are part
+    of the recommendation lifecycle — operator-visible in summaries,
+    PR body, error messages. _yaml.py's classify_outcome implements the
+    state machine that produces these.
+    """
+
+    APPLY_CLEAN = "apply_clean"
+    ALREADY_APPLIED = "already_applied"
+    DRIFT_DETECTED = "drift_detected"
+    TARGET_PATH_MISSING = "target_path_missing"
+    MANIFEST_NOT_FOUND = "manifest_not_found"
+
 
 # Severity threshold for the tighten_slo heuristic. The retrospective
 # already classifies whether an SLO judgment SLO was breached during

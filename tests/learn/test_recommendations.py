@@ -368,3 +368,28 @@ class TestPlanArtefactRename:
         # Old strings absent
         assert "opensrm.io/v1" not in yaml_text
         assert "SpecRecommendation" not in yaml_text
+
+
+# ---------------------------------------------------------------------------
+# jmy.6: OutcomeKind enum
+# ---------------------------------------------------------------------------
+
+
+class TestOutcomeKind:
+    """jmy.6: OutcomeKind enum lives in recommendations.py (operator-visible)."""
+
+    def test_outcome_kind_values(self):
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        assert OutcomeKind.APPLY_CLEAN.value == "apply_clean"
+        assert OutcomeKind.ALREADY_APPLIED.value == "already_applied"
+        assert OutcomeKind.DRIFT_DETECTED.value == "drift_detected"
+        assert OutcomeKind.TARGET_PATH_MISSING.value == "target_path_missing"
+        assert OutcomeKind.MANIFEST_NOT_FOUND.value == "manifest_not_found"
+
+    def test_outcome_kind_is_string_enum(self):
+        """StrEnum gives wire-safe string serialisation for free."""
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        assert OutcomeKind.APPLY_CLEAN == "apply_clean"
+        assert str(OutcomeKind.DRIFT_DETECTED) == "drift_detected"
