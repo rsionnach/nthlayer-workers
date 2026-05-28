@@ -214,6 +214,119 @@ class TestPrPath:
         assert "https://github.com/org/repo/pull/99" in captured_out.out
 
 
+class TestIncidentIdValidation:
+    """jmy.6 R5-P3: pre-flight reject incident IDs with unsafe characters."""
+
+    def _build_plan_with_incident(self, tmp_path, incident_id: str):
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation, Recommendation,
+        )
+        from datetime import datetime, timezone
+
+        plan = SpecRecommendation(
+            incident=incident_id,
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-deadbeef0123",
+                    service="fraud-detect",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+            ],
+        )
+        plan_in = tmp_path / "in.yaml"
+        plan_in.write_text(plan.to_yaml())
+        return plan_in
+
+    def test_path_traversal_rejected(self, tmp_path, monkeypatch, capsys):
+        from nthlayer_workers.learn.cli import main
+        # Seed a manifest so apply_recommendations produces modified_files
+        specs_dir = tmp_path / "specs"
+        specs_dir.mkdir()
+        (specs_dir / "fraud-detect.yaml").write_text(
+            "metadata:\n  name: fraud-detect\n"
+            "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+        )
+        plan_in = self._build_plan_with_incident(tmp_path, "../../etc/passwd")
+
+        with pytest.raises(SystemExit) as exc_info:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--pr",
+            ])
+        assert exc_info.value.code == 2
+
+    def test_shell_metachar_rejected(self, tmp_path, monkeypatch, capsys):
+        from nthlayer_workers.learn.cli import main
+        specs_dir = tmp_path / "specs"
+        specs_dir.mkdir()
+        (specs_dir / "fraud-detect.yaml").write_text(
+            "metadata:\n  name: fraud-detect\n"
+            "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+        )
+        plan_in = self._build_plan_with_incident(tmp_path, "inc;rm-rf")
+
+        with pytest.raises(SystemExit) as exc_info:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--pr",
+            ])
+        assert exc_info.value.code == 2
+
+    def test_canonical_incident_id_accepted(self, tmp_path, monkeypatch, capsys):
+        """Sanity: well-formed IDs flow through to the next stage."""
+        from nthlayer_workers.learn.cli import main
+        import subprocess
+
+        specs_dir = tmp_path / "specs"
+        specs_dir.mkdir()
+        (specs_dir / "fraud-detect.yaml").write_text(
+            "metadata:\n  name: fraud-detect\n"
+            "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+        )
+        plan_in = self._build_plan_with_incident(tmp_path, "inc-2026-05-28-001")
+
+        # Stub every subprocess to succeed
+        def fake_run(args, **kwargs):
+            if args[:2] == ["gh", "--version"]:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="2.0", stderr="")
+            if args[:3] == ["gh", "auth", "status"]:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+            if args[:3] == ["gh", "pr", "create"]:
+                return subprocess.CompletedProcess(
+                    args=args, returncode=0,
+                    stdout="https://github.com/x/y/pull/1\n", stderr="",
+                )
+            # All git ops succeed; branch checks return "not exists"
+            if "show-ref" in args:
+                return subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr="")
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        # Should NOT raise SystemExit(2) for the validation reason; may raise SystemExit(0) or similar
+        try:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--pr",
+            ])
+        except SystemExit as exc:
+            # Acceptable: 0 (full success). Reject 2 (validation should not fire here).
+            assert exc.code != 2
+
+
 class TestExitCodes:
     """Pass 1 R5 fix: SystemExit must use int exit codes per spec § 7."""
 

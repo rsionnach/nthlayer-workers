@@ -186,3 +186,46 @@ class TestCreatePr:
         assert pr.url is None
         assert pr.number is None
         assert "GraphQL" in pr.error
+
+    def test_gh_succeeds_with_empty_stdout_returns_failure(self, monkeypatch, tmp_path):
+        """gh pr create returned 0 but printed no URL — treat as failure."""
+        from nthlayer_workers.learn._gh import create_pr_via_gh
+        import subprocess
+
+        result = subprocess.CompletedProcess(
+            args=["gh", "pr", "create"], returncode=0, stdout="", stderr="",
+        )
+        monkeypatch.setattr(subprocess, "run", lambda args, **kw: result)
+
+        pr = create_pr_via_gh(
+            title="t", body="b",
+            branch="learn/recommendations/inc-test",
+            cwd=tmp_path,
+        )
+
+        assert not pr.ok
+        assert pr.url is None
+        assert "no PR URL" in pr.error
+
+    def test_gh_succeeds_with_unparseable_stdout_returns_failure(self, monkeypatch, tmp_path):
+        """gh pr create returned 0 but stdout doesn't contain a recognisable PR URL."""
+        from nthlayer_workers.learn._gh import create_pr_via_gh
+        import subprocess
+
+        result = subprocess.CompletedProcess(
+            args=["gh", "pr", "create"],
+            returncode=0,
+            stdout="this is not a URL at all\n",
+            stderr="",
+        )
+        monkeypatch.setattr(subprocess, "run", lambda args, **kw: result)
+
+        pr = create_pr_via_gh(
+            title="t", body="b",
+            branch="learn/recommendations/inc-test",
+            cwd=tmp_path,
+        )
+
+        assert not pr.ok
+        assert pr.url is None
+        assert "not parseable" in pr.error

@@ -27,6 +27,8 @@ from nthlayer_workers.learn.recommendations import parse_plan_file
 
 _DURATION_RE = re.compile(r"^(\d+)(s|m|h|d|w)$")
 
+_VALID_INCIDENT_ID_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
+
 _DURATION_UNITS: dict[str, int] = {
     "s": 1,
     "m": 60,
@@ -229,6 +231,19 @@ def _run_pr_path(plan, args, apply_result) -> None:
     if apply_result is None or not apply_result.modified_files:
         # Nothing was changed; no PR to open
         return
+
+    if not _VALID_INCIDENT_ID_RE.match(plan.incident):
+        print(
+            f"Error: incident id {plan.incident!r} contains invalid characters\n"
+            f"\n"
+            f"  Incident IDs must match [a-zA-Z0-9._-]+. Branch names are derived\n"
+            f"  from the incident id; characters outside this set produce confusing\n"
+            f"  git errors or unsafe branch names.\n"
+            f"\n"
+            f"  Exit code: 2",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
 
     specs_dir = Path(args.apply_to)
     branch = f"learn/recommendations/{plan.incident}"

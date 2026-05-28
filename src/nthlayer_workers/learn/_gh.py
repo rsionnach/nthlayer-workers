@@ -147,8 +147,18 @@ def create_pr_via_gh(
         # Carry gh's stderr through verbatim for the operator-recovery message
         return PRResult(url=None, number=None, error=result.stderr.strip())
 
-    # gh outputs the PR URL to stdout on success
-    url = result.stdout.strip()
-    match = _PR_URL_RE.search(url)
-    pr_number = int(match.group(1)) if match else None
-    return PRResult(url=url, number=pr_number, error=None)
+    # Validate stdout contains a parseable PR URL — gh occasionally exits 0
+    # with no URL (e.g. when the PR already exists, or in detached config).
+    # Treat as failure so the CLI's operator-recovery messaging fires.
+    stdout = result.stdout.strip()
+    if not stdout:
+        return PRResult(url=None, number=None, error="gh succeeded but printed no PR URL")
+
+    match = _PR_URL_RE.search(stdout)
+    if match is None:
+        return PRResult(
+            url=None, number=None,
+            error=f"gh succeeded but output not parseable as PR URL: {stdout!r}",
+        )
+
+    return PRResult(url=stdout, number=int(match.group(1)), error=None)
