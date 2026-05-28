@@ -41,6 +41,8 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
+import yaml
+
 
 def compute_rec_id(incident_id: str, rec_type: str, field: str) -> str:
     """Deterministic rec id from (incident, type, field).
@@ -51,8 +53,6 @@ def compute_rec_id(incident_id: str, rec_type: str, field: str) -> str:
     """
     payload = f"{incident_id}|{rec_type}|{field}".encode("utf-8")
     return "rec-" + hashlib.sha256(payload).hexdigest()[:12]
-
-import yaml
 
 
 class OutcomeKind(StrEnum):
@@ -269,86 +269,6 @@ def _tighten_slo_recommendations(
     return out
 
 
-SUPPORTED_API_VERSIONS = frozenset({"nthlayer.io/learn/v1"})
-
-
-class PlanFileUnknownVersionError(ValueError):
-    """Plan file's apiVersion is not one we recognise."""
-
-
-class PlanFileInvalidError(ValueError):
-    """Plan file is malformed or missing required keys."""
-
-
-def parse_plan_file(path) -> SpecRecommendation:
-    """Read a plan.yaml file and deserialise to SpecRecommendation.
-
-    Validates apiVersion is in SUPPORTED_API_VERSIONS and required
-    structural keys are present. Raises PlanFileUnknownVersionError
-    or PlanFileInvalidError on bad input. The underlying yaml.YAMLError
-    propagates on malformed YAML (handled at a higher layer as
-    manifest_parse_error).
-    """
-    from pathlib import Path
-
-    text = Path(path).read_text()
-    data = yaml.safe_load(text)
-
-    if not isinstance(data, dict):
-        raise PlanFileInvalidError(
-            f"plan file root must be a mapping, got {type(data).__name__}"
-        )
-
-    api_version = data.get("apiVersion")
-    if api_version not in SUPPORTED_API_VERSIONS:
-        raise PlanFileUnknownVersionError(
-            f"plan file apiVersion {api_version!r} is not supported; "
-            f"expected one of {sorted(SUPPORTED_API_VERSIONS)} "
-            f"(e.g. nthlayer.io/learn/v1)"
-        )
-
-    if "recommendations" not in data:
-        raise PlanFileInvalidError("plan file missing required 'recommendations' key")
-
-    if not isinstance(data["recommendations"], list):
-        raise PlanFileInvalidError(
-            f"plan file recommendations must be a list, "
-            f"got {type(data['recommendations']).__name__}"
-        )
-
-    metadata = data.get("metadata", {})
-    if not isinstance(metadata, dict):
-        raise PlanFileInvalidError("plan file metadata must be a mapping")
-
-    generated_at_str = metadata.get("generated_at")
-    if not isinstance(generated_at_str, str):
-        raise PlanFileInvalidError("plan file metadata.generated_at must be an ISO 8601 string")
-
-    recs: list[Recommendation] = []
-    for r in data["recommendations"]:
-        if not isinstance(r, dict):
-            raise PlanFileInvalidError("each recommendation must be a mapping")
-        try:
-            recs.append(Recommendation(**r))
-        except TypeError as exc:
-            raise PlanFileInvalidError(f"recommendation invalid: {exc}") from exc
-
-    try:
-        generated_at_parsed = datetime.fromisoformat(generated_at_str)
-        if generated_at_parsed.tzinfo is None:
-            generated_at_parsed = generated_at_parsed.replace(tzinfo=timezone.utc)
-        return SpecRecommendation(
-            incident=metadata.get("incident", ""),
-            generated_by=metadata.get("generated_by", "nthlayer-learn"),
-            generated_at=generated_at_parsed,
-            confidence=metadata.get("confidence", 0.0),
-            recommendations=recs,
-            requires_human_review=metadata.get("requires_human_review", True),
-        )
-    except (TypeError, ValueError) as exc:
-        raise PlanFileInvalidError(f"plan metadata invalid: {exc}") from exc
-
-
 def _add_deploy_gate_recommendations(
     evaluations: list[dict[str, Any]],
     root_causes: list[dict[str, Any]],
@@ -429,3 +349,83 @@ def _add_deploy_gate_recommendations(
             evidence=evidence,
         ))
     return out
+
+
+SUPPORTED_API_VERSIONS = frozenset({"nthlayer.io/learn/v1"})
+
+
+class PlanFileUnknownVersionError(ValueError):
+    """Plan file's apiVersion is not one we recognise."""
+
+
+class PlanFileInvalidError(ValueError):
+    """Plan file is malformed or missing required keys."""
+
+
+def parse_plan_file(path) -> SpecRecommendation:
+    """Read a plan.yaml file and deserialise to SpecRecommendation.
+
+    Validates apiVersion is in SUPPORTED_API_VERSIONS and required
+    structural keys are present. Raises PlanFileUnknownVersionError
+    or PlanFileInvalidError on bad input. The underlying yaml.YAMLError
+    propagates on malformed YAML (handled at a higher layer as
+    manifest_parse_error).
+    """
+    from pathlib import Path
+
+    text = Path(path).read_text()
+    data = yaml.safe_load(text)
+
+    if not isinstance(data, dict):
+        raise PlanFileInvalidError(
+            f"plan file root must be a mapping, got {type(data).__name__}"
+        )
+
+    api_version = data.get("apiVersion")
+    if api_version not in SUPPORTED_API_VERSIONS:
+        raise PlanFileUnknownVersionError(
+            f"plan file apiVersion {api_version!r} is not supported; "
+            f"expected one of {sorted(SUPPORTED_API_VERSIONS)} "
+            f"(e.g. nthlayer.io/learn/v1)"
+        )
+
+    if "recommendations" not in data:
+        raise PlanFileInvalidError("plan file missing required 'recommendations' key")
+
+    if not isinstance(data["recommendations"], list):
+        raise PlanFileInvalidError(
+            f"plan file recommendations must be a list, "
+            f"got {type(data['recommendations']).__name__}"
+        )
+
+    metadata = data.get("metadata", {})
+    if not isinstance(metadata, dict):
+        raise PlanFileInvalidError("plan file metadata must be a mapping")
+
+    generated_at_str = metadata.get("generated_at")
+    if not isinstance(generated_at_str, str):
+        raise PlanFileInvalidError("plan file metadata.generated_at must be an ISO 8601 string")
+
+    recs: list[Recommendation] = []
+    for r in data["recommendations"]:
+        if not isinstance(r, dict):
+            raise PlanFileInvalidError("each recommendation must be a mapping")
+        try:
+            recs.append(Recommendation(**r))
+        except TypeError as exc:
+            raise PlanFileInvalidError(f"recommendation invalid: {exc}") from exc
+
+    try:
+        generated_at_parsed = datetime.fromisoformat(generated_at_str)
+        if generated_at_parsed.tzinfo is None:
+            generated_at_parsed = generated_at_parsed.replace(tzinfo=timezone.utc)
+        return SpecRecommendation(
+            incident=metadata.get("incident", ""),
+            generated_by=metadata.get("generated_by", "nthlayer-learn"),
+            generated_at=generated_at_parsed,
+            confidence=metadata.get("confidence", 0.0),
+            recommendations=recs,
+            requires_human_review=metadata.get("requires_human_review", True),
+        )
+    except (TypeError, ValueError) as exc:
+        raise PlanFileInvalidError(f"plan metadata invalid: {exc}") from exc

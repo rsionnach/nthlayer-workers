@@ -5,12 +5,25 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from nthlayer_common.verdicts.serialise import to_dict
 from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
 from nthlayer_common.verdicts.store import AccuracyFilter, VerdictFilter
+from nthlayer_workers.learn._apply import apply_recommendations, format_summary
+from nthlayer_workers.learn._gh import (
+    PreflightError,
+    check_branch_available,
+    check_gh_auth,
+    check_gh_installed,
+    check_git_repo,
+    check_remote,
+    create_pr_via_gh,
+)
+from nthlayer_workers.learn.recommendations import parse_plan_file
 
 _DURATION_RE = re.compile(r"^(\d+)(s|m|h|d|w)$")
 
@@ -163,11 +176,6 @@ def _add_recommendations_subcommand(subparsers) -> None:
 
 def _cmd_recommendations(args: argparse.Namespace) -> None:
     """Dispatch the recommendations subcommand (jmy.6)."""
-    import sys
-    from pathlib import Path
-    from nthlayer_workers.learn.recommendations import parse_plan_file
-    from nthlayer_workers.learn._apply import apply_recommendations, format_summary
-
     # Validation: --pr requires --apply-to
     if args.pr and not args.apply_to:
         raise SystemExit("error: --pr requires --apply-to")
@@ -218,14 +226,6 @@ def _build_plan_from_incident(incident_id: str):
 
 def _run_pr_path(plan, args, apply_result) -> None:
     """Drive the --pr workflow: pre-flight + branch + commit + push + PR."""
-    import subprocess
-    from pathlib import Path
-    from nthlayer_workers.learn._gh import (
-        PreflightError,
-        check_gh_installed, check_gh_auth, check_git_repo,
-        check_remote, check_branch_available, create_pr_via_gh,
-    )
-
     if apply_result is None or not apply_result.modified_files:
         # Nothing was changed; no PR to open
         return
@@ -295,12 +295,10 @@ def _run_pr_path(plan, args, apply_result) -> None:
         raise SystemExit(1)
 
     print(f"PR created: {pr.url}")
-    return
 
 
 def _run_git(cwd, args: list[str]) -> None:
     """Run a git command in cwd; raise SystemExit on non-zero returncode."""
-    import subprocess
     result = subprocess.run(
         ["git", *args], cwd=cwd, capture_output=True, text=True, check=False,
     )
