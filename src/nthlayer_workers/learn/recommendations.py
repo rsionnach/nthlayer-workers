@@ -201,6 +201,15 @@ def analyze_incident(
 
     Confidence is the average of the produced recommendations' own
     confidence scores; missing recommendations don't drag it down.
+
+    ``financial_impact`` is propagated from
+    ``retrospective_data["financial_impact"]`` (the dict produced by
+    ``nthlayer_common.outcomes.compute_financial_impact`` upstream). Wrong
+    type raises ``TypeError`` naming the incident; absent / ``None`` /
+    ``{}`` all coerce to ``None`` (in-flight partial state treated as
+    missing rather than fabricating a half-built ``FinancialImpact``).
+    Persisted ``{}`` in a plan file is rejected by ``parse_plan_file``
+    instead — the two policies are intentional, not symmetric.
     """
     recs: list[Recommendation] = []
 
@@ -401,6 +410,14 @@ def parse_plan_file(path) -> SpecRecommendation:
     or PlanFileInvalidError on bad input. The underlying yaml.YAMLError
     propagates on malformed YAML (handled at a higher layer as
     manifest_parse_error).
+
+    ``metadata.financial_impact`` round-trips through ``to_yaml`` →
+    ``parse_plan_file``. Pre-jmy.23 plan files (no key) load with
+    ``financial_impact=None``. Any non-mapping value, or a dict that
+    fails ``FinancialImpact(**...)`` construction (missing keys, extra
+    keys, including ``{}``), raises ``PlanFileInvalidError`` — persisted
+    malformed state is rejected rather than coerced. This is intentionally
+    stricter than ``analyze_incident``'s in-memory propagation.
     """
     from pathlib import Path
 
