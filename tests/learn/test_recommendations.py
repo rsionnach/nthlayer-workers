@@ -150,6 +150,35 @@ class TestSpecRecommendationModel:
         out = yaml.safe_load(s.to_yaml())
         assert "financial_impact" not in out["metadata"]
 
+    def test_to_yaml_with_zero_estimated_keeps_field(self):
+        """jmy.23: FinancialImpact with estimated=0.0 must survive emission.
+
+        The per-Recommendation filter at _to_dict drops `(None, [], "")` from
+        recommendation dicts. metadata is built separately and not subject to
+        that filter — verify a $0/0-decisions figure still emits in full.
+        """
+        fi = FinancialImpact(
+            estimated=0.0, currency="USD", decisions_affected=0,
+            failure_mode="false_negative", volume_source="metric",
+        )
+        s = SpecRecommendation(
+            incident="INC-ZERO", generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
+            confidence=0.5,
+            recommendations=[
+                Recommendation(
+                    id="rec-test00000099",
+                    service="svc", type="tighten_slo",
+                    rationale="x", proposed_value=99.95,
+                ),
+            ],
+            financial_impact=fi,
+        )
+        out = yaml.safe_load(s.to_yaml())
+        assert "financial_impact" in out["metadata"]
+        assert out["metadata"]["financial_impact"]["estimated"] == 0.0
+        assert out["metadata"]["financial_impact"]["decisions_affected"] == 0
+
     def test_yaml_round_trip_preserves_financial_impact(self):
         """jmy.23: every FinancialImpact subfield round-trips through YAML with correct type."""
         fi = FinancialImpact(
@@ -413,6 +442,53 @@ class TestAnalyzeIncidentFinancialImpact:
         result = analyze_incident(retro, "inc-test-3")
         assert result.financial_impact is None
 
+    @pytest.mark.parametrize("bad", ["not a dict", 123, [1, 2, 3]])
+    def test_analyze_incident_raises_on_wrong_type_financial_impact(self, bad):
+        retro = _retrospective_with_breach(target=98.5, current=92.0)
+        retro["financial_impact"] = bad
+        with pytest.raises(TypeError, match="must be a mapping"):
+            analyze_incident(retro, "inc-bad-type")
+
+    def test_analyze_incident_wrong_type_error_names_incident(self):
+        retro = _retrospective_with_breach(target=98.5, current=92.0)
+        retro["financial_impact"] = "not a dict"
+        with pytest.raises(TypeError, match="inc-named-test"):
+            analyze_incident(retro, "inc-named-test")
+
+    def test_analyze_incident_raises_on_missing_required_keys(self):
+        retro = _retrospective_with_breach(target=98.5, current=92.0)
+        retro["financial_impact"] = {"estimated": 1.0, "currency": "USD"}
+        with pytest.raises(TypeError):
+            analyze_incident(retro, "inc-missing-keys")
+
+    def test_analyze_incident_raises_on_extra_keys(self):
+        retro = _retrospective_with_breach(target=98.5, current=92.0)
+        retro["financial_impact"] = {
+            "estimated": 1.0, "currency": "USD",
+            "decisions_affected": 1, "failure_mode": "false_negative",
+            "volume_source": "metric", "bogus": "x",
+        }
+        with pytest.raises(TypeError):
+            analyze_incident(retro, "inc-extra-keys")
+
+    def test_analyze_incident_treats_empty_dict_as_none(self):
+        retro = _retrospective_with_breach(target=98.5, current=92.0)
+        retro["financial_impact"] = {}
+        result = analyze_incident(retro, "inc-empty-dict")
+        assert result.financial_impact is None
+
+    def test_analyze_incident_does_not_mutate_retrospective(self):
+        import copy
+        retro = _retrospective_with_breach(target=98.5, current=92.0)
+        retro["financial_impact"] = {
+            "estimated": 5400.0, "currency": "USD",
+            "decisions_affected": 1200, "failure_mode": "false_negative",
+            "volume_source": "metric",
+        }
+        snapshot = copy.deepcopy(retro)
+        analyze_incident(retro, "inc-no-mutate")
+        assert retro == snapshot
+
 
 # ---------------------------------------------------------------------------
 # jmy.6: deterministic rec-<12-char-sha256-hex> id
@@ -615,3 +691,82 @@ class TestParsePlanFile:
 
         loaded = parse_plan_file(plan_path)
         assert loaded.generated_at.tzinfo is timezone.utc
+
+    # ---- jmy.23: financial_impact round-trip through parse_plan_file ----
+
+    def test_parse_plan_file_round_trips_financial_impact(self, tmp_path):
+        """jmy.23: to_yaml() → parse_plan_file preserves the FinancialImpact figure."""
+        from nthlayer_workers.learn.recommendations import parse_plan_file
+
+        fi = FinancialImpact(
+            estimated=5400.0, currency="USD", decisions_affected=1200,
+            failure_mode="false_negative", volume_source="metric",
+        )
+        original = SpecRecommendation(
+            incident="inc-rt", generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+            confidence=0.7, recommendations=[], financial_impact=fi,
+        )
+        plan_path = tmp_path / "plan.yaml"
+        plan_path.write_text(original.to_yaml())
+
+        loaded = parse_plan_file(plan_path)
+        assert loaded.financial_impact == fi
+
+    def test_parse_plan_file_legacy_yaml_without_financial_impact(self, tmp_path):
+        """jmy.23: pre-jmy.23 plan files (no metadata.financial_impact) load with None."""
+        from nthlayer_workers.learn.recommendations import parse_plan_file
+
+        plan_path = tmp_path / "plan.yaml"
+        plan_path.write_text(
+            "apiVersion: nthlayer.io/learn/v1\n"
+            "kind: RecommendationPlan\n"
+            "metadata: {incident: x, generated_by: y, generated_at: '2026-01-01T00:00:00+00:00', confidence: 0.5, requires_human_review: true}\n"
+            "recommendations: []\n"
+        )
+        loaded = parse_plan_file(plan_path)
+        assert loaded.financial_impact is None
+
+    def test_parse_plan_file_rejects_malformed_financial_impact_wrong_type(self, tmp_path):
+        """jmy.23: non-dict financial_impact raises PlanFileInvalidError."""
+        from nthlayer_workers.learn.recommendations import (
+            parse_plan_file, PlanFileInvalidError,
+        )
+
+        plan_path = tmp_path / "plan.yaml"
+        plan_path.write_text(
+            "apiVersion: nthlayer.io/learn/v1\n"
+            "kind: RecommendationPlan\n"
+            "metadata:\n"
+            "  incident: x\n"
+            "  generated_by: y\n"
+            "  generated_at: '2026-01-01T00:00:00+00:00'\n"
+            "  confidence: 0.5\n"
+            "  requires_human_review: true\n"
+            "  financial_impact: not-a-dict\n"
+            "recommendations: []\n"
+        )
+        with pytest.raises(PlanFileInvalidError, match="financial_impact must be a mapping"):
+            parse_plan_file(plan_path)
+
+    def test_parse_plan_file_rejects_malformed_financial_impact_missing_keys(self, tmp_path):
+        """jmy.23: dict missing required FinancialImpact keys → PlanFileInvalidError."""
+        from nthlayer_workers.learn.recommendations import (
+            parse_plan_file, PlanFileInvalidError,
+        )
+
+        plan_path = tmp_path / "plan.yaml"
+        plan_path.write_text(
+            "apiVersion: nthlayer.io/learn/v1\n"
+            "kind: RecommendationPlan\n"
+            "metadata:\n"
+            "  incident: x\n"
+            "  generated_by: y\n"
+            "  generated_at: '2026-01-01T00:00:00+00:00'\n"
+            "  confidence: 0.5\n"
+            "  requires_human_review: true\n"
+            "  financial_impact: {estimated: 1.0}\n"
+            "recommendations: []\n"
+        )
+        with pytest.raises(PlanFileInvalidError, match="financial_impact invalid"):
+            parse_plan_file(plan_path)

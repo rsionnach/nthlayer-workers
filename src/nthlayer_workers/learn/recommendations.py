@@ -218,13 +218,22 @@ def analyze_incident(
     )
 
     # Propagate financial_impact from the retrospective (opensrm-jmy.23).
-    # The retrospective writes a dict produced by
+    # Source: retrospective writes a dict produced by
     # nthlayer_common.outcomes.compute_financial_impact into
     # metadata.custom["financial_impact"] (see learn/retrospective.py:147).
-    # We reconstruct the dataclass here so downstream consumers see a
-    # typed FinancialImpact instance instead of a raw dict. No recompute.
-    # Unexpected keys raise TypeError — fail loud per design.
+    # Reconstruct the dataclass so downstream consumers see a typed
+    # FinancialImpact, not a raw dict. No recompute.
+    # Contract: wrong-type input names the incident in the error;
+    # missing/extra keys raise TypeError from the dataclass — fail loud.
+    # An empty-but-present dict coerces to None (treats upstream partial
+    # state as missing rather than fabricating a half-built FinancialImpact).
     fi_dict = retrospective_data.get("financial_impact")
+    if fi_dict is not None and not isinstance(fi_dict, dict):
+        raise TypeError(
+            f"retrospective_data['financial_impact'] for incident "
+            f"{incident_id} must be a mapping or None, got "
+            f"{type(fi_dict).__name__}"
+        )
     financial_impact = FinancialImpact(**fi_dict) if fi_dict else None
 
     return SpecRecommendation(
@@ -428,6 +437,25 @@ def parse_plan_file(path) -> SpecRecommendation:
     if not isinstance(generated_at_str, str):
         raise PlanFileInvalidError("plan file metadata.generated_at must be an ISO 8601 string")
 
+    # opensrm-jmy.23: round-trip financial_impact through metadata so
+    # to_yaml() → parse_plan_file preserves the figure. Pre-jmy.23 plan
+    # files (no key) load with financial_impact=None.
+    fi_metadata = metadata.get("financial_impact")
+    if fi_metadata is None:
+        financial_impact: FinancialImpact | None = None
+    elif isinstance(fi_metadata, dict):
+        try:
+            financial_impact = FinancialImpact(**fi_metadata)
+        except TypeError as exc:
+            raise PlanFileInvalidError(
+                f"plan metadata.financial_impact invalid: {exc}"
+            ) from exc
+    else:
+        raise PlanFileInvalidError(
+            f"plan metadata.financial_impact must be a mapping or null, "
+            f"got {type(fi_metadata).__name__}"
+        )
+
     recs: list[Recommendation] = []
     for r in data["recommendations"]:
         if not isinstance(r, dict):
@@ -448,6 +476,7 @@ def parse_plan_file(path) -> SpecRecommendation:
             confidence=metadata.get("confidence", 0.0),
             recommendations=recs,
             requires_human_review=metadata.get("requires_human_review", True),
+            financial_impact=financial_impact,
         )
     except (TypeError, ValueError) as exc:
         raise PlanFileInvalidError(f"plan metadata invalid: {exc}") from exc
