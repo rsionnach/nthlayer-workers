@@ -283,7 +283,8 @@ def _run_pr_path(plan, args, apply_result) -> None:
             f"  {branch} (local only).\n\n"
             f"  Options:\n"
             f"    Retry:   git push -u origin {branch}\n"
-            f"    Discard: git branch -D {branch}",
+            f"    Discard: git branch -D {branch}\n\n"
+            f"  Exit code: 1",
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -304,7 +305,8 @@ def _run_pr_path(plan, args, apply_result) -> None:
             f"  {branch}.\n\n"
             f"  Options:\n"
             f"    Retry:   gh pr create --base {args.base} --head {branch}\n"
-            f"    Discard: git branch -D {branch}",
+            f"    Discard: git branch -D {branch}\n\n"
+            f"  Exit code: 1",
             file=sys.stderr,
         )
         raise SystemExit(1)

@@ -28,6 +28,7 @@ dependencies = [
 
 [project.scripts]
 nthlayer-workers = "nthlayer_workers.cli:main"
+nthlayer-learn = "nthlayer_workers.learn.cli:main"
 
 [project.optional-dependencies]
 dev = [
