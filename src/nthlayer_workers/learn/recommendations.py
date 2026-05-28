@@ -43,6 +43,8 @@ from typing import Any
 
 import yaml
 
+from nthlayer_common.outcomes import FinancialImpact
+
 
 def compute_rec_id(incident_id: str, rec_type: str, field: str) -> str:
     """Deterministic rec id from (incident, type, field).
@@ -103,7 +105,6 @@ class Recommendation:
     field: str | None = None
     current_value: Any = None
     confidence: float = 0.0
-    financial_impact: str | None = None
     # ``dataclasses.field`` not ``field`` — the attribute above shadows
     # the module-level imported name when used as a default expression.
     evidence: list[dict[str, Any]] = dataclasses.field(default_factory=list)
@@ -125,6 +126,10 @@ class SpecRecommendation:
     confidence: float
     recommendations: list[Recommendation]
     requires_human_review: bool = True
+    # Top-level financial impact for the incident (opensrm-jmy.23).
+    # Populated by propagation from retrospective_data — never recomputed
+    # here. None when the retrospective lacked an outcomes block.
+    financial_impact: FinancialImpact | None = None
 
     def __post_init__(self) -> None:
         # Spec § 2 "Validation Rules": requires_human_review cannot be
@@ -149,16 +154,22 @@ class SpecRecommendation:
             # matches the spec's example shape.
             d = {k: v for k, v in d.items() if v not in (None, [], "")}
             recs.append(d)
+        metadata: dict[str, Any] = {
+            "incident": self.incident,
+            "generated_by": self.generated_by,
+            "generated_at": self.generated_at.isoformat(),
+            "confidence": self.confidence,
+            "requires_human_review": self.requires_human_review,
+        }
+        if self.financial_impact is not None:
+            # Native field names from FinancialImpact (estimated, currency,
+            # decisions_affected, failure_mode, volume_source). asdict()
+            # recursion produces the nested dict; no renaming.
+            metadata["financial_impact"] = asdict(self.financial_impact)
         return {
             "apiVersion": "nthlayer.io/learn/v1",
             "kind": "RecommendationPlan",
-            "metadata": {
-                "incident": self.incident,
-                "generated_by": self.generated_by,
-                "generated_at": self.generated_at.isoformat(),
-                "confidence": self.confidence,
-                "requires_human_review": self.requires_human_review,
-            },
+            "metadata": metadata,
             "recommendations": recs,
         }
 
@@ -206,12 +217,23 @@ def analyze_incident(
         sum(r.confidence for r in recs) / len(recs) if recs else 0.0
     )
 
+    # Propagate financial_impact from the retrospective (opensrm-jmy.23).
+    # The retrospective writes a dict produced by
+    # nthlayer_common.outcomes.compute_financial_impact into
+    # metadata.custom["financial_impact"] (see learn/retrospective.py:147).
+    # We reconstruct the dataclass here so downstream consumers see a
+    # typed FinancialImpact instance instead of a raw dict. No recompute.
+    # Unexpected keys raise TypeError — fail loud per design.
+    fi_dict = retrospective_data.get("financial_impact")
+    financial_impact = FinancialImpact(**fi_dict) if fi_dict else None
+
     return SpecRecommendation(
         incident=incident_id,
         generated_by=generated_by,
         generated_at=datetime.now(timezone.utc),
         confidence=round(overall_confidence, 2),
         recommendations=recs,
+        financial_impact=financial_impact,
     )
 
 

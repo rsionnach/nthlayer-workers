@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 import pytest
 import yaml
 
+from nthlayer_common.outcomes import FinancialImpact
+
 from nthlayer_workers.learn.recommendations import (
     Recommendation,
     SpecRecommendation,
@@ -76,7 +78,12 @@ class TestSpecRecommendationModel:
         assert out["recommendations"][0]["type"] == "tighten_slo"
 
     def test_to_yaml_drops_empty_optional_fields(self):
-        """Empty optional fields stay out of the YAML so it matches the spec example."""
+        """Empty optional fields stay out of the YAML so it matches the spec example.
+
+        opensrm-jmy.23: financial_impact moved off Recommendation to
+        SpecRecommendation.metadata, so the per-rec dict should not carry it
+        regardless of population state — it's no longer a Recommendation field.
+        """
         s = SpecRecommendation(
             incident="INC-Y", generated_by="nthlayer-learn",
             generated_at=datetime.now(timezone.utc),
@@ -86,14 +93,97 @@ class TestSpecRecommendationModel:
                     id="rec-test00000002",
                     service="svc", type="tighten_slo",
                     rationale="x", proposed_value=99.95,
-                    # field, current_value, financial_impact, evidence omitted
+                    # field, current_value, evidence omitted
                 ),
             ],
         )
         out = yaml.safe_load(s.to_yaml())
         rec = out["recommendations"][0]
+        # financial_impact is not a Recommendation field at all (jmy.23).
         assert "financial_impact" not in rec
         assert "evidence" not in rec
+
+    def test_to_yaml_metadata_includes_financial_impact_when_populated(self):
+        """jmy.23: SpecRecommendation.financial_impact lands in top-level metadata."""
+        fi = FinancialImpact(
+            estimated=5400.0,
+            currency="USD",
+            decisions_affected=1200,
+            failure_mode="false_negative",
+            volume_source="metric",
+        )
+        s = SpecRecommendation(
+            incident="INC-FI", generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
+            confidence=0.8,
+            recommendations=[
+                Recommendation(
+                    id="rec-test00000003",
+                    service="svc-a", type="tighten_slo",
+                    rationale="x", proposed_value=99.95,
+                ),
+            ],
+            financial_impact=fi,
+        )
+        out = yaml.safe_load(s.to_yaml())
+        meta_fi = out["metadata"]["financial_impact"]
+        assert meta_fi["estimated"] == 5400.0
+        assert meta_fi["currency"] == "USD"
+        assert meta_fi["decisions_affected"] == 1200
+        assert meta_fi["failure_mode"] == "false_negative"
+        assert meta_fi["volume_source"] == "metric"
+
+    def test_to_yaml_metadata_omits_financial_impact_when_none(self):
+        """jmy.23: absent FinancialImpact → metadata.financial_impact key absent."""
+        s = SpecRecommendation(
+            incident="INC-NOFI", generated_by="nthlayer-learn",
+            generated_at=datetime.now(timezone.utc),
+            confidence=0.5,
+            recommendations=[
+                Recommendation(
+                    id="rec-test00000004",
+                    service="svc", type="tighten_slo",
+                    rationale="x", proposed_value=99.95,
+                ),
+            ],
+        )
+        out = yaml.safe_load(s.to_yaml())
+        assert "financial_impact" not in out["metadata"]
+
+    def test_yaml_round_trip_preserves_financial_impact(self):
+        """jmy.23: every FinancialImpact subfield round-trips through YAML with correct type."""
+        fi = FinancialImpact(
+            estimated=5400.0,
+            currency="USD",
+            decisions_affected=1200,
+            failure_mode="false_negative",
+            volume_source="metric",
+        )
+        s = SpecRecommendation(
+            incident="INC-RT-FI", generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-test00000005",
+                    service="svc-a", type="tighten_slo",
+                    rationale="x", proposed_value=99.95,
+                ),
+            ],
+            financial_impact=fi,
+        )
+        loaded = yaml.safe_load(s.to_yaml())
+        meta_fi = loaded["metadata"]["financial_impact"]
+        assert isinstance(meta_fi["estimated"], float)
+        assert meta_fi["estimated"] == 5400.0
+        assert isinstance(meta_fi["decisions_affected"], int)
+        assert meta_fi["decisions_affected"] == 1200
+        assert isinstance(meta_fi["currency"], str)
+        assert meta_fi["currency"] == "USD"
+        assert isinstance(meta_fi["failure_mode"], str)
+        assert meta_fi["failure_mode"] == "false_negative"
+        assert isinstance(meta_fi["volume_source"], str)
+        assert meta_fi["volume_source"] == "metric"
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +373,45 @@ class TestAnalyzeIncidentAggregate:
         for orig, lit in zip(result.recommendations, loaded["recommendations"]):
             assert orig.type == lit["type"]
             assert orig.service == lit["service"]
+
+
+# ---------------------------------------------------------------------------
+# jmy.23: analyze_incident propagates retrospective financial_impact
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyzeIncidentFinancialImpact:
+    """jmy.23: analyze_incident reads retrospective_data["financial_impact"]
+    and attaches a FinancialImpact instance to the returned SpecRecommendation."""
+
+    def test_analyze_incident_propagates_financial_impact_when_present(self):
+        retro = _retrospective_with_breach(target=98.5, current=92.0)
+        retro["financial_impact"] = {
+            "estimated": 5400.0,
+            "currency": "USD",
+            "decisions_affected": 1200,
+            "failure_mode": "false_negative",
+            "volume_source": "metric",
+        }
+        result = analyze_incident(retro, "inc-test-1")
+        assert isinstance(result.financial_impact, FinancialImpact)
+        assert result.financial_impact.estimated == 5400.0
+        assert result.financial_impact.currency == "USD"
+        assert result.financial_impact.decisions_affected == 1200
+        assert result.financial_impact.failure_mode == "false_negative"
+        assert result.financial_impact.volume_source == "metric"
+
+    def test_analyze_incident_omits_financial_impact_when_absent(self):
+        retro = _retrospective_with_breach(target=98.5, current=92.0)
+        # No "financial_impact" key at all.
+        result = analyze_incident(retro, "inc-test-2")
+        assert result.financial_impact is None
+
+    def test_analyze_incident_omits_financial_impact_when_null(self):
+        retro = _retrospective_with_breach(target=98.5, current=92.0)
+        retro["financial_impact"] = None  # retrospective computed None
+        result = analyze_incident(retro, "inc-test-3")
+        assert result.financial_impact is None
 
 
 # ---------------------------------------------------------------------------
