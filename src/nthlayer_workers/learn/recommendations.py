@@ -334,10 +334,13 @@ def parse_plan_file(path) -> SpecRecommendation:
             raise PlanFileInvalidError(f"recommendation invalid: {exc}") from exc
 
     try:
+        generated_at_parsed = datetime.fromisoformat(generated_at_str)
+        if generated_at_parsed.tzinfo is None:
+            generated_at_parsed = generated_at_parsed.replace(tzinfo=timezone.utc)
         return SpecRecommendation(
             incident=metadata.get("incident", ""),
             generated_by=metadata.get("generated_by", "nthlayer-learn"),
-            generated_at=datetime.fromisoformat(generated_at_str),
+            generated_at=generated_at_parsed,
             confidence=metadata.get("confidence", 0.0),
             recommendations=recs,
             requires_human_review=metadata.get("requires_human_review", True),

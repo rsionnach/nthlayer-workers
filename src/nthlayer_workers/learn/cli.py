@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from datetime import datetime, timedelta, timezone
 
 from nthlayer_common.verdicts.serialise import to_dict
@@ -240,7 +241,8 @@ def _run_pr_path(plan, args, apply_result) -> None:
         check_remote(specs_dir)
         check_branch_available(specs_dir, branch)
     except PreflightError as exc:
-        raise SystemExit(f"Error: {exc}\n\nExit code: 2") from exc
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
 
     # Create branch
     _run_git(specs_dir, ["checkout", "-b", branch])
@@ -259,16 +261,17 @@ def _run_pr_path(plan, args, apply_result) -> None:
         cwd=specs_dir, capture_output=True, text=True, check=False,
     )
     if push.returncode != 0:
-        raise SystemExit(
+        print(
             f"Error: Push to origin failed\n\n"
             f"  git push failed: {push.stderr.strip()}\n\n"
             f"  Your manifest changes are committed on branch\n"
             f"  {branch} (local only).\n\n"
             f"  Options:\n"
             f"    Retry:   git push -u origin {branch}\n"
-            f"    Discard: git branch -D {branch}\n\n"
-            f"  Exit code: 1"
+            f"    Discard: git branch -D {branch}",
+            file=sys.stderr,
         )
+        raise SystemExit(1)
 
     # Create PR
     title = f"Apply NthLayer recommendations from {plan.incident}"
@@ -279,19 +282,20 @@ def _run_pr_path(plan, args, apply_result) -> None:
     )
 
     if not pr.ok:
-        raise SystemExit(
+        print(
             f"Error: PR creation failed\n\n"
             f"  gh pr create failed: {pr.error}\n\n"
             f"  Your manifest changes are committed on branch\n"
             f"  {branch}.\n\n"
             f"  Options:\n"
             f"    Retry:   gh pr create --base {args.base} --head {branch}\n"
-            f"    Discard: git branch -D {branch}\n\n"
-            f"  Exit code: 1"
+            f"    Discard: git branch -D {branch}",
+            file=sys.stderr,
         )
+        raise SystemExit(1)
 
     print(f"PR created: {pr.url}")
-    raise SystemExit(0)
+    return
 
 
 def _run_git(cwd, args: list[str]) -> None:

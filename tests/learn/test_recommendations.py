@@ -470,3 +470,19 @@ class TestParsePlanFile:
 
         with pytest.raises(PlanFileInvalidError, match="recommendations must be a list"):
             parse_plan_file(plan_path)
+
+    def test_parse_plan_file_coerces_naive_datetime_to_utc(self, tmp_path):
+        """jmy.6 P1 R5: naive generated_at coerced to UTC to prevent comparison bugs."""
+        from nthlayer_workers.learn.recommendations import parse_plan_file
+        from datetime import timezone
+
+        plan_path = tmp_path / "plan.yaml"
+        plan_path.write_text(
+            "apiVersion: nthlayer.io/learn/v1\n"
+            "kind: RecommendationPlan\n"
+            "metadata: {incident: x, generated_by: y, generated_at: '2026-05-01T10:00:00', confidence: 0.5, requires_human_review: true}\n"
+            "recommendations: []\n"
+        )
+
+        loaded = parse_plan_file(plan_path)
+        assert loaded.generated_at.tzinfo is timezone.utc
