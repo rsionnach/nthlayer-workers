@@ -408,6 +408,10 @@ def _normalize_blast_radius(raw: list[Any]) -> list[str]:
     ``list[{"service": str, ...}]``. Tolerate both so this heuristic
     doesn't depend on the retrospective normalisation step having run.
     Non-mapping / missing-service entries are silently dropped.
+
+    Duplicates are collapsed in first-seen order via ``dict.fromkeys`` —
+    an upstream blast_radius that lists the same service twice would
+    otherwise yield two recs with the same id (opensrm-jmy.21 P1 R5).
     """
     out: list[str] = []
     for item in raw:
@@ -417,7 +421,7 @@ def _normalize_blast_radius(raw: list[Any]) -> list[str]:
             svc = item.get("service")
             if isinstance(svc, str):
                 out.append(svc)
-    return out
+    return list(dict.fromkeys(out))
 
 
 def _add_dependency_recommendations(

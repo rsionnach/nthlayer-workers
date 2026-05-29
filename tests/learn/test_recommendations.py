@@ -488,6 +488,23 @@ class TestAddDependencyRecommendation:
         assert "svc-A" in rationale
         assert "svc-Y" in rationale
 
+    def test_duplicate_blast_services_collapse_to_one_rec(self):
+        """jmy.21 P1 R5: duplicate blast_radius entries must not yield
+        two recs sharing the same id. _normalize_blast_radius dedupes
+        first-seen so an upstream payload with repeats stays correct.
+        """
+        incident_custom = {
+            "trigger_service": "svc-A",
+            "blast_radius": ["svc-A", "svc-Y", "svc-Y", {"service": "svc-Y"}],
+            "declared_dependencies_by_service": {"svc-A": []},
+        }
+        from nthlayer_workers.learn.recommendations import (
+            _add_dependency_recommendations,
+        )
+        recs = _add_dependency_recommendations(incident_custom, "INC-DUP")
+        assert len(recs) == 1
+        assert recs[0].proposed_value == {"name": "svc-Y", "type": "unknown"}
+
     def test_analyze_incident_aggregates_add_dependency_with_others(self):
         """A retrospective that drives BOTH tighten_slo and add_dependency
         emits both, side-by-side in result.recommendations."""
