@@ -9,6 +9,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from nthlayer_common.verdicts.serialise import to_dict
 from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
@@ -208,7 +209,7 @@ def _cmd_recommendations(args: argparse.Namespace) -> None:
         )
         print(format_summary(apply_result), file=sys.stderr)
 
-    # --pr: create GitHub PR with manifest changes (full implementation in F3)
+    # --pr: create GitHub PR with manifest changes
     pr_result: PRResult | None = None
     if args.pr:
         pr_result = _run_pr_path(plan, args, apply_result)
@@ -216,7 +217,7 @@ def _cmd_recommendations(args: argparse.Namespace) -> None:
     if args.json:
         applied = apply_result.applied if apply_result is not None else []
         skipped = apply_result.skipped if apply_result is not None else []
-        doc: dict = {
+        doc: dict[str, Any] = {
             "applied": [
                 {"id": o.id, "service": o.service, "field": o.field}
                 for o in applied
