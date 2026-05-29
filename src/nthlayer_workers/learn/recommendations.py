@@ -403,7 +403,7 @@ def _normalize_blast_radius(raw: list[Any]) -> list[str]:
     """Normalise a blast_radius payload to ``list[str]``.
 
     Retrospective metadata.custom["blast_radius"] is written as
-    ``list[str]`` (retrospective.py:154-157), but the input shape from
+    ``list[str]`` by ``build_retrospective``, but the input shape from
     upstream correlation custom payloads can be either ``list[str]`` or
     ``list[{"service": str, ...}]``. Tolerate both so this heuristic
     doesn't depend on the retrospective normalisation step having run.

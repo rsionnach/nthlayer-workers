@@ -19,10 +19,14 @@ from typing import Any, Iterable
 import yaml as pyyaml  # lightweight read for the discovery walk only
 
 from nthlayer_workers.learn.recommendations import (
-    OutcomeKind, Recommendation, SpecRecommendation,
+    OutcomeKind, SpecRecommendation,
 )
 from nthlayer_workers.learn._yaml import (
-    apply_at_path, classify_outcome, get_yaml_round_trip, resolve_path,
+    LIST_APPEND_SIGIL,
+    apply_at_path,
+    classify_outcome,
+    get_yaml_round_trip,
+    resolve_path,
 )
 
 
@@ -154,8 +158,8 @@ def apply_recommendations(
         # classify_outcome both still see the sigil-bearing rec.field
         # and switch into list-append mode.
         lookup_path = rec.field or ""
-        if lookup_path.endswith("[+]"):
-            lookup_path = lookup_path[:-3]
+        if lookup_path.endswith(LIST_APPEND_SIGIL):
+            lookup_path = lookup_path[: -len(LIST_APPEND_SIGIL)]
         manifest_value = resolve_path(doc, lookup_path)
         outcome = classify_outcome(manifest_value, rec)
 

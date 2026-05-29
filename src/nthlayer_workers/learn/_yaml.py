@@ -19,6 +19,13 @@ from nthlayer_workers.learn.recommendations import OutcomeKind, Recommendation
 # from a real None-valued leaf.
 PATH_MISSING = object()
 
+# Suffix on a Recommendation.field that switches apply + classify into
+# list-append mode (opensrm-jmy.21). Centralised so the three call sites
+# — _apply.resolve_path strip, apply_at_path dispatch, classify_outcome
+# dispatch — stay in sync. Search this symbol to find every site that
+# implements the append convention.
+LIST_APPEND_SIGIL = "[+]"
+
 
 def get_yaml_round_trip() -> YAML:
     """Factory for a YAML() configured for comment-preserving round-trip.
@@ -79,11 +86,11 @@ def apply_at_path(doc: Any, dotted_path: str, value: Any) -> None:
     if not dotted_path:
         raise ValueError("apply_at_path requires a non-empty dotted_path")
 
-    if dotted_path.endswith("[+]"):
+    if dotted_path.endswith(LIST_APPEND_SIGIL):
         # List-append sigil (opensrm-jmy.21). Walk to the leaf's parent,
         # creating intermediate mappings as needed (same convention as
         # the set-path branch below), then append to / create the list.
-        base_path = dotted_path[:-3]
+        base_path = dotted_path[: -len(LIST_APPEND_SIGIL)]
         if not base_path:
             raise ValueError("apply_at_path '[+]' sigil requires a non-empty base path")
         keys = base_path.split(".")
@@ -203,7 +210,7 @@ def classify_outcome(manifest_value: Any, rec: Recommendation) -> OutcomeKind:
     Type-tolerant scalar comparison via normalize_scalar; structural
     (dict/list) comparison is exact.
     """
-    if rec.field and rec.field.endswith("[+]"):
+    if rec.field and rec.field.endswith(LIST_APPEND_SIGIL):
         # List-append table (opensrm-jmy.21 add_dependency). current_value
         # is always None for append recs (the path either doesn't exist
         # yet or holds a list of items; "current" is not a scalar).
