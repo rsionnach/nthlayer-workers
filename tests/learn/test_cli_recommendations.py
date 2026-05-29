@@ -1099,7 +1099,8 @@ class TestIncludeExcludeFlags:
                 "--exclude", "rec-def",
             ])
 
-    def test_include_unknown_id_rejected(self, tmp_path):
+    def test_include_unknown_id_rejected(self, tmp_path, capsys):
+        """jmy.24 P1 R5: unknown id → SystemExit(2) + stderr message."""
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_specs_dir(tmp_path)
@@ -1111,10 +1112,13 @@ class TestIncludeExcludeFlags:
                 "--apply-to", str(specs_dir),
                 "--include", "rec-typo",
             ])
-        msg = str(exc.value.code) if exc.value.code is not None else ""
-        assert "not found in plan" in msg
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "not found in plan" in err
+        assert "rec-typo" in err
 
-    def test_include_multiple_unknown_ids_reported_together(self, tmp_path):
+    def test_include_multiple_unknown_ids_reported_together(self, tmp_path, capsys):
+        """jmy.24 P1 R5: stderr lists every unknown id in one message."""
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_specs_dir(tmp_path)
@@ -1126,9 +1130,28 @@ class TestIncludeExcludeFlags:
                 "--apply-to", str(specs_dir),
                 "--include", "rec-typo1,rec-typo2",
             ])
-        msg = str(exc.value.code) if exc.value.code is not None else ""
-        assert "rec-typo1" in msg
-        assert "rec-typo2" in msg
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "rec-typo1" in err
+        assert "rec-typo2" in err
+
+    def test_include_duplicate_unknown_id_reported_once(self, tmp_path, capsys):
+        """jmy.24 P1 R5: duplicate input ids are dedup'd in the error message."""
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        plan_in = self._build_single_rec_plan(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--include", "rec-typo,rec-typo",
+            ])
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        # "rec-typo" appears exactly once in the missing list.
+        assert err.count("rec-typo") == 1
 
     def test_include_filters_plan_to_subset(self, tmp_path, capsys):
         """--include rec-abc only → JSON's applied contains only rec-abc."""

@@ -220,12 +220,23 @@ def _cmd_recommendations(args: argparse.Namespace) -> None:
         requested = (args.include or args.exclude).split(",")
         requested = [s.strip() for s in requested if s.strip()]
         plan_ids = {r.id for r in plan.recommendations}
-        missing = [rid for rid in requested if rid not in plan_ids]
+        # Dedup missing list preserving first-seen order so a user passing
+        # `--include rec-typo,rec-typo` doesn't see the same id twice.
+        missing = list(dict.fromkeys(
+            rid for rid in requested if rid not in plan_ids
+        ))
         if missing:
             joined = ", ".join(missing)
-            raise SystemExit(
-                f"error: --include/--exclude id(s) not found in plan: {joined}"
+            # Print to stderr + raise SystemExit(2) — int exit code per the
+            # locked contract. (--apply-to / --pr requirement checks above
+            # use string-SystemExit which exits 1; that pre-flight tier is
+            # informational, the unknown-id tier is a data error worth its
+            # own non-default exit code.)
+            print(
+                f"error: --include/--exclude id(s) not found in plan: {joined}",
+                file=sys.stderr,
             )
+            raise SystemExit(2)
         if args.include:
             keep = set(requested)
             plan.recommendations = [r for r in plan.recommendations if r.id in keep]
