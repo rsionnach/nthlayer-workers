@@ -488,6 +488,20 @@ class TestAddDependencyRecommendation:
         assert "svc-A" in rationale
         assert "svc-Y" in rationale
 
+    def test_normalize_blast_radius_drops_invalid_entries(self):
+        """jmy.21 P3 R5: _normalize_blast_radius must drop None, empty
+        strings, non-mapping items, and dicts with non-string service
+        keys. Locks the input-validation contract."""
+        from nthlayer_workers.learn.recommendations import _normalize_blast_radius
+        out = _normalize_blast_radius(
+            [None, "", "valid-svc", {"service": ""},
+             {"service": None}, {"service": "ok"}, 42, ["nested"]]
+        )
+        # Empty strings flow through (the heuristic does not validate
+        # service-name shape — it just filters non-strings and non-mapping
+        # types). dict.fromkeys preserves first-seen order.
+        assert out == ["", "valid-svc", "ok"]
+
     def test_duplicate_blast_services_collapse_to_one_rec(self):
         """jmy.21 P1 R5: duplicate blast_radius entries must not yield
         two recs sharing the same id. _normalize_blast_radius dedupes

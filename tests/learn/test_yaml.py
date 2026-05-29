@@ -424,3 +424,50 @@ class TestSigilAppend:
         )
         assert classify_outcome(["a", "b"], rec) == OutcomeKind.ALREADY_APPLIED
         assert classify_outcome(["b", "c"], rec) == OutcomeKind.APPLY_CLEAN
+
+    # ---- jmy.21 P3 R5 coverage gaps ----
+
+    def test_apply_at_path_raises_on_none_doc(self):
+        """jmy.21 P3 R5: doc=None must raise structural TypeError, not
+        the cryptic 'NoneType is not iterable' from key membership."""
+        from nthlayer_workers.learn._yaml import apply_at_path
+        with pytest.raises(TypeError, match="non-mapping document"):
+            apply_at_path(None, "spec.dependencies[+]", {"name": "x"})
+
+    def test_apply_at_path_raises_on_bare_sigil(self):
+        """jmy.21 P3 R5: `[+]` with no base path raises ValueError."""
+        from nthlayer_workers.learn._yaml import apply_at_path
+        with pytest.raises(ValueError, match="non-empty base path"):
+            apply_at_path({}, "[+]", {"name": "x"})
+
+    def test_apply_at_path_sigil_raises_on_non_mapping_intermediate(self):
+        """jmy.21 P3 R5: sigil descent through a scalar intermediate
+        raises the same structural TypeError as the set-path branch."""
+        from nthlayer_workers.learn._yaml import apply_at_path
+        doc = {"spec": 5}
+        with pytest.raises(TypeError, match="non-mapping"):
+            apply_at_path(doc, "spec.deps[+]", {"name": "x"})
+
+    def test_classify_outcome_append_mixed_list_scalar_and_dict(self):
+        """jmy.21 P3 R5: a list containing both scalars and dicts must
+        still match the proposed dict-with-name against existing dicts
+        (scalar items skipped by the type guard)."""
+        from nthlayer_workers.learn._yaml import classify_outcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind, Recommendation
+
+        rec = Recommendation(
+            id="rec-deadbeef0130",
+            service="svc-A",
+            type="add_dependency",
+            rationale="test",
+            field="spec.dependencies[+]",
+            current_value=None,
+            proposed_value={"name": "svc-Y"},
+        )
+        # Scalar "a-string" is silently skipped; dict-with-name matches.
+        assert classify_outcome(
+            ["a-string", {"name": "svc-Y", "type": "api"}], rec,
+        ) == OutcomeKind.ALREADY_APPLIED
+        assert classify_outcome(
+            ["a-string", {"name": "svc-Z"}], rec,
+        ) == OutcomeKind.APPLY_CLEAN

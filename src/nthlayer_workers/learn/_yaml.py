@@ -86,6 +86,15 @@ def apply_at_path(doc: Any, dotted_path: str, value: Any) -> None:
     if not dotted_path:
         raise ValueError("apply_at_path requires a non-empty dotted_path")
 
+    # An empty / null manifest (e.g. a file with `---` only) loads to
+    # None. Guard up-front so both branches below get a clear structural
+    # TypeError instead of the cryptic `'NoneType' is not iterable`.
+    if not isinstance(doc, dict):
+        raise TypeError(
+            f"cannot apply path to non-mapping document "
+            f"(got {type(doc).__name__})"
+        )
+
     if dotted_path.endswith(LIST_APPEND_SIGIL):
         # List-append sigil (opensrm-jmy.21). Walk to the leaf's parent,
         # creating intermediate mappings as needed (same convention as

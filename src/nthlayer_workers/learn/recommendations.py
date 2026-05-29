@@ -452,6 +452,11 @@ def _add_dependency_recommendations(
     ]
     recs: list[Recommendation] = []
     for svc in undeclared:
+        # field_path includes svc only for hashing — distinguishes
+        # per-svc recs in the same incident. rec.field is the actual
+        # YAML target ("spec.dependencies[+]") and is identical across
+        # the per-incident recs; the apply layer uses rec.proposed_value
+        # to disambiguate which item to append.
         field_path = f"spec.dependencies[+].{svc}"
         recs.append(Recommendation(
             id=compute_rec_id(incident_id, "add_dependency", field_path),
