@@ -9,12 +9,15 @@ app, runs it, and returns the finalized plan.
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 
+import structlog
 import yaml
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Input, Static
 
+from nthlayer_workers.learn._apply import resolve_manifest_path
 from nthlayer_workers.learn._interactive import (
     WalkthroughState,
     accept,
@@ -26,6 +29,8 @@ from nthlayer_workers.learn._interactive import (
 )
 from nthlayer_workers.learn._preview import build_preview
 from nthlayer_workers.learn.recommendations import SpecRecommendation
+
+log = structlog.get_logger(__name__)
 
 
 class InteractiveWalkthroughApp(App[SpecRecommendation]):
@@ -88,10 +93,6 @@ class InteractiveWalkthroughApp(App[SpecRecommendation]):
         render a minimal current→proposed block from rec fields alone."""
         if self._specs_dir:
             try:
-                from pathlib import Path
-
-                from nthlayer_workers.learn._apply import resolve_manifest_path
-
                 m_path = resolve_manifest_path(rec.service, Path(self._specs_dir))
                 if m_path:
                     preview = build_preview(
@@ -101,8 +102,16 @@ class InteractiveWalkthroughApp(App[SpecRecommendation]):
                     )
                     if preview:
                         return f"{preview}\nRationale: {rec.rationale}"
-            except Exception:
-                pass
+            except Exception as exc:
+                # Preview failed (manifest unreadable, path resolution edge
+                # case, etc.) — fall through to the simple block. Log so
+                # operators investigating a missing rich diff have a trace.
+                log.warning(
+                    "interactive_preview_failed",
+                    rec_id=rec.id,
+                    service=rec.service,
+                    error=str(exc),
+                )
         # Fallback: simple current → proposed block. When rec.field is
         # None (legitimate for placeholder recs like add_deploy_gate with
         # no breached SLO), key the YAML block by rec.type so the operator
