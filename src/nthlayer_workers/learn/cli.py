@@ -16,6 +16,7 @@ from nthlayer_common.verdicts.store import AccuracyFilter, VerdictFilter
 from nthlayer_workers.learn._apply import apply_recommendations, format_summary
 from nthlayer_workers.learn._gh import (
     PreflightError,
+    PRResult,
     check_branch_available,
     check_gh_auth,
     check_gh_installed,
@@ -172,6 +173,8 @@ def _add_recommendations_subcommand(subparsers) -> None:
                     help="Create the PR as a draft")
     p.add_argument("--specs-dir",
                     help="For --output: include preview field per recommendation")
+    p.add_argument("--json", action="store_true",
+                    help="Emit a single structured JSON document to stdout at end-of-run (requires --apply-to)")
 
     p.set_defaults(func=_cmd_recommendations)
 
@@ -181,6 +184,8 @@ def _cmd_recommendations(args: argparse.Namespace) -> None:
     # Validation: --pr requires --apply-to
     if args.pr and not args.apply_to:
         raise SystemExit("error: --pr requires --apply-to")
+    if args.json and not args.apply_to:
+        raise SystemExit("error: --json requires --apply-to")
 
     # Resolve input source
     if args.from_path:
@@ -204,8 +209,55 @@ def _cmd_recommendations(args: argparse.Namespace) -> None:
         print(format_summary(apply_result), file=sys.stderr)
 
     # --pr: create GitHub PR with manifest changes (full implementation in F3)
+    pr_result: PRResult | None = None
     if args.pr:
-        _run_pr_path(plan, args, apply_result)
+        pr_result = _run_pr_path(plan, args, apply_result)
+
+    if args.json:
+        applied = apply_result.applied if apply_result is not None else []
+        skipped = apply_result.skipped if apply_result is not None else []
+        doc: dict = {
+            "applied": [
+                {"id": o.id, "service": o.service, "field": o.field}
+                for o in applied
+            ],
+            "skipped": [
+                {"id": o.id, "service": o.service,
+                 "outcome": o.outcome.value, "detail": o.detail}
+                for o in skipped
+            ],
+            "pr_url": pr_result.url if pr_result else None,
+            "pr_number": pr_result.number if pr_result else None,
+        }
+        exit_code = apply_result.exit_code if apply_result is not None else 0
+        if pr_result is not None and not pr_result.ok:
+            # Prefix matches the stderr error template in non-JSON mode so
+            # operators see the same phrasing in both output modes.
+            doc["pr_error"] = f"gh pr create failed: {pr_result.error}"
+            exit_code = 1
+        doc["exit_code"] = exit_code
+        print(json.dumps(doc), file=sys.stdout)
+        if exit_code != 0:
+            raise SystemExit(exit_code)
+        return
+
+    # Non-JSON mode: emit PR outcome (success URL to stdout, error block to stderr)
+    if pr_result is not None:
+        if not pr_result.ok:
+            branch = f"learn/recommendations/{plan.incident}"
+            print(
+                f"Error: PR creation failed\n\n"
+                f"  gh pr create failed: {pr_result.error}\n\n"
+                f"  Your manifest changes are committed on branch\n"
+                f"  {branch}.\n\n"
+                f"  Options:\n"
+                f"    Retry:   gh pr create --base {args.base} --head {branch}\n"
+                f"    Discard: git branch -D {branch}\n\n"
+                f"  Exit code: 1",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        print(f"PR created: {pr_result.url}")
 
     # Exit code: from apply if --apply-to was used, else 0
     if apply_result is not None and apply_result.exit_code != 0:
@@ -226,11 +278,17 @@ def _build_plan_from_incident(incident_id: str):
     )
 
 
-def _run_pr_path(plan, args, apply_result) -> None:
-    """Drive the --pr workflow: pre-flight + branch + commit + push + PR."""
+def _run_pr_path(plan, args, apply_result) -> PRResult | None:
+    """Drive the --pr workflow: pre-flight + branch + commit + push + PR.
+
+    Returns the PRResult from `gh pr create` (success or soft-failure), or None
+    when no PR was attempted (nothing applied). Hard failures — preflight, git
+    commit, git push — still raise SystemExit because they happen before/around
+    the apply and don't fit the end-of-run JSON model.
+    """
     if apply_result is None or not apply_result.modified_files:
         # Nothing was changed; no PR to open
-        return
+        return None
 
     if not _VALID_INCIDENT_ID_RE.match(plan.incident):
         print(
@@ -297,21 +355,9 @@ def _run_pr_path(plan, args, apply_result) -> None:
         base=args.base, draft=args.draft,
     )
 
-    if not pr.ok:
-        print(
-            f"Error: PR creation failed\n\n"
-            f"  gh pr create failed: {pr.error}\n\n"
-            f"  Your manifest changes are committed on branch\n"
-            f"  {branch}.\n\n"
-            f"  Options:\n"
-            f"    Retry:   gh pr create --base {args.base} --head {branch}\n"
-            f"    Discard: git branch -D {branch}\n\n"
-            f"  Exit code: 1",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
-    print(f"PR created: {pr.url}")
+    # Soft-failure (pr.ok == False) and success both return to caller — the
+    # caller decides between human-readable stderr and structured JSON output.
+    return pr
 
 
 def _run_git(cwd, args: list[str]) -> None:

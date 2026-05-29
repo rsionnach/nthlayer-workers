@@ -466,3 +466,403 @@ class TestExitCodes:
 
         # Partial-skip (1 applied + 1 skipped) → exit code 1, not 0
         assert exc_info.value.code == 1
+
+
+class TestJsonOutput:
+    """opensrm-jmy.25: --json structured output for the recommendations CLI.
+
+    Contract:
+      - --json requires --apply-to (pre-flight error mirrors --pr).
+      - End-of-run emits a single JSON document on stdout.
+      - format_summary continues to go to stderr.
+      - The human-readable "PR created: ..." stdout line is suppressed
+        in --json mode (URL surfaces inside the JSON instead).
+      - PR-failure shape adds a "pr_error" key; exit_code=1.
+    """
+
+    @staticmethod
+    def _build_single_rec_plan(tmp_path, *, incident: str = "inc-jmy25"):
+        """Helper: write a one-recommendation plan.yaml and return its path."""
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation, Recommendation,
+        )
+        from datetime import datetime, timezone
+
+        plan = SpecRecommendation(
+            incident=incident,
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-deadbeef0123",
+                    service="fraud-detect",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+            ],
+        )
+        plan_in = tmp_path / "in.yaml"
+        plan_in.write_text(plan.to_yaml())
+        return plan_in
+
+    @staticmethod
+    def _seed_specs_dir(tmp_path):
+        specs_dir = tmp_path / "specs"
+        specs_dir.mkdir()
+        (specs_dir / "fraud-detect.yaml").write_text(
+            "metadata:\n  name: fraud-detect\n"
+            "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+        )
+        return specs_dir
+
+    @staticmethod
+    def _build_pr_fake_run(*, pr_url: str = "https://github.com/x/y/pull/42",
+                           pr_stderr: str | None = None):
+        """Build a subprocess.run stub that walks the full --pr workflow.
+
+        If pr_stderr is None → gh pr create succeeds with pr_url on stdout.
+        If pr_stderr is set  → gh pr create exits non-zero, stderr=pr_stderr.
+        """
+        import subprocess
+
+        def fake_run(args, **kwargs):
+            if args[:2] == ["gh", "--version"]:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="gh 2.x", stderr="")
+            if args[:3] == ["gh", "auth", "status"]:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="logged in", stderr="")
+            if "rev-parse" in args:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout=".git", stderr="")
+            if "remote" in args and "get-url" in args:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="git@github.com:x/y.git", stderr="")
+            if "show-ref" in args:
+                return subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr="")
+            if "ls-remote" in args:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+            if args[:3] == ["gh", "pr", "create"]:
+                if pr_stderr is not None:
+                    return subprocess.CompletedProcess(
+                        args=args, returncode=1, stdout="", stderr=pr_stderr,
+                    )
+                return subprocess.CompletedProcess(
+                    args=args, returncode=0, stdout=f"{pr_url}\n", stderr="",
+                )
+            # All other git subcommands succeed
+            if args[0] == "git":
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+        return fake_run
+
+    def test_json_requires_apply_to(self, tmp_path, capsys):
+        """--json without --apply-to raises SystemExit mirroring --pr's guard."""
+        from nthlayer_workers.learn.cli import main
+
+        plan_in = self._build_single_rec_plan(tmp_path)
+
+        with pytest.raises(SystemExit) as exc_info:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--json",
+            ])
+
+        # Message-shape contract from the implementation bead.
+        # SystemExit may carry the message as .code (str) for argparse-style exits.
+        msg = str(exc_info.value.code) if exc_info.value.code is not None else ""
+        assert "--json requires --apply-to" in msg
+
+    def test_json_apply_clean_emits_valid_json_to_stdout(self, tmp_path, capsys):
+        """Happy --apply-to --json: stdout parses to the documented shape."""
+        import json
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        plan_in = self._build_single_rec_plan(tmp_path)
+
+        main([
+            "recommendations",
+            "--from", str(plan_in),
+            "--apply-to", str(specs_dir),
+            "--json",
+        ])
+
+        out = capsys.readouterr().out
+        doc = json.loads(out)
+        assert isinstance(doc, dict)
+        assert len(doc["applied"]) == 1
+        entry = doc["applied"][0]
+        assert {"id", "service", "field"} <= set(entry.keys())
+        assert entry["id"] == "rec-deadbeef0123"
+        assert entry["service"] == "fraud-detect"
+        assert entry["field"] == "spec.slos.judgment.target"
+        assert doc["skipped"] == []
+        assert doc["pr_url"] is None
+        assert doc["pr_number"] is None
+        assert doc["exit_code"] == 0
+        assert "pr_error" not in doc
+
+    def test_json_with_skipped_recs_round_trips_outcome_and_detail(
+        self, tmp_path, capsys,
+    ):
+        """Skipped recommendations surface as JSON entries with outcome+detail.
+
+        We trigger MANIFEST_NOT_FOUND naturally by referencing a service whose
+        manifest isn't in specs_dir — apply_recommendations populates the
+        detail string with the canonical "no manifest for service ..." text,
+        which the --json emitter must round-trip verbatim.
+        """
+        import json
+        from nthlayer_workers.learn.cli import main
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation, Recommendation,
+        )
+        from datetime import datetime, timezone
+
+        # specs_dir is empty — every recommendation will be MANIFEST_NOT_FOUND.
+        specs_dir = tmp_path / "specs"
+        specs_dir.mkdir()
+
+        plan = SpecRecommendation(
+            incident="inc-skip-detail",
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-skipped-0001",
+                    service="missing-svc",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+            ],
+        )
+        plan_in = tmp_path / "in.yaml"
+        plan_in.write_text(plan.to_yaml())
+
+        with pytest.raises(SystemExit):
+            # Zero APPLY_CLEAN + skipped → exit 2 per ApplyResult.exit_code
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--json",
+            ])
+
+        out = capsys.readouterr().out
+        doc = json.loads(out)
+        assert len(doc["skipped"]) == 1
+        skipped = doc["skipped"][0]
+        assert {"id", "service", "outcome", "detail"} <= set(skipped.keys())
+        assert skipped["id"] == "rec-skipped-0001"
+        assert skipped["service"] == "missing-svc"
+        # OutcomeKind is a StrEnum: value is "manifest_not_found"
+        assert skipped["outcome"] == "manifest_not_found"
+        assert "missing-svc" in skipped["detail"]
+
+    def test_json_with_pr_happy_path_includes_pr_url_and_number(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """--apply-to --pr --json: pr_url/pr_number populated from gh output."""
+        import json
+        import subprocess
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        plan_in = self._build_single_rec_plan(tmp_path)
+
+        monkeypatch.setattr(
+            subprocess, "run",
+            self._build_pr_fake_run(pr_url="https://github.com/x/y/pull/42"),
+        )
+
+        main([
+            "recommendations",
+            "--from", str(plan_in),
+            "--apply-to", str(specs_dir),
+            "--pr",
+            "--json",
+        ])
+
+        out = capsys.readouterr().out
+        doc = json.loads(out)
+        assert doc["pr_url"] == "https://github.com/x/y/pull/42"
+        assert doc["pr_number"] == 42
+        assert doc["exit_code"] == 0
+        assert "pr_error" not in doc
+
+    def test_json_with_pr_failure_includes_pr_error_and_exit_code_one(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """gh pr create failure: pr_error populated, nulls for url/number, exit 1."""
+        import json
+        import subprocess
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        plan_in = self._build_single_rec_plan(tmp_path)
+
+        monkeypatch.setattr(
+            subprocess, "run",
+            self._build_pr_fake_run(pr_stderr="gh: command failed: rate limited"),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--pr",
+                "--json",
+            ])
+
+        # Process must exit 1 on PR failure even in --json mode.
+        assert exc_info.value.code == 1
+
+        out = capsys.readouterr().out
+        doc = json.loads(out)
+        assert doc["pr_url"] is None
+        assert doc["pr_number"] is None
+        assert isinstance(doc["pr_error"], str)
+        # Contract: error string mentions the failing command.
+        assert "gh pr create" in doc["pr_error"]
+        assert doc["exit_code"] == 1
+
+    def test_json_format_summary_still_on_stderr(self, tmp_path, capsys):
+        """format_summary continues to go to stderr in --json mode."""
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        plan_in = self._build_single_rec_plan(tmp_path)
+
+        main([
+            "recommendations",
+            "--from", str(plan_in),
+            "--apply-to", str(specs_dir),
+            "--json",
+        ])
+
+        captured = capsys.readouterr()
+        # Distinctive token from format_summary() — it always emits "Exit code: N".
+        assert "Exit code:" in captured.err
+
+    def test_json_suppresses_human_readable_pr_url_stdout_line(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """--json suppresses the `print(f"PR created: {pr.url}")` line.
+
+        Strongest assertion: captured stdout parses cleanly as a SINGLE JSON
+        document — i.e. nothing concatenated after. We assert both: one line
+        only, and json.loads succeeds without raising.
+        """
+        import json
+        import subprocess
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        plan_in = self._build_single_rec_plan(tmp_path)
+
+        monkeypatch.setattr(
+            subprocess, "run",
+            self._build_pr_fake_run(pr_url="https://github.com/x/y/pull/42"),
+        )
+
+        main([
+            "recommendations",
+            "--from", str(plan_in),
+            "--apply-to", str(specs_dir),
+            "--pr",
+            "--json",
+        ])
+
+        out = capsys.readouterr().out
+        # Must parse — defends against trailing "PR created: ..." text.
+        json.loads(out)
+        # And must be a single logical line of output.
+        assert len(out.strip().splitlines()) == 1
+        # Belt-and-braces: the legacy human-readable token must NOT appear.
+        assert "PR created:" not in out
+
+    def test_json_exit_codes_match_non_json_mode(self, tmp_path, capsys):
+        """--json must not change exit-code routing for the same apply outcome.
+
+        Set up a partial-skip scenario (one applied, one MANIFEST_NOT_FOUND)
+        and assert exit code is 1 in BOTH --apply-to alone and --apply-to --json.
+        """
+        from nthlayer_workers.learn.cli import main
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation, Recommendation,
+        )
+        from datetime import datetime, timezone
+
+        def _seed_partial(root):
+            specs_dir = root / "specs"
+            specs_dir.mkdir()
+            (specs_dir / "fraud-detect.yaml").write_text(
+                "metadata:\n  name: fraud-detect\n"
+                "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+            )
+            plan = SpecRecommendation(
+                incident="inc-partial",
+                generated_by="nthlayer-learn",
+                generated_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+                confidence=0.7,
+                recommendations=[
+                    Recommendation(
+                        id="rec-deadbeef0001",
+                        service="fraud-detect",
+                        type="tighten_slo",
+                        rationale="test",
+                        field="spec.slos.judgment.target",
+                        current_value=95.0,
+                        proposed_value=98.5,
+                    ),
+                    Recommendation(
+                        id="rec-deadbeef0002",
+                        service="missing-svc",
+                        type="tighten_slo",
+                        rationale="test",
+                        field="spec.slos.judgment.target",
+                        current_value=95.0,
+                        proposed_value=98.5,
+                    ),
+                ],
+            )
+            plan_in = root / "in.yaml"
+            plan_in.write_text(plan.to_yaml())
+            return specs_dir, plan_in
+
+        # Run 1: --apply-to alone (no --json) → expect exit 1
+        root_a = tmp_path / "a"
+        root_a.mkdir()
+        specs_a, plan_a = _seed_partial(root_a)
+        with pytest.raises(SystemExit) as exc_no_json:
+            main([
+                "recommendations",
+                "--from", str(plan_a),
+                "--apply-to", str(specs_a),
+            ])
+        non_json_code = exc_no_json.value.code
+
+        # Run 2: --apply-to --json → must match
+        root_b = tmp_path / "b"
+        root_b.mkdir()
+        specs_b, plan_b = _seed_partial(root_b)
+        with pytest.raises(SystemExit) as exc_json:
+            main([
+                "recommendations",
+                "--from", str(plan_b),
+                "--apply-to", str(specs_b),
+                "--json",
+            ])
+        json_code = exc_json.value.code
+
+        assert non_json_code == 1
+        assert json_code == 1
+        assert non_json_code == json_code
