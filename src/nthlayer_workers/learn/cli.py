@@ -176,6 +176,8 @@ def _add_recommendations_subcommand(subparsers) -> None:
                     help="For --output: include preview field per recommendation")
     p.add_argument("--json", action="store_true",
                     help="Emit a single structured JSON document to stdout at end-of-run (requires --apply-to)")
+    p.add_argument("--interactive", action="store_true",
+                    help="Walk recommendations in a TUI (a/r/m/n/p/q). Requires --apply-to or --output.")
 
     selection_group = p.add_mutually_exclusive_group()
     selection_group.add_argument(
@@ -201,6 +203,10 @@ def _cmd_recommendations(args: argparse.Namespace) -> None:
         raise SystemExit("error: --json requires --apply-to")
     if (args.include or args.exclude) and not args.apply_to:
         raise SystemExit("error: --include/--exclude requires --apply-to")
+    if args.interactive and not (args.apply_to or args.output):
+        raise SystemExit("error: --interactive requires --apply-to or --output")
+    if args.interactive and args.json:
+        raise SystemExit("error: --interactive and --json are mutually exclusive")
 
     # Resolve input source
     if args.from_path:
@@ -240,6 +246,14 @@ def _cmd_recommendations(args: argparse.Namespace) -> None:
         else:  # args.exclude
             drop = set(requested)
             plan.recommendations = [r for r in plan.recommendations if r.id not in drop]
+
+    # --interactive: walk the (post-filter) plan in a TUI; user decides
+    # accept/reject/modify per rec. Returns a new plan containing only
+    # accepted recs (with any modifications applied). Runs BEFORE
+    # --output so the snapshot reflects the operator's final selection.
+    if args.interactive:
+        from nthlayer_workers.learn._interactive_app import run_walkthrough
+        plan = run_walkthrough(plan, specs_dir=args.apply_to)
 
     # --output: write plan to file (post-filter so it reflects the
     # effective plan, opensrm-jmy.24 P3 R5).

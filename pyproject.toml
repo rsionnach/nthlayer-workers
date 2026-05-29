@@ -24,6 +24,7 @@ dependencies = [
     # tests; declared as a top-level production dep.
     "python-multipart>=0.0.18",
     "ruamel.yaml>=0.18",
+    "textual>=1.0",
 ]
 
 [project.scripts]

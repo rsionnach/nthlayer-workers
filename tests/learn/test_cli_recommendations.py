@@ -1435,3 +1435,259 @@ class TestIncludeExcludeFlags:
             ])
         assert exc.value.code == 2
         assert "not found in plan" in capsys.readouterr().err
+
+
+class TestInteractiveFlag:
+    """opensrm-jmy.22: --interactive launches the TUI walkthrough.
+
+    Contract:
+      - --interactive requires --apply-to or --output (pre-flight error).
+      - --interactive and --json are mutually exclusive (pre-flight error).
+      - After the --include/--exclude filter, dispatch calls
+        run_walkthrough(plan, specs_dir=args.apply_to) from
+        nthlayer_workers.learn._interactive_app; the returned plan flows
+        into --output / --apply-to / --pr as the effective plan.
+    """
+
+    @staticmethod
+    def _seed_specs_dir(tmp_path):
+        specs_dir = tmp_path / "specs"
+        specs_dir.mkdir()
+        (specs_dir / "fraud-detect.yaml").write_text(
+            "metadata:\n  name: fraud-detect\n"
+            "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+        )
+        return specs_dir
+
+    @staticmethod
+    def _build_single_rec_plan(tmp_path, *, incident: str = "inc-jmy22"):
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation, Recommendation,
+        )
+        from datetime import datetime, timezone
+
+        plan = SpecRecommendation(
+            incident=incident,
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-aaaaaaaaaaaa",
+                    service="fraud-detect",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+            ],
+        )
+        plan_in = tmp_path / "in.yaml"
+        plan_in.write_text(plan.to_yaml())
+        return plan_in
+
+    @staticmethod
+    def _build_multi_rec_plan(tmp_path, *, incident: str = "inc-jmy22-multi"):
+        """Two recommendations with distinct rec ids ('rec-A' / 'rec-B')."""
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation, Recommendation,
+        )
+        from datetime import datetime, timezone
+
+        plan = SpecRecommendation(
+            incident=incident,
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-A",
+                    service="fraud-detect",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+                Recommendation(
+                    id="rec-B",
+                    service="fraud-detect",
+                    type="add_deploy_gate",
+                    rationale="test",
+                    field="spec.gates.judgment_quality",
+                    current_value=None,
+                    proposed_value={"block_on": "judgment_quality"},
+                ),
+            ],
+        )
+        plan_in = tmp_path / "in.yaml"
+        plan_in.write_text(plan.to_yaml())
+        return plan_in
+
+    def test_interactive_requires_apply_to_or_output(self, tmp_path):
+        from nthlayer_workers.learn.cli import main
+
+        plan_in = self._build_single_rec_plan(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--interactive",
+            ])
+        msg = str(exc.value.code) if exc.value.code is not None else ""
+        assert "requires --apply-to or --output" in msg
+
+    def test_interactive_and_json_mutually_exclusive(self, tmp_path):
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        plan_in = self._build_single_rec_plan(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--interactive",
+                "--json",
+            ])
+        msg = str(exc.value.code) if exc.value.code is not None else ""
+        assert "mutually exclusive" in msg
+
+    @staticmethod
+    def _install_fake_walkthrough(monkeypatch, fake_walkthrough):
+        """Install a fake _interactive_app module to bypass textual import.
+
+        cli.py does ``from ._interactive_app import run_walkthrough`` inside
+        _cmd_recommendations. We replace the module in sys.modules so the
+        lazy import inside the CLI returns our fake without ever loading
+        textual.
+        """
+        import sys
+        import types
+
+        fake_module = types.ModuleType("nthlayer_workers.learn._interactive_app")
+        fake_module.run_walkthrough = fake_walkthrough
+        monkeypatch.setitem(
+            sys.modules,
+            "nthlayer_workers.learn._interactive_app",
+            fake_module,
+        )
+
+    def test_interactive_with_apply_to_runs_walkthrough(
+        self, tmp_path, monkeypatch,
+    ):
+        """Stub run_walkthrough → empty plan; no recs applied to manifest."""
+        from nthlayer_workers.learn.cli import main
+        from nthlayer_workers.learn.recommendations import SpecRecommendation
+        from datetime import datetime, timezone
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        plan_in = self._build_single_rec_plan(tmp_path)
+        manifest_before = (specs_dir / "fraud-detect.yaml").read_text()
+
+        def fake_walkthrough(plan, specs_dir=None):
+            # Operator "rejected all": return a plan with zero recs.
+            return SpecRecommendation(
+                incident=plan.incident,
+                generated_by=plan.generated_by,
+                generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+                confidence=0.0,
+                recommendations=[],
+            )
+
+        self._install_fake_walkthrough(monkeypatch, fake_walkthrough)
+
+        # Empty effective plan → clean no-op exit 0.
+        main([
+            "recommendations",
+            "--from", str(plan_in),
+            "--apply-to", str(specs_dir),
+            "--interactive",
+        ])
+
+        # Manifest unchanged.
+        assert (specs_dir / "fraud-detect.yaml").read_text() == manifest_before
+
+    def test_interactive_with_output_writes_post_walkthrough_plan(
+        self, tmp_path, monkeypatch,
+    ):
+        """Stub run_walkthrough → 1-rec plan; --output reflects that plan."""
+        from nthlayer_workers.learn.cli import main
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation, Recommendation, parse_plan_file,
+        )
+        from datetime import datetime, timezone
+
+        plan_in = self._build_single_rec_plan(tmp_path)
+        out_path = tmp_path / "post.yaml"
+
+        def fake_walkthrough(plan, specs_dir=None):
+            return SpecRecommendation(
+                incident=plan.incident,
+                generated_by=plan.generated_by,
+                generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+                confidence=0.7,
+                recommendations=[
+                    Recommendation(
+                        id="rec-postwalk",
+                        service="fraud-detect",
+                        type="tighten_slo",
+                        rationale="kept by operator",
+                        field="spec.slos.judgment.target",
+                        current_value=95.0,
+                        proposed_value=99.5,
+                    ),
+                ],
+            )
+
+        self._install_fake_walkthrough(monkeypatch, fake_walkthrough)
+
+        main([
+            "recommendations",
+            "--from", str(plan_in),
+            "--output", str(out_path),
+            "--interactive",
+        ])
+
+        saved = parse_plan_file(out_path)
+        assert len(saved.recommendations) == 1
+        assert saved.recommendations[0].id == "rec-postwalk"
+        assert saved.recommendations[0].proposed_value == 99.5
+
+    def test_interactive_with_include_passes_post_filter_plan_to_walkthrough(
+        self, tmp_path, monkeypatch,
+    ):
+        """--include rec-A runs before walkthrough; rec-B is filtered out."""
+        from nthlayer_workers.learn.cli import main
+        from nthlayer_workers.learn.recommendations import SpecRecommendation
+        from datetime import datetime, timezone
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        plan_in = self._build_multi_rec_plan(tmp_path)
+        captured: dict = {}
+
+        def fake_walkthrough(plan, specs_dir=None):
+            captured["plan"] = plan
+            # Return empty so apply is a clean no-op.
+            return SpecRecommendation(
+                incident=plan.incident,
+                generated_by=plan.generated_by,
+                generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+                confidence=0.0,
+                recommendations=[],
+            )
+
+        self._install_fake_walkthrough(monkeypatch, fake_walkthrough)
+
+        main([
+            "recommendations",
+            "--from", str(plan_in),
+            "--apply-to", str(specs_dir),
+            "--include", "rec-A",
+            "--interactive",
+        ])
+
+        assert "plan" in captured
+        captured_ids = [r.id for r in captured["plan"].recommendations]
+        assert captured_ids == ["rec-A"]
