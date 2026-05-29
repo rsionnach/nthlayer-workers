@@ -734,6 +734,88 @@ class TestJsonOutput:
         assert "gh pr create" in doc["pr_error"]
         assert doc["exit_code"] == 1
 
+    def test_json_pr_error_escapes_special_characters(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """jmy.25 P3: pr_error containing JSON-special chars survives round-trip.
+
+        gh stderr can include quotes, backslashes, and newlines. The JSON
+        contract requires that consumers can `json.loads` stdout cleanly
+        regardless of stderr content.
+        """
+        import json
+        import subprocess
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        plan_in = self._build_single_rec_plan(tmp_path)
+        tricky_stderr = 'gh: failed: "quoted"\nwith backslash: C:\\path\nand newlines'
+
+        monkeypatch.setattr(
+            subprocess, "run",
+            self._build_pr_fake_run(pr_stderr=tricky_stderr),
+        )
+
+        with pytest.raises(SystemExit):
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--pr",
+                "--json",
+            ])
+
+        out = capsys.readouterr().out
+        doc = json.loads(out)
+        # All special characters round-trip through json.dumps/json.loads.
+        assert '"quoted"' in doc["pr_error"]
+        assert "C:\\path" in doc["pr_error"]
+        assert "\n" in doc["pr_error"]
+
+    def test_json_with_all_already_applied_and_pr_no_pr_attempted(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """jmy.25 P3: ALREADY_APPLIED only + --pr + --json → no PR, clean JSON.
+
+        When apply produces no modified_files (everything already at proposed
+        value), _run_pr_path returns None per design. JSON should reflect
+        pr_url/number=null with no pr_error and exit_code=0.
+        """
+        import json
+        import subprocess
+        from nthlayer_workers.learn.cli import main
+
+        # Seed manifest already at the proposed_value (98.5) so the rec
+        # classifies ALREADY_APPLIED, not APPLY_CLEAN.
+        specs_dir = tmp_path / "specs"
+        specs_dir.mkdir()
+        (specs_dir / "fraud-detect.yaml").write_text(
+            "metadata:\n  name: fraud-detect\n"
+            "spec:\n  slos:\n    judgment:\n      target: 98.5\n"
+        )
+        plan_in = self._build_single_rec_plan(tmp_path)
+
+        # subprocess.run should never be called for gh pr create — guard it.
+        monkeypatch.setattr(
+            subprocess, "run",
+            self._build_pr_fake_run(),
+        )
+
+        main([
+            "recommendations",
+            "--from", str(plan_in),
+            "--apply-to", str(specs_dir),
+            "--pr",
+            "--json",
+        ])
+
+        out = capsys.readouterr().out
+        doc = json.loads(out)
+        assert doc["pr_url"] is None
+        assert doc["pr_number"] is None
+        assert "pr_error" not in doc
+        assert doc["exit_code"] == 0
+
     def test_json_format_summary_still_on_stderr(self, tmp_path, capsys):
         """format_summary continues to go to stderr in --json mode."""
         from nthlayer_workers.learn.cli import main
