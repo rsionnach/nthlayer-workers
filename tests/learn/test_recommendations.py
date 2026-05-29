@@ -349,6 +349,161 @@ class TestAddDeployGateRecommendation:
 
 
 # ---------------------------------------------------------------------------
+# analyze_incident: add_dependency (opensrm-jmy.21)
+# ---------------------------------------------------------------------------
+
+
+class TestAddDependencyRecommendation:
+    """opensrm-jmy.21: emit ``add_dependency`` recs for blast-radius services
+    the trigger service did not declare as dependencies.
+
+    Inputs read from ``incident_custom``:
+      - ``trigger_service``: the service the call graph was rooted at
+      - ``blast_radius``: list[str] OR list[{"service": str}]
+      - ``declared_dependencies_by_service``: {service: [dep_name, ...]}
+    """
+
+    def _retro_for_add_dependency(
+        self,
+        *,
+        trigger_service: str | None = "svc-A",
+        blast_radius: list | None = None,
+        declared: dict | None = None,
+    ) -> dict:
+        """Minimal retrospective shape that only drives the add_dependency path.
+
+        No SLO breach (so tighten_slo is skipped); no change-shaped root cause
+        (so add_deploy_gate is skipped). Any recs returned must come from
+        add_dependency emission.
+        """
+        custom: dict = {}
+        if trigger_service is not None:
+            custom["trigger_service"] = trigger_service
+        custom["blast_radius"] = blast_radius if blast_radius is not None else []
+        if declared is not None:
+            custom["declared_dependencies_by_service"] = declared
+        return {"evaluations": [], "incident_custom": custom}
+
+    def test_no_undeclared_no_recommendations(self):
+        retro = self._retro_for_add_dependency(
+            trigger_service="svc-A",
+            blast_radius=["svc-A", "svc-B"],
+            declared={"svc-A": ["svc-B"]},
+        )
+        result = analyze_incident(retro, "INC-ADD-1")
+        assert all(r.type != "add_dependency" for r in result.recommendations)
+
+    def test_undeclared_service_produces_recommendation(self):
+        retro = self._retro_for_add_dependency(
+            trigger_service="svc-A",
+            blast_radius=["svc-A", "svc-B", "svc-Y"],
+            declared={"svc-A": ["svc-B"]},
+        )
+        result = analyze_incident(retro, "INC-ADD-2")
+        adds = [r for r in result.recommendations if r.type == "add_dependency"]
+        assert len(adds) == 1
+        rec = adds[0]
+        assert rec.service == "svc-A"
+        assert rec.field == "spec.dependencies[+]"
+        assert rec.proposed_value == {"name": "svc-Y", "type": "unknown"}
+        assert rec.current_value is None
+        assert rec.confidence == 0.5
+
+    def test_trigger_service_self_excluded_from_undeclared(self):
+        """The trigger service is never proposed as a dependency of itself."""
+        retro = self._retro_for_add_dependency(
+            trigger_service="svc-A",
+            blast_radius=["svc-A"],
+            declared={"svc-A": []},
+        )
+        result = analyze_incident(retro, "INC-ADD-3")
+        assert all(r.type != "add_dependency" for r in result.recommendations)
+
+    def test_multiple_undeclared_produce_multiple_recs(self):
+        retro = self._retro_for_add_dependency(
+            trigger_service="svc-A",
+            blast_radius=["svc-A", "X", "Y", "Z"],
+            declared={"svc-A": []},
+        )
+        result = analyze_incident(retro, "INC-ADD-4")
+        adds = [r for r in result.recommendations if r.type == "add_dependency"]
+        assert len(adds) == 3
+        proposed_names = sorted(r.proposed_value["name"] for r in adds)
+        assert proposed_names == ["X", "Y", "Z"]
+        # Each rec should carry a distinct id so the operator-facing artefact
+        # doesn't collapse them into a single line.
+        assert len({r.id for r in adds}) == 3
+
+    def test_blast_radius_dict_shape_supported(self):
+        """Correlate emits blast_radius as either str list or
+        [{"service": ...}] dict list — both must drive add_dependency."""
+        retro = self._retro_for_add_dependency(
+            trigger_service="svc-A",
+            blast_radius=[{"service": "svc-A"}, {"service": "svc-Y"}],
+            declared={"svc-A": []},
+        )
+        result = analyze_incident(retro, "INC-ADD-5")
+        adds = [r for r in result.recommendations if r.type == "add_dependency"]
+        assert len(adds) == 1
+        assert adds[0].proposed_value["name"] == "svc-Y"
+
+    def test_missing_trigger_service_yields_no_recs(self):
+        """No trigger_service AND empty blast_radius → no recs (nothing to anchor on)."""
+        retro = self._retro_for_add_dependency(
+            trigger_service=None,
+            blast_radius=[],
+            declared={},
+        )
+        result = analyze_incident(retro, "INC-ADD-6")
+        adds = [r for r in result.recommendations if r.type == "add_dependency"]
+        assert adds == []
+
+    def test_missing_declared_dependencies_treats_as_empty_set(self):
+        """When declared_dependencies_by_service is absent entirely, every
+        non-trigger service in blast_radius is undeclared by construction.
+        """
+        retro = self._retro_for_add_dependency(
+            trigger_service="svc-A",
+            blast_radius=["svc-A", "svc-B", "svc-C"],
+            declared=None,  # key omitted from incident_custom
+        )
+        result = analyze_incident(retro, "INC-ADD-7")
+        adds = [r for r in result.recommendations if r.type == "add_dependency"]
+        # All blast minus trigger → svc-B + svc-C
+        names = sorted(r.proposed_value["name"] for r in adds)
+        assert names == ["svc-B", "svc-C"]
+
+    def test_rec_rationale_mentions_incident_id_and_services(self):
+        retro = self._retro_for_add_dependency(
+            trigger_service="svc-A",
+            blast_radius=["svc-A", "svc-Y"],
+            declared={"svc-A": []},
+        )
+        result = analyze_incident(retro, "INC-ADD-RAT-42")
+        rec = next(r for r in result.recommendations if r.type == "add_dependency")
+        rationale = rec.rationale
+        # The rationale must let the operator pattern-match the rec back to
+        # the source incident and identify both ends of the missing edge.
+        assert "INC-ADD-RAT-42" in rationale
+        assert "svc-A" in rationale
+        assert "svc-Y" in rationale
+
+    def test_analyze_incident_aggregates_add_dependency_with_others(self):
+        """A retrospective that drives BOTH tighten_slo and add_dependency
+        emits both, side-by-side in result.recommendations."""
+        retro = _retrospective_with_breach(target=98.5, current=92.0)
+        retro["incident_custom"]["trigger_service"] = "fraud-detect"
+        retro["incident_custom"]["blast_radius"] = ["fraud-detect", "svc-Y"]
+        retro["incident_custom"]["declared_dependencies_by_service"] = {
+            "fraud-detect": [],
+        }
+        result = analyze_incident(retro, "INC-ADD-COMBO")
+        types = {r.type for r in result.recommendations}
+        assert "tighten_slo" in types
+        assert "add_dependency" in types
+
+
+# ---------------------------------------------------------------------------
 # analyze_incident: aggregate behaviour
 # ---------------------------------------------------------------------------
 

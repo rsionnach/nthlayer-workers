@@ -69,9 +69,44 @@ def apply_at_path(doc: Any, dotted_path: str, value: Any) -> None:
     Raises TypeError if a non-leaf path segment is already bound to
     a non-mapping value (we won't silently overwrite scalars with
     mappings — that's a structural change the engine doesn't produce).
+
+    The ``[+]`` sigil on the trailing segment (e.g.
+    ``spec.dependencies[+]``) requests list-append at the un-sigil'd
+    path. The path must point to a list, OR be absent (in which case
+    it is created as an empty list and then appended). ``value`` is a
+    single item to append. TypeError if the existing leaf is not a list.
     """
     if not dotted_path:
         raise ValueError("apply_at_path requires a non-empty dotted_path")
+
+    if dotted_path.endswith("[+]"):
+        # List-append sigil (opensrm-jmy.21). Walk to the leaf's parent,
+        # creating intermediate mappings as needed (same convention as
+        # the set-path branch below), then append to / create the list.
+        base_path = dotted_path[:-3]
+        if not base_path:
+            raise ValueError("apply_at_path '[+]' sigil requires a non-empty base path")
+        keys = base_path.split(".")
+        current = doc
+        for key in keys[:-1]:
+            if key not in current:
+                current[key] = CommentedMap()
+            if not isinstance(current[key], dict):
+                raise TypeError(
+                    f"cannot descend into non-mapping at {key!r} "
+                    f"(found {type(current[key]).__name__})"
+                )
+            current = current[key]
+        leaf = keys[-1]
+        if leaf not in current:
+            current[leaf] = []
+        if not isinstance(current[leaf], list):
+            raise TypeError(
+                f"cannot append to non-list at {leaf!r} "
+                f"(found {type(current[leaf]).__name__})"
+            )
+        current[leaf].append(value)
+        return
 
     keys = dotted_path.split(".")
     current = doc
@@ -156,9 +191,32 @@ def classify_outcome(manifest_value: Any, rec: Recommendation) -> OutcomeKind:
       manifest path = proposed    → already_applied
       manifest path = other       → drift_detected
 
+    For list-append recommendations (rec.field ending in ``[+]``,
+    opensrm-jmy.21): manifest_value is the list at the un-sigil'd
+    path (caller responsible for stripping the sigil before
+    resolve_path).
+      manifest path missing       → apply_clean (create + append)
+      manifest is a list and contains proposed → already_applied
+      manifest is a list, no match → apply_clean (append)
+      manifest is not a list       → drift_detected
+
     Type-tolerant scalar comparison via normalize_scalar; structural
     (dict/list) comparison is exact.
     """
+    if rec.field and rec.field.endswith("[+]"):
+        # List-append table (opensrm-jmy.21 add_dependency). current_value
+        # is always None for append recs (the path either doesn't exist
+        # yet or holds a list of items; "current" is not a scalar).
+        if manifest_value is PATH_MISSING:
+            return OutcomeKind.APPLY_CLEAN
+        if not isinstance(manifest_value, list):
+            # Operator turned what should be a list into a different
+            # shape — we don't silently overwrite that.
+            return OutcomeKind.DRIFT_DETECTED
+        if _list_contains_proposed(manifest_value, rec.proposed_value):
+            return OutcomeKind.ALREADY_APPLIED
+        return OutcomeKind.APPLY_CLEAN
+
     proposed_norm = _normalize_for_compare(rec.proposed_value)
 
     if rec.current_value is None:
@@ -189,3 +247,24 @@ def _normalize_for_compare(value: Any) -> Any:
     if isinstance(value, (dict, list)):
         return value
     return normalize_scalar(value)
+
+
+def _list_contains_proposed(manifest_list: list, proposed: Any) -> bool:
+    """Membership check for the ``[+]`` append-rec already_applied branch.
+
+    If ``proposed`` is a dict carrying a ``"name"`` key, match any item
+    in ``manifest_list`` that is also a dict with the same ``"name"``
+    value — this is the OpenSRM convention for keyed list entries (e.g.
+    Dependency objects). Otherwise fall back to deep ``==`` equality
+    against each item.
+    """
+    if isinstance(proposed, dict) and "name" in proposed:
+        proposed_name = proposed["name"]
+        for item in manifest_list:
+            if isinstance(item, dict) and item.get("name") == proposed_name:
+                return True
+        return False
+    for item in manifest_list:
+        if item == proposed:
+            return True
+    return False

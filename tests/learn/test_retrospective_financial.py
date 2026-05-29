@@ -182,6 +182,95 @@ def test_no_duration_and_no_breaches_returns_none(specs_dir: Path):
     assert result is None
 
 
+class TestDeclaredDependenciesByService:
+    """opensrm-jmy.21: build_retrospective() populates
+    ``retro.metadata.custom["declared_dependencies_by_service"]``.
+
+    Exercised via the two pure helpers (``_load_manifests_from_specs`` +
+    ``_extract_declared_dependencies``) the public function delegates to,
+    keeping these tests free of the full verdict-store + verdict-lineage
+    setup that ``build_retrospective`` requires. The mapping from helper
+    pair → ``retro.metadata.custom[...]`` is a single line in
+    ``build_retrospective`` (line 162).
+    """
+
+    def test_declared_dependencies_extracted_from_manifests(self, tmp_path: Path):
+        from nthlayer_workers.learn.retrospective import (
+            _extract_declared_dependencies,
+            _load_manifests_from_specs,
+        )
+
+        svc_a = textwrap.dedent("""
+            apiVersion: opensrm.nthlayer.io/v2
+            kind: ServiceManifest
+            metadata: {name: svc-a, labels: {tier: critical, type: api}}
+            spec:
+              owner: {group: group:default/team-a}
+              service: {name: svc-a}
+              dependencies:
+                - service: component:default/dep-one
+                  type: api
+                - service: component:default/dep-two
+                  type: database
+        """).strip()
+        svc_b = textwrap.dedent("""
+            apiVersion: opensrm.nthlayer.io/v2
+            kind: ServiceManifest
+            metadata: {name: svc-b, labels: {tier: standard, type: api}}
+            spec:
+              owner: {group: group:default/team-b}
+              service: {name: svc-b}
+        """).strip()
+        (tmp_path / "svc-a.yaml").write_text(svc_a)
+        (tmp_path / "svc-b.yaml").write_text(svc_b)
+
+        loaded = _load_manifests_from_specs(str(tmp_path))
+        declared = _extract_declared_dependencies(loaded)
+
+        assert declared == {
+            "svc-a": ["dep-one", "dep-two"],
+            "svc-b": [],
+        }
+
+    def test_declared_dependencies_empty_when_specs_dir_none(self):
+        from nthlayer_workers.learn.retrospective import (
+            _extract_declared_dependencies,
+            _load_manifests_from_specs,
+        )
+
+        loaded = _load_manifests_from_specs(None)
+        assert _extract_declared_dependencies(loaded) == {}
+
+    def test_declared_dependencies_empty_list_for_no_deps_block(self, tmp_path: Path):
+        """Services without ``dependencies:`` yield an empty list, never an absent key.
+
+        The absence of declared deps is itself information downstream consumers
+        (jmy.21 add_dependency) want — silently omitting the key would make a
+        service with `dependencies: []` indistinguishable from a service that
+        wasn't loaded.
+        """
+        from nthlayer_workers.learn.retrospective import (
+            _extract_declared_dependencies,
+            _load_manifests_from_specs,
+        )
+
+        spec = textwrap.dedent("""
+            apiVersion: opensrm.nthlayer.io/v2
+            kind: ServiceManifest
+            metadata: {name: silent-svc, labels: {tier: standard, type: api}}
+            spec:
+              owner: {group: group:default/team-a}
+              service: {name: silent-svc}
+        """).strip()
+        (tmp_path / "silent-svc.yaml").write_text(spec)
+
+        loaded = _load_manifests_from_specs(str(tmp_path))
+        declared = _extract_declared_dependencies(loaded)
+
+        assert "silent-svc" in declared
+        assert declared["silent-svc"] == []
+
+
 def test_multi_service_metric_path_attributes_per_service(tmp_path: Path):
     # Critical correctness check: with 2 services in blast_radius, the
     # metric path must attribute each service's own breach count, not

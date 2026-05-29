@@ -105,9 +105,22 @@ def build_retrospective(
     if not blast_radius:
         blast_radius = incident_custom.get("blast_radius", [])
 
+    # Load manifests from specs_dir once and share the result across
+    # all consumers (financial_impact + declared_dependencies_by_service).
+    # opensrm-jmy.21: declared_dependencies_by_service is the
+    # ground-truth view of operator-declared deps that downstream
+    # add_dependency recommendation logic compares against the
+    # incident's observed call graph.
+    loaded_manifests = _load_manifests_from_specs(specs_dir)
+    declared_dependencies_by_service = _extract_declared_dependencies(loaded_manifests)
+
     # Financial impact (if specs available)
     financial_impact = _compute_financial_impact(
-        blast_radius, duration_minutes, breach_counts_by_service, specs_dir,
+        blast_radius,
+        duration_minutes,
+        breach_counts_by_service,
+        specs_dir,
+        loaded_manifests=loaded_manifests,
     )
 
     # Generate recommendations
@@ -146,6 +159,7 @@ def build_retrospective(
             "timeline": timeline[:20],  # Cap at 20 entries
             "financial_impact": financial_impact,
             "recommendations": recommendations,
+            "declared_dependencies_by_service": declared_dependencies_by_service,
         }},
     )
     link(retro, context=[incident_verdict_id])
@@ -194,11 +208,70 @@ def _parse_ts(ts: Any) -> datetime:
     return dt
 
 
+def _load_manifests_from_specs(specs_dir: str | None) -> dict[str, Any]:
+    """Load all ``*.yaml`` manifests under ``specs_dir`` once, keyed by
+    ``manifest.name`` (the canonical service identity).
+
+    Returns an empty dict when ``specs_dir`` is None or not a directory,
+    so callers can treat the result uniformly without re-checking the
+    filesystem. Duplicate manifests for the same service (template forks,
+    environment overlays) are deduplicated by keeping the first one
+    encountered and emitting a warning — this matches the pre-jmy.21
+    behaviour of ``_compute_financial_impact``.
+
+    Parse failures from ``load_manifest`` are silently skipped (consistent
+    with the prior inline ``ManifestLoadError`` swallow); the financial-
+    impact and dependency-extraction paths both tolerate a partial view.
+    """
+    if not specs_dir:
+        return {}
+    specs_path = Path(specs_dir)
+    if not specs_path.is_dir():
+        return {}
+
+    manifests: dict[str, Any] = {}
+    for spec_file in specs_path.glob("*.yaml"):
+        try:
+            manifest = load_manifest(str(spec_file))
+        except ManifestLoadError:
+            continue
+        if manifest.name in manifests:
+            log.warning(
+                "manifest_duplicate_skipped",
+                service=manifest.name,
+                spec_file=str(spec_file),
+            )
+            continue
+        manifests[manifest.name] = manifest
+    return manifests
+
+
+def _extract_declared_dependencies(
+    loaded_manifests: dict[str, Any],
+) -> dict[str, list[str]]:
+    """Build a {service_name: [dep_name, ...]} map from already-loaded manifests.
+
+    A manifest with ``dependencies = None`` produces an empty list for
+    that service (the absence of declared deps is itself information
+    downstream consumers want to record). opensrm-jmy.21 uses this map
+    as the ground-truth side of the observed-vs-declared comparison that
+    drives ``add_dependency`` recommendations.
+    """
+    declared: dict[str, list[str]] = {}
+    for service_name, manifest in loaded_manifests.items():
+        declared[service_name] = [
+            dep.name for dep in (manifest.dependencies or [])
+        ]
+    return declared
+
+
 def _compute_financial_impact(
     blast_radius: list,
     duration_minutes: float,
     breach_counts_by_service: dict[str, int],
     specs_dir: str | None,
+    *,
+    loaded_manifests: dict[str, Any] | None = None,
 ) -> dict | None:
     """Compute spec § 1 financial impact across blast-radius services.
 
@@ -208,6 +281,11 @@ def _compute_financial_impact(
     prorated to incident duration (spec_estimate path). Sum across
     services that share a currency; mixed-currency manifests are
     skipped with a warning.
+
+    ``loaded_manifests`` is the shared cache produced by
+    ``_load_manifests_from_specs`` (opensrm-jmy.21). When omitted the
+    function loads manifests itself — preserves the pre-jmy.21 calling
+    convention used by ``tests/learn/test_retrospective_financial.py``.
     """
     if not specs_dir or not blast_radius:
         return None
@@ -222,8 +300,9 @@ def _compute_financial_impact(
         )
         return None
 
-    specs_path = Path(specs_dir)
-    if not specs_path.is_dir():
+    if loaded_manifests is None:
+        loaded_manifests = _load_manifests_from_specs(specs_dir)
+    if not loaded_manifests:
         return None
 
     affected_services = {
@@ -235,33 +314,16 @@ def _compute_financial_impact(
     total_decisions = 0
     currency: str | None = None
     aggregate_source: str | None = None
-    # Dedup duplicate manifests for the same service (template forks,
-    # environment overlays under one specs_dir would otherwise be
-    # double-counted).
-    seen_services: set[str] = set()
 
-    for spec_file in specs_path.glob("*.yaml"):
-        try:
-            manifest = load_manifest(str(spec_file))
-        except ManifestLoadError:
-            continue
-        if manifest.name not in affected_services:
-            continue
-        if manifest.name in seen_services:
-            log.warning(
-                "financial_impact_duplicate_manifest_skipped",
-                service=manifest.name,
-                spec_file=str(spec_file),
-            )
+    for service_name, manifest in loaded_manifests.items():
+        if service_name not in affected_services:
             continue
         if manifest.outcomes is None:
-            seen_services.add(manifest.name)
             continue
-        seen_services.add(manifest.name)
 
         # Metric path: this service's own breach count. Falls back to
         # spec_estimate when the service produced no breach evaluations.
-        service_breaches = breach_counts_by_service.get(manifest.name, 0)
+        service_breaches = breach_counts_by_service.get(service_name, 0)
         if service_breaches > 0:
             decisions = service_breaches
             this_source = "metric"
@@ -291,7 +353,7 @@ def _compute_financial_impact(
             if currency != impact.currency:
                 log.warning(
                     "financial_impact_currency_mismatch_skipped",
-                    service=manifest.name,
+                    service=service_name,
                     aggregate_currency=currency,
                     service_currency=impact.currency,
                 )

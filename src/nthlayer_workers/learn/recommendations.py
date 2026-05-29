@@ -86,6 +86,13 @@ _TIGHTEN_SLO_GAP_FRACTION = 0.80
 # only a small tightening. Mid-point keeps the proposal defensible.
 _TIGHTEN_SLO_BLEND = 0.5
 
+# add_dependency confidence (opensrm-jmy.21). Mid-band: the observed
+# blast radius is strong evidence that a runtime relationship exists,
+# but whether it should be a declared dependency (vs incidental
+# co-failure) is an operator judgement — so a flat 0.5 rather than
+# the higher tighten_slo / add_deploy_gate confidences.
+_ADD_DEPENDENCY_CONFIDENCE = 0.5
+
 
 @dataclass
 class Recommendation:
@@ -221,6 +228,7 @@ def analyze_incident(
         recs.append(rec)
     for rec in _add_deploy_gate_recommendations(evaluations, root_causes, incident_id):
         recs.append(rec)
+    recs.extend(_add_dependency_recommendations(incident_custom, incident_id))
 
     overall_confidence = (
         sum(r.confidence for r in recs) / len(recs) if recs else 0.0
@@ -389,6 +397,73 @@ def _add_deploy_gate_recommendations(
             evidence=evidence,
         ))
     return out
+
+
+def _normalize_blast_radius(raw: list[Any]) -> list[str]:
+    """Normalise a blast_radius payload to ``list[str]``.
+
+    Retrospective metadata.custom["blast_radius"] is written as
+    ``list[str]`` (retrospective.py:154-157), but the input shape from
+    upstream correlation custom payloads can be either ``list[str]`` or
+    ``list[{"service": str, ...}]``. Tolerate both so this heuristic
+    doesn't depend on the retrospective normalisation step having run.
+    Non-mapping / missing-service entries are silently dropped.
+    """
+    out: list[str] = []
+    for item in raw:
+        if isinstance(item, str):
+            out.append(item)
+        elif isinstance(item, dict):
+            svc = item.get("service")
+            if isinstance(svc, str):
+                out.append(svc)
+    return out
+
+
+def _add_dependency_recommendations(
+    incident_custom: dict[str, Any],
+    incident_id: str,
+) -> list[Recommendation]:
+    """Recommend adding undeclared services from the incident chain to the
+    trigger service's manifest dependencies (opensrm-jmy.21).
+
+    Heuristic: for the trigger service S, services that appeared in the
+    incident's blast_radius but are NOT in S's declared dependencies (and
+    are not S itself) get an add_dependency recommendation.
+
+    Trigger service is read from ``incident_custom["trigger_service"]``.
+    Absent → no recommendations (we don't invent a key). Declared deps
+    come from ``incident_custom["declared_dependencies_by_service"]``
+    populated by ``learn.retrospective.build_retrospective``.
+    """
+    trigger = incident_custom.get("trigger_service")
+    blast = _normalize_blast_radius(incident_custom.get("blast_radius") or [])
+    if not trigger or not blast:
+        return []
+    declared_map = incident_custom.get("declared_dependencies_by_service") or {}
+    declared_for_trigger = set(declared_map.get(trigger, []))
+    undeclared = [
+        svc for svc in blast
+        if svc != trigger and svc not in declared_for_trigger
+    ]
+    recs: list[Recommendation] = []
+    for svc in undeclared:
+        field_path = f"spec.dependencies[+].{svc}"
+        recs.append(Recommendation(
+            id=compute_rec_id(incident_id, "add_dependency", field_path),
+            service=trigger,
+            type="add_dependency",
+            rationale=(
+                f"{svc} participated in the incident chain for {trigger} "
+                f"({incident_id}) but is not declared in {trigger}'s "
+                f"manifest dependencies."
+            ),
+            field="spec.dependencies[+]",
+            current_value=None,
+            proposed_value={"name": svc, "type": "unknown"},
+            confidence=_ADD_DEPENDENCY_CONFIDENCE,
+        ))
+    return recs
 
 
 SUPPORTED_API_VERSIONS = frozenset({"nthlayer.io/learn/v1"})

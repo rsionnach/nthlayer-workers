@@ -273,3 +273,154 @@ class TestClassifyOutcome:
 
         result = classify_outcome("98.5", rec_with_current)
         assert result == OutcomeKind.ALREADY_APPLIED
+
+
+# ---------------------------------------------------------------------------
+# jmy.21: list-append sigil ``[+]`` (apply_at_path + classify_outcome)
+# ---------------------------------------------------------------------------
+
+
+class TestSigilAppend:
+    """``spec.dependencies[+]`` semantics for add_dependency recs (jmy.21)."""
+
+    def test_apply_at_path_appends_to_existing_list(self):
+        from io import StringIO
+
+        from nthlayer_workers.learn._yaml import apply_at_path, get_yaml_round_trip
+
+        yaml = get_yaml_round_trip()
+        text = (
+            "spec:\n"
+            "  dependencies:\n"
+            "    - name: a\n"
+            "      type: api\n"
+        )
+        doc = yaml.load(text)
+
+        apply_at_path(doc, "spec.dependencies[+]", {"name": "b", "type": "x"})
+
+        deps = doc["spec"]["dependencies"]
+        assert len(deps) == 2
+        names = [d["name"] for d in deps]
+        assert names == ["a", "b"]
+
+        # Round-trip cleanly
+        buf = StringIO()
+        yaml.dump(doc, buf)
+        output = buf.getvalue()
+        assert "name: a" in output
+        assert "name: b" in output
+
+    def test_apply_at_path_creates_list_at_missing_leaf(self):
+        from nthlayer_workers.learn._yaml import apply_at_path, get_yaml_round_trip
+
+        yaml = get_yaml_round_trip()
+        text = "spec:\n  slos: {}\n"
+        doc = yaml.load(text)
+
+        apply_at_path(doc, "spec.dependencies[+]", {"name": "a"})
+
+        deps = doc["spec"]["dependencies"]
+        assert isinstance(deps, list)
+        assert len(deps) == 1
+        assert deps[0]["name"] == "a"
+
+    def test_apply_at_path_creates_intermediates_for_sigil(self):
+        from nthlayer_workers.learn._yaml import apply_at_path, get_yaml_round_trip
+
+        yaml = get_yaml_round_trip()
+        # Empty doc — full chain must be materialised.
+        doc = yaml.load("{}\n")
+
+        apply_at_path(doc, "a.b.c[+]", {"name": "x"})
+
+        assert doc["a"]["b"]["c"] == [{"name": "x"}]
+
+    def test_apply_at_path_raises_when_leaf_is_non_list(self):
+        from nthlayer_workers.learn._yaml import apply_at_path, get_yaml_round_trip
+
+        yaml = get_yaml_round_trip()
+        text = "spec:\n  dependencies: 5\n"
+        doc = yaml.load(text)
+
+        with pytest.raises(TypeError, match="dependencies"):
+            apply_at_path(doc, "spec.dependencies[+]", {"name": "a"})
+
+    def test_classify_outcome_append_path_missing_returns_apply_clean(self):
+        from nthlayer_workers.learn._yaml import PATH_MISSING, classify_outcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind, Recommendation
+
+        rec = Recommendation(
+            id="rec-deadbeef0125",
+            service="svc-A",
+            type="add_dependency",
+            rationale="test",
+            field="spec.dependencies[+]",
+            current_value=None,
+            proposed_value={"name": "svc-Y", "type": "unknown"},
+        )
+        assert classify_outcome(PATH_MISSING, rec) == OutcomeKind.APPLY_CLEAN
+
+    def test_classify_outcome_append_already_present_by_name(self):
+        from nthlayer_workers.learn._yaml import classify_outcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind, Recommendation
+
+        rec = Recommendation(
+            id="rec-deadbeef0126",
+            service="svc-A",
+            type="add_dependency",
+            rationale="test",
+            field="spec.dependencies[+]",
+            current_value=None,
+            proposed_value={"name": "a", "type": "x"},
+        )
+        manifest_list = [{"name": "a", "type": "api"}, {"name": "b"}]
+        assert classify_outcome(manifest_list, rec) == OutcomeKind.ALREADY_APPLIED
+
+    def test_classify_outcome_append_absent_by_name(self):
+        from nthlayer_workers.learn._yaml import classify_outcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind, Recommendation
+
+        rec = Recommendation(
+            id="rec-deadbeef0127",
+            service="svc-A",
+            type="add_dependency",
+            rationale="test",
+            field="spec.dependencies[+]",
+            current_value=None,
+            proposed_value={"name": "b", "type": "x"},
+        )
+        manifest_list = [{"name": "a"}]
+        assert classify_outcome(manifest_list, rec) == OutcomeKind.APPLY_CLEAN
+
+    def test_classify_outcome_append_non_list_returns_drift(self):
+        from nthlayer_workers.learn._yaml import classify_outcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind, Recommendation
+
+        rec = Recommendation(
+            id="rec-deadbeef0128",
+            service="svc-A",
+            type="add_dependency",
+            rationale="test",
+            field="spec.dependencies[+]",
+            current_value=None,
+            proposed_value={"name": "x"},
+        )
+        assert classify_outcome({"some": "dict"}, rec) == OutcomeKind.DRIFT_DETECTED
+
+    def test_classify_outcome_append_scalar_proposed_uses_deep_eq(self):
+        """Non-dict proposed (no ``name`` key) falls back to deep ``==``."""
+        from nthlayer_workers.learn._yaml import classify_outcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind, Recommendation
+
+        rec = Recommendation(
+            id="rec-deadbeef0129",
+            service="svc-A",
+            type="add_dependency",
+            rationale="test",
+            field="spec.dependencies[+]",
+            current_value=None,
+            proposed_value="a",
+        )
+        assert classify_outcome(["a", "b"], rec) == OutcomeKind.ALREADY_APPLIED
+        assert classify_outcome(["b", "c"], rec) == OutcomeKind.APPLY_CLEAN

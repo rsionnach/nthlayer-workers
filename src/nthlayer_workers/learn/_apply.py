@@ -147,8 +147,16 @@ def apply_recommendations(
             doc_cache[manifest_path] = yaml.load(manifest_path.read_text())
         doc = doc_cache[manifest_path]
 
-        # Classify
-        manifest_value = resolve_path(doc, rec.field or "")
+        # Classify. The ``[+]`` sigil on rec.field is part of the
+        # recommendation semantics (list-append); it is not part of the
+        # dotted path used to resolve the current manifest value, so
+        # strip it before calling resolve_path. apply_at_path and
+        # classify_outcome both still see the sigil-bearing rec.field
+        # and switch into list-append mode.
+        lookup_path = rec.field or ""
+        if lookup_path.endswith("[+]"):
+            lookup_path = lookup_path[:-3]
+        manifest_value = resolve_path(doc, lookup_path)
         outcome = classify_outcome(manifest_value, rec)
 
         if outcome == OutcomeKind.APPLY_CLEAN:
