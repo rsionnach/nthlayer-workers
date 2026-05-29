@@ -177,6 +177,18 @@ def _add_recommendations_subcommand(subparsers) -> None:
     p.add_argument("--json", action="store_true",
                     help="Emit a single structured JSON document to stdout at end-of-run (requires --apply-to)")
 
+    selection_group = p.add_mutually_exclusive_group()
+    selection_group.add_argument(
+        "--include", dest="include",
+        help="Comma-separated rec ids to apply; mutually exclusive with --exclude. "
+             "Requires --apply-to.",
+    )
+    selection_group.add_argument(
+        "--exclude", dest="exclude",
+        help="Comma-separated rec ids to skip; mutually exclusive with --include. "
+             "Requires --apply-to.",
+    )
+
     p.set_defaults(func=_cmd_recommendations)
 
 
@@ -187,6 +199,8 @@ def _cmd_recommendations(args: argparse.Namespace) -> None:
         raise SystemExit("error: --pr requires --apply-to")
     if args.json and not args.apply_to:
         raise SystemExit("error: --json requires --apply-to")
+    if (args.include or args.exclude) and not args.apply_to:
+        raise SystemExit("error: --include/--exclude requires --apply-to")
 
     # Resolve input source
     if args.from_path:
@@ -200,6 +214,24 @@ def _cmd_recommendations(args: argparse.Namespace) -> None:
     # --output: write plan to file BEFORE --apply-to runs (per design § 4)
     if args.output:
         Path(args.output).write_text(plan.to_yaml())
+
+    # --include / --exclude: filter recommendations before apply (jmy.24)
+    if args.include or args.exclude:
+        requested = (args.include or args.exclude).split(",")
+        requested = [s.strip() for s in requested if s.strip()]
+        plan_ids = {r.id for r in plan.recommendations}
+        missing = [rid for rid in requested if rid not in plan_ids]
+        if missing:
+            joined = ", ".join(missing)
+            raise SystemExit(
+                f"error: --include/--exclude id(s) not found in plan: {joined}"
+            )
+        if args.include:
+            keep = set(requested)
+            plan.recommendations = [r for r in plan.recommendations if r.id in keep]
+        else:  # args.exclude
+            drop = set(requested)
+            plan.recommendations = [r for r in plan.recommendations if r.id not in drop]
 
     # --apply-to: apply plan to specs directory
     apply_result = None

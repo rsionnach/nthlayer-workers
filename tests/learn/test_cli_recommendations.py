@@ -948,3 +948,306 @@ class TestJsonOutput:
         assert non_json_code == 1
         assert json_code == 1
         assert non_json_code == json_code
+
+
+class TestIncludeExcludeFlags:
+    """opensrm-jmy.24: --include / --exclude rec-id filtering on --apply-to.
+
+    Contract:
+      - Both require --apply-to (pre-flight error).
+      - Mutually exclusive (argparse mutex group).
+      - Unknown ids → SystemExit listing all unknowns in one message.
+      - Filter mutates plan.recommendations in place before apply_recommendations.
+      - Empty effective plan is a clean exit-0 (no error).
+    """
+
+    @staticmethod
+    def _seed_specs_dir(tmp_path):
+        specs_dir = tmp_path / "specs"
+        specs_dir.mkdir()
+        (specs_dir / "fraud-detect.yaml").write_text(
+            "metadata:\n  name: fraud-detect\n"
+            "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+        )
+        return specs_dir
+
+    @staticmethod
+    def _build_single_rec_plan(tmp_path, *, incident: str = "inc-jmy24"):
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation, Recommendation,
+        )
+        from datetime import datetime, timezone
+
+        plan = SpecRecommendation(
+            incident=incident,
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-abc",
+                    service="fraud-detect",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+            ],
+        )
+        plan_in = tmp_path / "in.yaml"
+        plan_in.write_text(plan.to_yaml())
+        return plan_in
+
+    @staticmethod
+    def _build_multi_rec_plan(tmp_path, *, incident: str = "inc-jmy24-multi"):
+        """Build a plan with two recs on the same service so both can apply.
+
+        Returns (plan_path, rec_abc_id, rec_def_id) — the rec ids are
+        computed via compute_rec_id so callers can reference them by
+        their deterministic ids.
+        """
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation, Recommendation, compute_rec_id,
+        )
+        from datetime import datetime, timezone
+
+        field_tighten = "spec.slos.judgment.target"
+        field_gate = "spec.gates.judgment_quality"
+        rec_abc_id = compute_rec_id(incident, "tighten_slo", field_tighten)
+        rec_def_id = compute_rec_id(incident, "add_deploy_gate", field_gate)
+
+        plan = SpecRecommendation(
+            incident=incident,
+            generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id=rec_abc_id,
+                    service="fraud-detect",
+                    type="tighten_slo",
+                    rationale="test",
+                    field=field_tighten,
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+                Recommendation(
+                    id=rec_def_id,
+                    service="fraud-detect",
+                    type="add_deploy_gate",
+                    rationale="test",
+                    field=field_gate,
+                    current_value=None,
+                    proposed_value={"block_on": "judgment_quality"},
+                ),
+            ],
+        )
+        plan_in = tmp_path / "in.yaml"
+        plan_in.write_text(plan.to_yaml())
+        return plan_in, rec_abc_id, rec_def_id
+
+    @staticmethod
+    def _seed_multi_specs_dir(tmp_path):
+        """Manifest with the SLO field present so tighten_slo can apply cleanly."""
+        specs_dir = tmp_path / "specs"
+        specs_dir.mkdir()
+        (specs_dir / "fraud-detect.yaml").write_text(
+            "metadata:\n  name: fraud-detect\n"
+            "spec:\n"
+            "  slos:\n    judgment:\n      target: 95.0\n"
+        )
+        return specs_dir
+
+    def test_include_without_apply_to_rejected(self, tmp_path):
+        from nthlayer_workers.learn.cli import main
+
+        plan_in = self._build_single_rec_plan(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--include", "rec-x",
+            ])
+        msg = str(exc.value.code) if exc.value.code is not None else ""
+        assert "requires --apply-to" in msg
+
+    def test_exclude_without_apply_to_rejected(self, tmp_path):
+        from nthlayer_workers.learn.cli import main
+
+        plan_in = self._build_single_rec_plan(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--exclude", "rec-x",
+            ])
+        msg = str(exc.value.code) if exc.value.code is not None else ""
+        assert "requires --apply-to" in msg
+
+    def test_include_and_exclude_mutually_exclusive(self, tmp_path):
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        plan_in = self._build_single_rec_plan(tmp_path)
+        with pytest.raises(SystemExit):
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--include", "rec-abc",
+                "--exclude", "rec-def",
+            ])
+
+    def test_include_unknown_id_rejected(self, tmp_path):
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        plan_in = self._build_single_rec_plan(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--include", "rec-typo",
+            ])
+        msg = str(exc.value.code) if exc.value.code is not None else ""
+        assert "not found in plan" in msg
+
+    def test_include_multiple_unknown_ids_reported_together(self, tmp_path):
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        plan_in = self._build_single_rec_plan(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--include", "rec-typo1,rec-typo2",
+            ])
+        msg = str(exc.value.code) if exc.value.code is not None else ""
+        assert "rec-typo1" in msg
+        assert "rec-typo2" in msg
+
+    def test_include_filters_plan_to_subset(self, tmp_path, capsys):
+        """--include rec-abc only → JSON's applied contains only rec-abc."""
+        import json
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_multi_specs_dir(tmp_path)
+        plan_in, rec_abc_id, rec_def_id = self._build_multi_rec_plan(tmp_path)
+
+        # Use --json to inspect applied/skipped without parsing stderr text.
+        main([
+            "recommendations",
+            "--from", str(plan_in),
+            "--apply-to", str(specs_dir),
+            "--include", rec_abc_id,
+            "--json",
+        ])
+
+        out = capsys.readouterr().out
+        doc = json.loads(out)
+        all_ids = {e["id"] for e in doc["applied"]} | {e["id"] for e in doc["skipped"]}
+        assert rec_abc_id in all_ids
+        assert rec_def_id not in all_ids
+
+    def test_exclude_filters_out_subset(self, tmp_path, capsys):
+        import json
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_multi_specs_dir(tmp_path)
+        plan_in, rec_abc_id, rec_def_id = self._build_multi_rec_plan(tmp_path)
+
+        try:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--exclude", rec_def_id,
+                "--json",
+            ])
+        except SystemExit:
+            # Acceptable: a non-zero exit can happen if anything else skipped.
+            # We only care that rec_def_id was filtered out.
+            pass
+
+        out = capsys.readouterr().out
+        doc = json.loads(out)
+        all_ids = {e["id"] for e in doc["applied"]} | {e["id"] for e in doc["skipped"]}
+        assert rec_abc_id in all_ids
+        assert rec_def_id not in all_ids
+
+    def test_exclude_all_results_in_empty_apply_exit_zero(self, tmp_path, capsys):
+        """Excluding every rec → no error, format_summary shows Applied: 0."""
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_multi_specs_dir(tmp_path)
+        plan_in, rec_abc_id, rec_def_id = self._build_multi_rec_plan(tmp_path)
+
+        # Should NOT raise — empty plan after filter is a clean no-op.
+        main([
+            "recommendations",
+            "--from", str(plan_in),
+            "--apply-to", str(specs_dir),
+            "--exclude", f"{rec_abc_id},{rec_def_id}",
+        ])
+
+        captured = capsys.readouterr()
+        assert "Applied: 0" in captured.err
+
+    def test_include_with_json_mode_filters_doc(self, tmp_path, capsys):
+        """--include rec-abc --json → JSON applied/skipped exclude filtered recs."""
+        import json
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_multi_specs_dir(tmp_path)
+        plan_in, rec_abc_id, rec_def_id = self._build_multi_rec_plan(tmp_path)
+
+        main([
+            "recommendations",
+            "--from", str(plan_in),
+            "--apply-to", str(specs_dir),
+            "--include", rec_abc_id,
+            "--json",
+        ])
+
+        out = capsys.readouterr().out
+        doc = json.loads(out)
+        applied_ids = {e["id"] for e in doc["applied"]}
+        skipped_ids = {e["id"] for e in doc["skipped"]}
+        # The filtered-out rec is absent from both arrays.
+        assert rec_def_id not in applied_ids
+        assert rec_def_id not in skipped_ids
+        # The kept rec is referenced (either applied or skipped — depends on
+        # whether the manifest already matched; for tighten_slo with current
+        # 95.0 and proposed 98.5 we expect applied).
+        assert rec_abc_id in applied_ids
+        assert skipped_ids == set()
+
+    def test_no_filter_flags_applies_all(self, tmp_path, capsys):
+        """Regression: without --include/--exclude, all plan recs flow through."""
+        import json
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_multi_specs_dir(tmp_path)
+        plan_in, rec_abc_id, rec_def_id = self._build_multi_rec_plan(tmp_path)
+
+        try:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--json",
+            ])
+        except SystemExit:
+            # apply may exit non-zero if any rec skipped; the contract here
+            # is purely that BOTH ids appear in the JSON.
+            pass
+
+        out = capsys.readouterr().out
+        doc = json.loads(out)
+        all_ids = {e["id"] for e in doc["applied"]} | {e["id"] for e in doc["skipped"]}
+        assert rec_abc_id in all_ids
+        assert rec_def_id in all_ids
