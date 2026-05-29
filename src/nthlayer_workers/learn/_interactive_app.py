@@ -217,6 +217,14 @@ def run_walkthrough(
     """
     app = InteractiveWalkthroughApp(plan, specs_dir=specs_dir)
     result = app.run()
-    return result if result is not None else dataclasses.replace(
-        plan, recommendations=[],
+    if result is not None:
+        return result
+    # App.run returned None — Ctrl+C, SIGTERM, or some Textual abort path.
+    # All operator decisions are lost; downstream apply will no-op.
+    # Log so the silent path is traceable (opensrm-jmy.22 P3 R5).
+    log.warning(
+        "interactive_aborted_returning_empty_plan",
+        incident=plan.incident,
+        original_rec_count=len(plan.recommendations),
     )
+    return dataclasses.replace(plan, recommendations=[])

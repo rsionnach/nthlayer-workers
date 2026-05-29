@@ -1691,3 +1691,114 @@ class TestInteractiveFlag:
         assert "plan" in captured
         captured_ids = [r.id for r in captured["plan"].recommendations]
         assert captured_ids == ["rec-A"]
+
+    def test_interactive_with_output_and_apply_to_both_reflect_walkthrough(
+        self, tmp_path, monkeypatch,
+    ):
+        """jmy.22 P3 R5: --interactive + --output + --apply-to → both the
+        snapshot file AND the manifest reflect the post-walkthrough plan.
+        """
+        from nthlayer_workers.learn.cli import main
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation, Recommendation, parse_plan_file,
+        )
+        from datetime import datetime, timezone
+
+        specs_dir = tmp_path / "specs"
+        specs_dir.mkdir()
+        (specs_dir / "fraud-detect.yaml").write_text(
+            "metadata:\n  name: fraud-detect\n"
+            "spec:\n  slos:\n    judgment:\n      target: 95.0\n"
+        )
+        plan = SpecRecommendation(
+            incident="inc-jmy22-combo", generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-combo-a", service="fraud-detect",
+                    type="tighten_slo", rationale="x",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0, proposed_value=98.5,
+                ),
+                Recommendation(
+                    id="rec-combo-b", service="fraud-detect",
+                    type="tighten_slo", rationale="y",
+                    field="spec.slos.other.target",
+                    current_value=99.0, proposed_value=99.5,
+                ),
+            ],
+        )
+        plan_in = tmp_path / "in.yaml"
+        plan_in.write_text(plan.to_yaml())
+        plan_out = tmp_path / "snapshot.yaml"
+
+        # Walkthrough accepts only rec-combo-a (rejects b).
+        def fake_walkthrough(plan_in_arg, specs_dir=None):
+            kept = [
+                r for r in plan_in_arg.recommendations if r.id == "rec-combo-a"
+            ]
+            from dataclasses import replace
+            return replace(plan_in_arg, recommendations=kept)
+        self._install_fake_walkthrough(monkeypatch, fake_walkthrough)
+
+        try:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--output", str(plan_out),
+                "--interactive",
+            ])
+        except SystemExit:
+            pass
+
+        # Snapshot has only rec-combo-a.
+        snap = parse_plan_file(plan_out)
+        assert [r.id for r in snap.recommendations] == ["rec-combo-a"]
+        # Manifest's judgment target updated (a applied); other.target absent.
+        manifest_text = (specs_dir / "fraud-detect.yaml").read_text()
+        assert "target: 98.5" in manifest_text
+        assert "other" not in manifest_text
+
+
+class TestRunWalkthroughAbort:
+    """jmy.22 P3 R5: run_walkthrough handles app.run() returning None
+    (Ctrl+C / SIGTERM / Textual abort) by logging + returning empty plan.
+    """
+
+    def test_run_walkthrough_none_returns_empty_plan(self, monkeypatch, caplog):
+        import logging
+        from nthlayer_workers.learn._interactive_app import run_walkthrough
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation, Recommendation,
+        )
+        from datetime import datetime, timezone
+
+        plan = SpecRecommendation(
+            incident="inc-abort", generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-abort", service="svc", type="tighten_slo",
+                    rationale="x",
+                    field="spec.slos.x.target",
+                    current_value=95.0, proposed_value=98.5,
+                ),
+            ],
+        )
+
+        # Patch App.run to return None (simulating abort).
+        from nthlayer_workers.learn import _interactive_app as iapp
+        class FakeApp:
+            def __init__(self, *a, **kw): pass
+            def run(self):
+                return None
+        monkeypatch.setattr(iapp, "InteractiveWalkthroughApp", FakeApp)
+
+        caplog.set_level(logging.WARNING)
+        result = run_walkthrough(plan)
+        assert result.recommendations == []
+        # Source plan untouched.
+        assert len(plan.recommendations) == 1

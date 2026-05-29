@@ -486,3 +486,91 @@ class TestRenderDiffWithNoFieldPath:
         assert "action" in diff
         assert "block" in diff
         assert "+++ proposed +++" in diff
+
+
+# ---------------------------------------------------------------------------
+# jmy.22 P3 R5: edge cases — empty modify, dangling state, abort path
+# ---------------------------------------------------------------------------
+
+
+class TestModifyEmptyInputs:
+    """jmy.22 P3 R5: empty/whitespace YAML must not silently overwrite
+    proposed_value with None. Operator who pressed Enter accidentally
+    keeps their original proposed_value and sees a clear error.
+    """
+
+    def test_modify_empty_string_does_not_overwrite_with_none(self):
+        from nthlayer_workers.learn._interactive import (
+            WalkthroughState, modify,
+        )
+        plan = _build_multi_rec_plan(rec_ids=("rec-a",))
+        original = plan.recommendations[0].proposed_value
+        state = WalkthroughState.for_plan(plan)
+        state = modify(state, "")
+        assert state.last_error and "non-empty" in state.last_error
+        assert state.modified_values == {}
+        assert state.accepted_ids == set()
+        # Original proposed value untouched on the source plan.
+        assert plan.recommendations[0].proposed_value == original
+
+    def test_modify_whitespace_only_does_not_overwrite_with_none(self):
+        from nthlayer_workers.learn._interactive import (
+            WalkthroughState, modify,
+        )
+        plan = _build_multi_rec_plan(rec_ids=("rec-a",))
+        state = WalkthroughState.for_plan(plan)
+        state = modify(state, "   \n  \t  ")
+        assert state.last_error and "non-empty" in state.last_error
+        assert state.modified_values == {}
+        assert state.accepted_ids == set()
+
+    def test_modify_yaml_null_keyword_does_not_overwrite_with_none(self):
+        """A bare 'null' or '~' parses to None — same footgun shape, same
+        guard."""
+        from nthlayer_workers.learn._interactive import (
+            WalkthroughState, modify,
+        )
+        plan = _build_multi_rec_plan(rec_ids=("rec-a",))
+        state = WalkthroughState.for_plan(plan)
+        state = modify(state, "null")
+        assert state.last_error and "non-null" in state.last_error
+        assert state.modified_values == {}
+
+
+class TestModifyRejectInteraction:
+    """jmy.22 P3 R5: reject clears any prior modification on the same rec
+    so modified_values doesn't carry stale entries."""
+
+    def test_modify_then_reject_same_rec_drops_modification(self):
+        from nthlayer_workers.learn._interactive import (
+            WalkthroughState, modify, prev_rec, reject,
+        )
+        plan = _build_multi_rec_plan(rec_ids=("rec-a", "rec-b"))
+        state = WalkthroughState.for_plan(plan)
+        state = modify(state, "42.0")
+        assert "rec-a" in state.modified_values
+        # Rewind to rec-a and reject it.
+        state = prev_rec(state)
+        state = reject(state)
+        assert "rec-a" not in state.modified_values
+        assert "rec-a" in state.rejected_ids
+        assert "rec-a" not in state.accepted_ids
+
+
+class TestNavigationFromDoneState:
+    """jmy.22 P3 R5: prev_rec from done-state (index == total) must
+    return to the last rec so the operator can revisit it."""
+
+    def test_prev_from_done_state_returns_to_last_rec(self):
+        from nthlayer_workers.learn._interactive import (
+            WalkthroughState, accept, prev_rec,
+        )
+        plan = _build_multi_rec_plan(rec_ids=("rec-a", "rec-b"))
+        state = WalkthroughState.for_plan(plan)
+        state = accept(state)   # rec-a, index=1
+        state = accept(state)   # rec-b, index=2 (== total, done)
+        assert state.current is None
+        state = prev_rec(state)
+        assert state.index == 1
+        assert state.current is not None
+        assert state.current.id == "rec-b"

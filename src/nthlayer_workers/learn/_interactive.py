@@ -68,12 +68,20 @@ def accept(state: WalkthroughState) -> WalkthroughState:
 
 
 def reject(state: WalkthroughState) -> WalkthroughState:
-    """Mark current rec rejected; advance to next."""
+    """Mark current rec rejected; advance to next.
+
+    Also drops any prior modification of this rec — `modified_values`
+    tracks state that only matters for accepted recs. Keeping a stale
+    entry would resurrect the modification if a future change iterated
+    `modified_values` directly (today `finalize` gates on `accepted_ids`
+    so the leak is invisible, but the invariant is worth keeping clean).
+    """
     rec = state.current
     if rec is None:
         return state
     state.rejected_ids.add(rec.id)
     state.accepted_ids.discard(rec.id)
+    state.modified_values.pop(rec.id, None)
     state.last_error = None
     return _advance(state)
 
@@ -84,14 +92,29 @@ def modify(state: WalkthroughState, new_value_yaml: str) -> WalkthroughState:
     Modify implies accept (operator wouldn't edit a rec they were going to
     reject). On parse failure, state is unchanged except for last_error
     which the screen renders.
+
+    Empty or whitespace-only input is rejected: ``yaml.safe_load("")``
+    legally returns ``None``, but silently overwriting proposed_value
+    with None when the operator pressed Enter accidentally is a footgun
+    (opensrm-jmy.22 P3 R5). Treat None and bare strings as a parse error.
     """
     rec = state.current
     if rec is None:
+        return state
+    if not new_value_yaml or not new_value_yaml.strip():
+        state.last_error = (
+            "modify requires a non-empty value; press Esc to cancel"
+        )
         return state
     try:
         parsed = yaml.safe_load(new_value_yaml)
     except yaml.YAMLError as exc:
         state.last_error = f"YAML parse error: {exc}"
+        return state
+    if parsed is None:
+        state.last_error = (
+            "modify requires a non-null value; press Esc to cancel"
+        )
         return state
     state.modified_values[rec.id] = parsed
     state.accepted_ids.add(rec.id)
