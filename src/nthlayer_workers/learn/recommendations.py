@@ -41,9 +41,12 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
+import structlog
 import yaml
 
 from nthlayer_common.outcomes import FinancialImpact
+
+log = structlog.get_logger(__name__)
 
 
 def compute_rec_id(incident_id: str, rec_type: str, field: str) -> str:
@@ -91,6 +94,8 @@ _TIGHTEN_SLO_BLEND = 0.5
 # but whether it should be a declared dependency (vs incidental
 # co-failure) is an operator judgement — so a flat 0.5 rather than
 # the higher tighten_slo / add_deploy_gate confidences.
+# TODO(jmy.21-followup): scale by blast-radius co-occurrence count
+# (how often svc-Y participates in svc-X incidents over a window).
 _ADD_DEPENDENCY_CONFIDENCE = 0.5
 
 
@@ -443,6 +448,16 @@ def _add_dependency_recommendations(
     trigger = incident_custom.get("trigger_service")
     blast = _normalize_blast_radius(incident_custom.get("blast_radius") or [])
     if not trigger or not blast:
+        # Pre-jmy.21 retrospectives have no trigger_service; that's
+        # back-compat. Logged at debug so operators investigating a
+        # correlate misconfig (missing trigger but present blast) can
+        # see the no-op without warning-level noise on the back-compat path.
+        log.debug(
+            "add_dependency_skipped",
+            incident_id=incident_id,
+            has_trigger=bool(trigger),
+            blast_size=len(blast),
+        )
         return []
     declared_map = incident_custom.get("declared_dependencies_by_service") or {}
     declared_for_trigger = set(declared_map.get(trigger, []))

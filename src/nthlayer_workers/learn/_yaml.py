@@ -82,6 +82,10 @@ def apply_at_path(doc: Any, dotted_path: str, value: Any) -> None:
     path. The path must point to a list, OR be absent (in which case
     it is created as an empty list and then appended). ``value`` is a
     single item to append. TypeError if the existing leaf is not a list.
+
+    Both branches (set-path and ``[+]`` append) share the structural-
+    error contract: ``doc`` must be a mapping, intermediates must be
+    mappings, and a non-empty dotted_path is required.
     """
     if not dotted_path:
         raise ValueError("apply_at_path requires a non-empty dotted_path")
