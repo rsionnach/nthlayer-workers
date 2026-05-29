@@ -211,11 +211,10 @@ def _cmd_recommendations(args: argparse.Namespace) -> None:
         # integration test G1 exercises this path explicitly).
         plan = _build_plan_from_incident(args.incident)
 
-    # --output: write plan to file BEFORE --apply-to runs (per design § 4)
-    if args.output:
-        Path(args.output).write_text(plan.to_yaml())
-
     # --include / --exclude: filter recommendations before apply (jmy.24)
+    # NOTE: filter runs BEFORE --output so the snapshot reflects the
+    # effective plan an operator actually applied (GitOps "save what I
+    # ran" workflow). Pre-filter snapshots: drop the selection flags.
     if args.include or args.exclude:
         requested = (args.include or args.exclude).split(",")
         requested = [s.strip() for s in requested if s.strip()]
@@ -241,6 +240,11 @@ def _cmd_recommendations(args: argparse.Namespace) -> None:
         else:  # args.exclude
             drop = set(requested)
             plan.recommendations = [r for r in plan.recommendations if r.id not in drop]
+
+    # --output: write plan to file (post-filter so it reflects the
+    # effective plan, opensrm-jmy.24 P3 R5).
+    if args.output:
+        Path(args.output).write_text(plan.to_yaml())
 
     # --apply-to: apply plan to specs directory
     apply_result = None

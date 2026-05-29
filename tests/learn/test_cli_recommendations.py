@@ -1274,3 +1274,164 @@ class TestIncludeExcludeFlags:
         all_ids = {e["id"] for e in doc["applied"]} | {e["id"] for e in doc["skipped"]}
         assert rec_abc_id in all_ids
         assert rec_def_id in all_ids
+
+    # ---- jmy.24 P3 R5 coverage gaps ----
+
+    def test_output_snapshot_reflects_post_filter(self, tmp_path, capsys):
+        """jmy.24 P3 R5: --output writes the post-filter plan so the
+        snapshot reflects what was actually applied (GitOps pattern).
+        """
+        from nthlayer_workers.learn.cli import main
+        from nthlayer_workers.learn.recommendations import parse_plan_file
+
+        specs_dir = self._seed_multi_specs_dir(tmp_path)
+        plan_in, rec_abc_id, _rec_def_id = self._build_multi_rec_plan(tmp_path)
+        snapshot = tmp_path / "snapshot.yaml"
+
+        try:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--output", str(snapshot),
+                "--include", rec_abc_id,
+            ])
+        except SystemExit:
+            pass
+
+        saved = parse_plan_file(snapshot)
+        saved_ids = {r.id for r in saved.recommendations}
+        assert saved_ids == {rec_abc_id}
+
+    def test_include_empty_string_is_silent_no_op(self, tmp_path, capsys):
+        """jmy.24 P3 R5: --include "" is falsy → no filter applied.
+        Regression-pin for the silent treatment so a future refactor
+        doesn't accidentally start rejecting empty-string values.
+        """
+        import json
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_multi_specs_dir(tmp_path)
+        plan_in, rec_abc_id, rec_def_id = self._build_multi_rec_plan(tmp_path)
+
+        try:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--include", "",
+                "--json",
+            ])
+        except SystemExit:
+            pass
+
+        doc = json.loads(capsys.readouterr().out)
+        all_ids = {e["id"] for e in doc["applied"]} | {e["id"] for e in doc["skipped"]}
+        # Both recs present — no filter applied.
+        assert rec_abc_id in all_ids
+        assert rec_def_id in all_ids
+
+    def test_include_commas_only_parses_to_empty_set(self, tmp_path, capsys):
+        """jmy.24 P3 R5: --include "," strips to empty requested list →
+        no missing ids (none requested), keep set is empty, plan filtered
+        to []. Apply runs with empty plan, exits 0.
+        """
+        import json
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_multi_specs_dir(tmp_path)
+        plan_in, _rec_abc_id, _rec_def_id = self._build_multi_rec_plan(tmp_path)
+
+        main([
+            "recommendations",
+            "--from", str(plan_in),
+            "--apply-to", str(specs_dir),
+            "--include", ",",
+            "--json",
+        ])
+
+        doc = json.loads(capsys.readouterr().out)
+        assert doc["applied"] == []
+        assert doc["skipped"] == []
+        assert doc["exit_code"] == 0
+
+    def test_filter_preserves_original_rec_order(self, tmp_path, capsys):
+        """jmy.24 P3 R5: filter result follows plan order, not arg order.
+        Reversing the --include args list must NOT reverse the applied list.
+        """
+        import json
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_multi_specs_dir(tmp_path)
+        plan_in, rec_abc_id, rec_def_id = self._build_multi_rec_plan(tmp_path)
+        # rec_abc_id appears first in the plan. Pass --include in reverse
+        # order — the applied/skipped lists must still match plan order.
+        try:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--include", f"{rec_def_id},{rec_abc_id}",
+                "--json",
+            ])
+        except SystemExit:
+            pass
+
+        doc = json.loads(capsys.readouterr().out)
+        all_ids = [e["id"] for e in doc["applied"]] + [e["id"] for e in doc["skipped"]]
+        # Find each id's first index; rec_abc must come before rec_def
+        # because the original plan order is [abc, def].
+        assert all_ids.index(rec_abc_id) < all_ids.index(rec_def_id)
+
+    def test_include_all_rec_ids_is_no_op_filter(self, tmp_path, capsys):
+        """jmy.24 P3 R5: --include of every rec id is a no-op filter
+        (every rec survives). Behaves identically to omitting the flag."""
+        import json
+        from nthlayer_workers.learn.cli import main
+
+        specs_dir = self._seed_multi_specs_dir(tmp_path)
+        plan_in, rec_abc_id, rec_def_id = self._build_multi_rec_plan(tmp_path)
+
+        try:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--include", f"{rec_abc_id},{rec_def_id}",
+                "--json",
+            ])
+        except SystemExit:
+            pass
+
+        doc = json.loads(capsys.readouterr().out)
+        all_ids = {e["id"] for e in doc["applied"]} | {e["id"] for e in doc["skipped"]}
+        assert all_ids == {rec_abc_id, rec_def_id}
+
+    def test_include_against_zero_rec_plan_rejects_all_as_unknown(
+        self, tmp_path, capsys,
+    ):
+        """jmy.24 P3 R5: plan with zero recommendations + any --include
+        → every requested id is unknown → SystemExit(2).
+        """
+        from datetime import datetime, timezone
+        from nthlayer_workers.learn.cli import main
+        from nthlayer_workers.learn.recommendations import SpecRecommendation
+
+        specs_dir = self._seed_specs_dir(tmp_path)
+        empty_plan = SpecRecommendation(
+            incident="inc-empty", generated_by="nthlayer-learn",
+            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            confidence=0.0, recommendations=[],
+        )
+        plan_in = tmp_path / "empty.yaml"
+        plan_in.write_text(empty_plan.to_yaml())
+
+        with pytest.raises(SystemExit) as exc:
+            main([
+                "recommendations",
+                "--from", str(plan_in),
+                "--apply-to", str(specs_dir),
+                "--include", "rec-anything",
+            ])
+        assert exc.value.code == 2
+        assert "not found in plan" in capsys.readouterr().err
