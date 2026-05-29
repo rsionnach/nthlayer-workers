@@ -103,17 +103,18 @@ class InteractiveWalkthroughApp(App[SpecRecommendation]):
                         return f"{preview}\nRationale: {rec.rationale}"
             except Exception:
                 pass
-        # Fallback: simple current → proposed block
+        # Fallback: simple current → proposed block. When rec.field is
+        # None (legitimate for placeholder recs like add_deploy_gate with
+        # no breached SLO), key the YAML block by rec.type so the operator
+        # still sees the proposed value rather than an empty diff
+        # (opensrm-jmy.22 P1 R5).
+        key = rec.field if rec.field else rec.type
         cur = (
-            yaml.safe_dump({rec.field: rec.current_value}, sort_keys=False)
-            if rec.field
+            yaml.safe_dump({key: rec.current_value}, sort_keys=False)
+            if rec.current_value is not None
             else ""
         )
-        prop = (
-            yaml.safe_dump({rec.field: rec.proposed_value}, sort_keys=False)
-            if rec.field
-            else ""
-        )
+        prop = yaml.safe_dump({key: rec.proposed_value}, sort_keys=False)
         return (
             f"--- current ---\n{cur}\n"
             f"+++ proposed +++\n{prop}\n\n"

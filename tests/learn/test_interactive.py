@@ -7,6 +7,7 @@ state machine.
 """
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime, timezone
 
 
@@ -450,3 +451,38 @@ class TestFinalize:
 
         assert len(plan.recommendations) == original_count
         assert [r.proposed_value for r in plan.recommendations] == original_proposed_values
+
+
+# ---------------------------------------------------------------------------
+# jmy.22 P1 R5: _render_diff fallback when rec.field is None
+# ---------------------------------------------------------------------------
+
+
+class TestRenderDiffWithNoFieldPath:
+    """jmy.22 P1 R5: a Recommendation with field=None (legitimate for
+    placeholder recs) must still display proposed_value in the diff
+    fallback. Previously the YAML block was keyed by rec.field and
+    rendered empty when field was None.
+    """
+
+    def test_render_diff_uses_type_as_key_when_field_is_none(self):
+        from nthlayer_workers.learn._interactive_app import InteractiveWalkthroughApp
+
+        plan = _build_multi_rec_plan(rec_ids=("rec-a",))
+        # Mutate the rec to drop field (simulating a placeholder add_deploy_gate
+        # or any future rec type that legitimately has field=None).
+        plan.recommendations[0] = dataclasses.replace(
+            plan.recommendations[0],
+            field=None,
+            current_value=None,
+            proposed_value={"action": "block", "service": "fraud-detect"},
+        )
+
+        app = InteractiveWalkthroughApp(plan, specs_dir=None)
+        diff = app._render_diff(app._state.current)
+
+        # proposed_value must be rendered somewhere in the diff text;
+        # rec.type is used as the YAML key when field is None.
+        assert "action" in diff
+        assert "block" in diff
+        assert "+++ proposed +++" in diff
