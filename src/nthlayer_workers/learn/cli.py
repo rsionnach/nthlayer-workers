@@ -227,11 +227,9 @@ def _cmd_recommendations(args: argparse.Namespace) -> None:
         ))
         if missing:
             joined = ", ".join(missing)
-            # Print to stderr + raise SystemExit(2) — int exit code per the
-            # locked contract. (--apply-to / --pr requirement checks above
-            # use string-SystemExit which exits 1; that pre-flight tier is
-            # informational, the unknown-id tier is a data error worth its
-            # own non-default exit code.)
+            # Unknown ids are a data error → exit 2.
+            # (Pre-flight requirement checks above use string-SystemExit
+            # which exits 1.)
             print(
                 f"error: --include/--exclude id(s) not found in plan: {joined}",
                 file=sys.stderr,
