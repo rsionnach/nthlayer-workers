@@ -88,3 +88,35 @@ class TestTriggerServiceResolution:
 
         retro = build_retrospective(incident.id, store)
         assert retro.metadata.custom["trigger_service"] == "payments"
+
+    def test_trigger_service_skips_whitespace_correlation_subject_to_fallback(self):
+        """Correlation subject.service is whitespace-only → fallback wins.
+        R5 edge-cases: whitespace strings are not valid service identities."""
+        store = MemoryStore()
+        incident = _make_incident("payments")
+        correlation = _make_correlation("   ")
+        store.put(incident)
+        store.put(correlation)
+        incident.lineage.context = [correlation.id]
+        store.put(incident)
+
+        retro = build_retrospective(incident.id, store)
+        assert retro.metadata.custom["trigger_service"] == "payments"
+
+    def test_trigger_service_whitespace_fallback_omits_key(self):
+        """Both correlation and fallback are whitespace-only → key omitted."""
+        store = MemoryStore()
+        incident = _make_incident("   ")
+        store.put(incident)
+
+        retro = build_retrospective(incident.id, store)
+        assert "trigger_service" not in retro.metadata.custom
+
+    def test_trigger_service_stripped_when_padded(self):
+        """Padded service name is stripped before write — no `' fraud-detect '` keys."""
+        store = MemoryStore()
+        incident = _make_incident("  fraud-detect  ")
+        store.put(incident)
+
+        retro = build_retrospective(incident.id, store)
+        assert retro.metadata.custom["trigger_service"] == "fraud-detect"

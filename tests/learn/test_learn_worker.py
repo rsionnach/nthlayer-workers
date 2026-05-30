@@ -619,3 +619,73 @@ class TestRetrospectiveTriggerService:
         data = submitted["data"]["data"]
         assert "declared_dependencies_by_service" not in data
         assert data["trigger_service"] == "fraud-detect"
+
+    async def test_retrospective_duplicate_trigger_manifest_first_wins(self):
+        """R5 edge-cases: two manifests with the same name in the API
+        response → first-wins selection, warning logged."""
+        client = AsyncMock()
+        client.get_assessments.return_value = APIResult(
+            ok=True, status_code=200,
+            data=[{
+                "id": "csn-6", "service": "fraud-detect",
+                "created_at": "2026-05-29T00:00:00+00:00",
+                "data": {
+                    "domain": {"service": "fraud-detect"},
+                    "window": {"opened_at": "2026-05-29T00:00:00+00:00",
+                               "closed_at": "2026-05-29T00:05:00+00:00",
+                               "duration_seconds": 300},
+                    "affected_services": ["fraud-detect"],
+                },
+            }],
+        )
+        client.get_verdicts.return_value = APIResult(ok=True, status_code=200, data=[])
+        client.get_manifests.return_value = APIResult(
+            ok=True, status_code=200,
+            data=[
+                {"name": "fraud-detect", "dependencies": [{"name": "svc-first"}]},
+                {"name": "fraud-detect", "dependencies": [{"name": "svc-second"}]},
+            ],
+        )
+        client.submit_assessment.return_value = APIResult(ok=True, status_code=200, data={})
+
+        module = LearnRetrospectiveModule(client=client)
+        await module.process_cycle()
+
+        submitted = client.submit_assessment.call_args.args[0]
+        data = submitted["data"]["data"]
+        # First-wins: svc-first, not svc-second
+        assert data["declared_dependencies_by_service"] == {
+            "fraud-detect": ["svc-first"],
+        }
+
+    async def test_retrospective_handles_get_manifests_data_none(self):
+        """R5 edge-cases: get_manifests returns ok=True but data=None
+        (no catalogue) → treated as empty, declared_deps omitted, no crash."""
+        client = AsyncMock()
+        client.get_assessments.return_value = APIResult(
+            ok=True, status_code=200,
+            data=[{
+                "id": "csn-7", "service": "fraud-detect",
+                "created_at": "2026-05-29T00:00:00+00:00",
+                "data": {
+                    "domain": {"service": "fraud-detect"},
+                    "window": {"opened_at": "2026-05-29T00:00:00+00:00",
+                               "closed_at": "2026-05-29T00:05:00+00:00",
+                               "duration_seconds": 300},
+                    "affected_services": ["fraud-detect"],
+                },
+            }],
+        )
+        client.get_verdicts.return_value = APIResult(ok=True, status_code=200, data=[])
+        client.get_manifests.return_value = APIResult(
+            ok=True, status_code=200, data=None,
+        )
+        client.submit_assessment.return_value = APIResult(ok=True, status_code=200, data={})
+
+        module = LearnRetrospectiveModule(client=client)
+        await module.process_cycle()
+
+        submitted = client.submit_assessment.call_args.args[0]
+        data = submitted["data"]["data"]
+        assert "declared_dependencies_by_service" not in data
+        assert data["trigger_service"] == "fraud-detect"

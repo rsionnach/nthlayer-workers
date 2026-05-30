@@ -318,12 +318,21 @@ class LearnRetrospectiveModule:
                     # declared_map.get(trigger) and never iterates other
                     # entries, so emit a 1-key dict rather than the full
                     # catalogue (smaller wire payload, intentional shape).
-                    trigger_manifest = next(
+                    trigger_matches = [
                         m for m in manifests_result.data
                         if m.get("name") == trigger_service
-                    )
+                    ]
+                    if len(trigger_matches) > 1:
+                        # First-wins (matches the existing
+                        # _load_manifests_from_specs dedup behaviour
+                        # on the CLI side, retrospective.py line 238).
+                        logger.warning(
+                            "learn_manifest_duplicate_skipped",
+                            service=trigger_service,
+                            count=len(trigger_matches),
+                        )
                     declared_dependencies_by_service = extract_declared_dependencies(
-                        from_dicts=[trigger_manifest],
+                        from_dicts=[trigger_matches[0]],
                     )
 
         # Build recommendations

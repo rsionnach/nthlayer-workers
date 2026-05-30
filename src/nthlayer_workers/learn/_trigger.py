@@ -25,8 +25,16 @@ def resolve_trigger_service(
     Returning ``None`` is the signal to OMIT the trigger_service key
     from the retrospective payload entirely (back-compat with jmy.21's
     ``log.debug + []`` no-rec path in ``_add_dependency_recommendations``).
+
+    Whitespace-only strings (e.g. ``" "``) are normalised to ``None`` —
+    they cannot be a valid service identity, and treating them as
+    truthy would let pathological producer data poison the
+    ``declared_map.get(trigger)`` lookup downstream (no match, but
+    silent).
     """
     for candidate in correlation_candidates:
-        if candidate:
-            return candidate
-    return fallback or None
+        if candidate and candidate.strip():
+            return candidate.strip()
+    if fallback and fallback.strip():
+        return fallback.strip()
+    return None
