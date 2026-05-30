@@ -435,3 +435,185 @@ class TestGenerateRecommendations:
     def test_no_recommendations_for_simple_chain(self):
         recs = _generate_recommendations([{"type": "approval"}], {"affected_services": ["a"]})
         assert recs == []
+
+
+# ---------------------------------------------------------------------------
+# TestRetrospectiveTriggerService — opensrm-dpws
+# ---------------------------------------------------------------------------
+
+
+class TestRetrospectiveTriggerService:
+    """opensrm-dpws: worker-path retrospective populates trigger_service
+    and (when trigger's manifest is present) declared_dependencies_by_service."""
+
+    async def test_retrospective_includes_trigger_service(self):
+        """snapshot.data.domain.service → data['trigger_service']."""
+        client = AsyncMock()
+        client.get_assessments.return_value = APIResult(
+            ok=True, status_code=200,
+            data=[{
+                "id": "csn-1",
+                "service": "fraud-detect",
+                "created_at": "2026-05-29T00:00:00+00:00",
+                "data": {
+                    "domain": {"service": "fraud-detect", "environment": "prod"},
+                    "window": {"opened_at": "2026-05-29T00:00:00+00:00",
+                               "closed_at": "2026-05-29T00:05:00+00:00",
+                               "duration_seconds": 300},
+                    "affected_services": ["fraud-detect", "svc-x"],
+                },
+            }],
+        )
+        client.get_verdicts.return_value = APIResult(ok=True, status_code=200, data=[])
+        client.get_manifests.return_value = APIResult(
+            ok=True, status_code=200,
+            data=[
+                {"name": "fraud-detect", "dependencies": [
+                    {"name": "svc-known", "type": "api"},
+                ]},
+            ],
+        )
+        client.submit_assessment.return_value = APIResult(ok=True, status_code=200, data={})
+
+        module = LearnRetrospectiveModule(client=client)
+        await module.process_cycle()
+
+        submitted = client.submit_assessment.call_args.args[0]
+        data = submitted["data"]["data"]
+        assert data["trigger_service"] == "fraud-detect"
+
+    async def test_retrospective_trigger_service_fallback_to_top_level_service(self):
+        """data.domain.service absent → uses snapshot['service']."""
+        client = AsyncMock()
+        client.get_assessments.return_value = APIResult(
+            ok=True, status_code=200,
+            data=[{
+                "id": "csn-2",
+                "service": "payments",
+                "created_at": "2026-05-29T00:00:00+00:00",
+                "data": {
+                    "domain": {},
+                    "window": {"opened_at": "2026-05-29T00:00:00+00:00",
+                               "closed_at": "2026-05-29T00:05:00+00:00",
+                               "duration_seconds": 300},
+                    "affected_services": ["payments"],
+                },
+            }],
+        )
+        client.get_verdicts.return_value = APIResult(ok=True, status_code=200, data=[])
+        client.get_manifests.return_value = APIResult(
+            ok=True, status_code=200,
+            data=[{"name": "payments", "dependencies": []}],
+        )
+        client.submit_assessment.return_value = APIResult(ok=True, status_code=200, data={})
+
+        module = LearnRetrospectiveModule(client=client)
+        await module.process_cycle()
+
+        submitted = client.submit_assessment.call_args.args[0]
+        data = submitted["data"]["data"]
+        assert data["trigger_service"] == "payments"
+
+    async def test_retrospective_includes_declared_dependencies(self):
+        """get_manifests returns trigger's manifest → declared_deps populated."""
+        client = AsyncMock()
+        client.get_assessments.return_value = APIResult(
+            ok=True, status_code=200,
+            data=[{
+                "id": "csn-3", "service": "fraud-detect",
+                "created_at": "2026-05-29T00:00:00+00:00",
+                "data": {
+                    "domain": {"service": "fraud-detect"},
+                    "window": {"opened_at": "2026-05-29T00:00:00+00:00",
+                               "closed_at": "2026-05-29T00:05:00+00:00",
+                               "duration_seconds": 300},
+                    "affected_services": ["fraud-detect"],
+                },
+            }],
+        )
+        client.get_verdicts.return_value = APIResult(ok=True, status_code=200, data=[])
+        client.get_manifests.return_value = APIResult(
+            ok=True, status_code=200,
+            data=[
+                {"name": "fraud-detect", "dependencies": [
+                    {"name": "svc-known", "type": "api"},
+                ]},
+                {"name": "svc-known", "dependencies": []},
+            ],
+        )
+        client.submit_assessment.return_value = APIResult(ok=True, status_code=200, data={})
+
+        module = LearnRetrospectiveModule(client=client)
+        await module.process_cycle()
+
+        submitted = client.submit_assessment.call_args.args[0]
+        data = submitted["data"]["data"]
+        assert data["declared_dependencies_by_service"] == {
+            "fraud-detect": ["svc-known"],
+            "svc-known": [],
+        }
+
+    async def test_retrospective_omits_declared_deps_when_manifest_fetch_fails(self):
+        """get_manifests returns ok=False → declared_deps key absent, no crash.
+        trigger_service is still populated (decoupled per design § 3.6)."""
+        client = AsyncMock()
+        client.get_assessments.return_value = APIResult(
+            ok=True, status_code=200,
+            data=[{
+                "id": "csn-4", "service": "fraud-detect",
+                "created_at": "2026-05-29T00:00:00+00:00",
+                "data": {
+                    "domain": {"service": "fraud-detect"},
+                    "window": {"opened_at": "2026-05-29T00:00:00+00:00",
+                               "closed_at": "2026-05-29T00:05:00+00:00",
+                               "duration_seconds": 300},
+                    "affected_services": ["fraud-detect"],
+                },
+            }],
+        )
+        client.get_verdicts.return_value = APIResult(ok=True, status_code=200, data=[])
+        client.get_manifests.return_value = APIResult(
+            ok=False, status_code=503, data=None, error="connection_failed",
+        )
+        client.submit_assessment.return_value = APIResult(ok=True, status_code=200, data={})
+
+        module = LearnRetrospectiveModule(client=client)
+        await module.process_cycle()
+
+        submitted = client.submit_assessment.call_args.args[0]
+        data = submitted["data"]["data"]
+        assert "declared_dependencies_by_service" not in data
+        assert data["trigger_service"] == "fraud-detect"
+
+    async def test_retrospective_omits_declared_deps_when_trigger_manifest_absent(self):
+        """get_manifests succeeds but trigger's own manifest missing → declared_deps omitted."""
+        client = AsyncMock()
+        client.get_assessments.return_value = APIResult(
+            ok=True, status_code=200,
+            data=[{
+                "id": "csn-5", "service": "fraud-detect",
+                "created_at": "2026-05-29T00:00:00+00:00",
+                "data": {
+                    "domain": {"service": "fraud-detect"},
+                    "window": {"opened_at": "2026-05-29T00:00:00+00:00",
+                               "closed_at": "2026-05-29T00:05:00+00:00",
+                               "duration_seconds": 300},
+                    "affected_services": ["fraud-detect", "svc-x"],
+                },
+            }],
+        )
+        client.get_verdicts.return_value = APIResult(ok=True, status_code=200, data=[])
+        # Catalogue has svc-x but NOT fraud-detect (the trigger)
+        client.get_manifests.return_value = APIResult(
+            ok=True, status_code=200,
+            data=[{"name": "svc-x", "dependencies": []}],
+        )
+        client.submit_assessment.return_value = APIResult(ok=True, status_code=200, data={})
+
+        module = LearnRetrospectiveModule(client=client)
+        await module.process_cycle()
+
+        submitted = client.submit_assessment.call_args.args[0]
+        data = submitted["data"]["data"]
+        assert "declared_dependencies_by_service" not in data
+        assert data["trigger_service"] == "fraud-detect"

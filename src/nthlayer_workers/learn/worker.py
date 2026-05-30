@@ -16,6 +16,9 @@ import structlog
 
 from nthlayer_common.api_client import CoreAPIClient
 from nthlayer_common.cloudevents import wrap_assessment
+from nthlayer_common.manifest import extract_declared_dependencies
+
+from nthlayer_workers.learn._trigger import resolve_trigger_service
 
 logger = structlog.get_logger()
 
@@ -246,6 +249,16 @@ class LearnRetrospectiveModule:
         domain = snapshot_data.get("domain", {})
         service = snapshot.get("service", domain.get("service", "unknown"))
 
+        # opensrm-dpws: resolve trigger_service via correlation-first /
+        # snapshot-service-fallback precedence. The snapshot's
+        # data.domain.service IS the correlator's grouping anchor; the
+        # top-level service field is the same value emitted at submit
+        # time but kept independent for resilience.
+        trigger_service = resolve_trigger_service(
+            [domain.get("service")],
+            snapshot.get("service"),
+        )
+
         # Build verdict chain by querying verdicts for the affected service
         # during the snapshot window. Cannot use get_ancestors on an assessment
         # ID — that endpoint operates on verdict IDs only.
@@ -276,32 +289,66 @@ class LearnRetrospectiveModule:
         # Extract root cause from correlation data
         root_cause = snapshot_data.get("correlation_groups", [{}])[0] if snapshot_data.get("correlation_groups") else None
 
+        # opensrm-dpws: declared_dependencies_by_service — populate only
+        # when the trigger's own manifest is in the API result.
+        # _add_dependency_recommendations reads declared_map.get(trigger)
+        # so non-trigger gaps are harmless; trigger gap → over-broad recs.
+        declared_dependencies_by_service: dict[str, list[str]] | None = None
+        if trigger_service:
+            manifests_result = await self.client.get_manifests()
+            if not manifests_result.ok:
+                logger.warning(
+                    "learn_manifest_fetch_failed",
+                    error=manifests_result.error,
+                )
+            elif not manifests_result.data:
+                logger.info("learn_manifest_catalogue_empty")
+            else:
+                manifest_names = {
+                    m.get("name") for m in manifests_result.data if m.get("name")
+                }
+                if trigger_service not in manifest_names:
+                    logger.warning(
+                        "learn_trigger_manifest_absent",
+                        service=trigger_service,
+                    )
+                else:
+                    declared_dependencies_by_service = extract_declared_dependencies(
+                        from_dicts=manifests_result.data,
+                    )
+
         # Build recommendations
         recommendations = _generate_recommendations(chain, snapshot_data)
 
         now = datetime.now(timezone.utc)
         duration = snapshot_data.get("window", {}).get("duration_seconds", 0)
 
+        data: dict[str, Any] = {
+            "correlation_snapshot_id": snapshot.get("id"),
+            "duration_minutes": duration / 60 if duration else 0,
+            "decisions_affected": sum(1 for v in chain if v.get("type") == "quality_breach"),
+            "verdict_count": len(chain),
+            "root_cause": root_cause,
+            "blast_radius": snapshot_data.get("affected_services", []),
+            "timeline": timeline[:20],
+            "recommendations": recommendations,
+            "outcome_coverage": {
+                "resolved": resolved_count,
+                "pending": pending_count,
+                "total": len(chain),
+            },
+        }
+        if trigger_service is not None:
+            data["trigger_service"] = trigger_service
+        if declared_dependencies_by_service is not None:
+            data["declared_dependencies_by_service"] = declared_dependencies_by_service
+
         assessment = {
             "id": f"retro-{service}-{uuid.uuid4().hex[:8]}",
             "created_at": now.isoformat(),
             "kind": "retrospective",
             "service": service,
-            "data": {
-                "correlation_snapshot_id": snapshot.get("id"),
-                "duration_minutes": duration / 60 if duration else 0,
-                "decisions_affected": sum(1 for v in chain if v.get("type") == "quality_breach"),
-                "verdict_count": len(chain),
-                "root_cause": root_cause,
-                "blast_radius": snapshot_data.get("affected_services", []),
-                "timeline": timeline[:20],
-                "recommendations": recommendations,
-                "outcome_coverage": {
-                    "resolved": resolved_count,
-                    "pending": pending_count,
-                    "total": len(chain),
-                },
-            },
+            "data": data,
         }
 
         result = await self.client.submit_assessment(wrap_assessment(assessment, component="learn"))
