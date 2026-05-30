@@ -30,17 +30,11 @@ def _walk_modules() -> list[str]:
 
     names = [PACKAGE_NAME]
     for module_info in pkgutil.walk_packages(paths, prefix=f"{PACKAGE_NAME}."):
-        # Skip __main__ entry-point modules — convention is they
-        # parse argparse at module top level which SystemExits on
-        # bare import. Tracked under opensrm-a5fv for the proper
-        # `if __name__ == "__main__":` guard.
-        if module_info.name.endswith(".__main__"):
-            continue
         # Skip legacy fastapi-dependent module from the deprecated
         # nthlayer-measure repo (consolidated 2026-04-26). The
         # project's own tests pytest.importorskip("fastapi") to
         # skip it; the module is superseded by core's HTTP API.
-        # Tracked under opensrm-a5fv.
+        # Tracked under opensrm-t5yr for production-side deletion.
         if module_info.name == f"{PACKAGE_NAME}.measure.api.server":
             continue
         names.append(module_info.name)

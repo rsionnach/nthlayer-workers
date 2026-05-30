@@ -1,7 +1,6 @@
 """Unit tests for nthlayer_workers.learn._preview (jmy.6)."""
 from __future__ import annotations
 
-import pytest
 
 
 class TestBuildPreviewScalar:
