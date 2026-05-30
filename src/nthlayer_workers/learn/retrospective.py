@@ -7,7 +7,11 @@ from typing import Any
 
 import structlog
 
-from nthlayer_common.manifest import ManifestLoadError, load_manifest
+from nthlayer_common.manifest import (
+    ManifestLoadError,
+    extract_declared_dependencies,
+    load_manifest,
+)
 from nthlayer_common.outcomes import (
     compute_financial_impact,
     estimate_decisions_in_window,
@@ -15,6 +19,8 @@ from nthlayer_common.outcomes import (
 from nthlayer_common.verdicts.core import create, link
 from nthlayer_common.verdicts.models import Verdict
 from nthlayer_common.verdicts.store import VerdictStore, VerdictFilter
+
+from nthlayer_workers.learn._trigger import resolve_trigger_service
 
 log = structlog.get_logger(__name__)
 
@@ -128,6 +134,32 @@ def build_retrospective(
         evaluation_verdicts, correlation_verdicts, incident_custom
     )
 
+    # opensrm-dpws: resolve trigger_service via correlation-first /
+    # subject-fallback precedence. None → key omitted (back-compat with
+    # jmy.21's _add_dependency_recommendations no-rec path).
+    trigger_service = resolve_trigger_service(
+        [v.subject.service for v in correlation_verdicts],
+        incident.subject.service,
+    )
+
+    custom: dict[str, Any] = {
+        "incident_verdict_id": incident_verdict_id,
+        "duration_minutes": round(duration_minutes, 1),
+        "decisions_affected": decisions_affected,
+        "root_cause": root_cause,
+        "blast_radius": [
+            s.get("service", s) if isinstance(s, dict) else s
+            for s in blast_radius
+        ],
+        "verdict_count": len(all_verdicts),
+        "timeline": timeline[:20],  # Cap at 20 entries
+        "financial_impact": financial_impact,
+        "recommendations": recommendations,
+        "declared_dependencies_by_service": declared_dependencies_by_service,
+    }
+    if trigger_service is not None:
+        custom["trigger_service"] = trigger_service
+
     # Create retrospective verdict
     retro = create(
         subject={
@@ -146,21 +178,7 @@ def build_retrospective(
             "reasoning": f"{len(all_verdicts)} verdicts in chain, {duration_minutes:.0f}m duration",
         },
         producer={"system": "nthlayer-learn"},
-        metadata={"custom": {
-            "incident_verdict_id": incident_verdict_id,
-            "duration_minutes": round(duration_minutes, 1),
-            "decisions_affected": decisions_affected,
-            "root_cause": root_cause,
-            "blast_radius": [
-                s.get("service", s) if isinstance(s, dict) else s
-                for s in blast_radius
-            ],
-            "verdict_count": len(all_verdicts),
-            "timeline": timeline[:20],  # Cap at 20 entries
-            "financial_impact": financial_impact,
-            "recommendations": recommendations,
-            "declared_dependencies_by_service": declared_dependencies_by_service,
-        }},
+        metadata={"custom": custom},
     )
     link(retro, context=[incident_verdict_id])
     verdict_store.put(retro)
@@ -249,20 +267,10 @@ def _load_manifests_from_specs(specs_dir: str | None) -> dict[str, Any]:
 def _extract_declared_dependencies(
     loaded_manifests: dict[str, Any],
 ) -> dict[str, list[str]]:
-    """Build a {service_name: [dep_name, ...]} map from already-loaded manifests.
-
-    A manifest with ``dependencies = None`` produces an empty list for
-    that service (the absence of declared deps is itself information
-    downstream consumers want to record). opensrm-jmy.21 uses this map
-    as the ground-truth side of the observed-vs-declared comparison that
-    drives ``add_dependency`` recommendations.
+    """Wrapper around the shared helper (opensrm-dpws). The CLI path
+    works with Manifest dataclass instances loaded via load_manifest().
     """
-    declared: dict[str, list[str]] = {}
-    for service_name, manifest in loaded_manifests.items():
-        declared[service_name] = [
-            dep.name for dep in (manifest.dependencies or [])
-        ]
-    return declared
+    return extract_declared_dependencies(from_manifests=loaded_manifests)
 
 
 def _compute_financial_impact(
