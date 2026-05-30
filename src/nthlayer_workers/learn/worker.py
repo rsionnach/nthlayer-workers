@@ -313,8 +313,17 @@ class LearnRetrospectiveModule:
                         service=trigger_service,
                     )
                 else:
+                    # Trigger-narrow per design § 3.4: downstream
+                    # _add_dependency_recommendations reads
+                    # declared_map.get(trigger) and never iterates other
+                    # entries, so emit a 1-key dict rather than the full
+                    # catalogue (smaller wire payload, intentional shape).
+                    trigger_manifest = next(
+                        m for m in manifests_result.data
+                        if m.get("name") == trigger_service
+                    )
                     declared_dependencies_by_service = extract_declared_dependencies(
-                        from_dicts=manifests_result.data,
+                        from_dicts=[trigger_manifest],
                     )
 
         # Build recommendations

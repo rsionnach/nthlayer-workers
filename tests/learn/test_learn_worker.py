@@ -548,9 +548,11 @@ class TestRetrospectiveTriggerService:
 
         submitted = client.submit_assessment.call_args.args[0]
         data = submitted["data"]["data"]
+        # Trigger-narrow per design § 3.4: only trigger's entry emitted,
+        # not the full catalogue. svc-known's own manifest is in the API
+        # result but NOT in declared_dependencies_by_service.
         assert data["declared_dependencies_by_service"] == {
             "fraud-detect": ["svc-known"],
-            "svc-known": [],
         }
 
     async def test_retrospective_omits_declared_deps_when_manifest_fetch_fails(self):
