@@ -333,3 +333,98 @@ class TestSummaryBuilder:
         summary = format_summary(ApplyResult())
         assert "Applied: 0" in summary
         assert "Exit code: 0" in summary
+
+
+class TestApplyIdempotency:
+    """opensrm-1mja: ALREADY_APPLIED outcomes route to skipped (not applied).
+
+    The apply layer must report idempotent re-runs as skips so downstream
+    consumers (CLI summary, --json output, operators reading exit-code
+    semantics) don't double-count no-op recs as applied work.
+    """
+
+    def test_add_dependency_rerun_routes_to_skipped(self, tmp_path):
+        """Apply add_dependency once → applied. Apply same plan again →
+        skipped (outcome=already_applied), manifest unchanged."""
+        from datetime import datetime, timezone
+        from nthlayer_workers.learn._apply import apply_recommendations
+        from nthlayer_workers.learn.recommendations import (
+            OutcomeKind, Recommendation, SpecRecommendation,
+        )
+
+        (tmp_path / "payments-api.yaml").write_text(
+            "metadata:\n  name: payments-api\nspec:\n  slos: {}\n"
+        )
+        plan = SpecRecommendation(
+            incident="inc-idempotency",
+            generated_by="test",
+            generated_at=datetime(2026, 5, 30, tzinfo=timezone.utc),
+            confidence=0.5,
+            recommendations=[
+                Recommendation(
+                    id="rec-idem-1",
+                    service="payments-api",
+                    type="add_dependency",
+                    rationale="test",
+                    field="spec.dependencies[+]",
+                    current_value=None,
+                    proposed_value={"name": "svc-new", "type": "api"},
+                ),
+            ],
+        )
+
+        # First apply: APPLY_CLEAN → applied
+        first = apply_recommendations(plan, tmp_path)
+        assert len(first.applied) == 1
+        assert first.applied[0].outcome == OutcomeKind.APPLY_CLEAN
+        assert len(first.skipped) == 0
+
+        # Second apply: ALREADY_APPLIED → skipped (THE FIX)
+        second = apply_recommendations(plan, tmp_path)
+        assert len(second.applied) == 0, (
+            f"already_applied must route to skipped, not applied: "
+            f"{second.applied}"
+        )
+        assert len(second.skipped) == 1
+        assert second.skipped[0].outcome == OutcomeKind.ALREADY_APPLIED
+        assert second.skipped[0].id == "rec-idem-1"
+        # Idempotent re-run is success: exit_code 0, NOT 2.
+        assert second.exit_code == 0
+
+    def test_tighten_slo_rerun_routes_to_skipped(self, tmp_path):
+        """Same invariant for scalar paths (tighten_slo): re-applying a
+        rec whose proposed_value already matches the manifest is a no-op
+        skip, not a re-application."""
+        from datetime import datetime, timezone
+        from nthlayer_workers.learn._apply import apply_recommendations
+        from nthlayer_workers.learn.recommendations import (
+            OutcomeKind, Recommendation, SpecRecommendation,
+        )
+
+        # Seed manifest where the target ALREADY equals the proposed value.
+        (tmp_path / "fraud-detect.yaml").write_text(
+            "metadata:\n  name: fraud-detect\n"
+            "spec:\n  slos:\n    judgment:\n      target: 98.5\n"
+        )
+        plan = SpecRecommendation(
+            incident="inc-idempotency-scalar",
+            generated_by="test",
+            generated_at=datetime(2026, 5, 30, tzinfo=timezone.utc),
+            confidence=0.7,
+            recommendations=[
+                Recommendation(
+                    id="rec-idem-scalar",
+                    service="fraud-detect",
+                    type="tighten_slo",
+                    rationale="test",
+                    field="spec.slos.judgment.target",
+                    current_value=95.0,
+                    proposed_value=98.5,
+                ),
+            ],
+        )
+
+        result = apply_recommendations(plan, tmp_path)
+        assert len(result.applied) == 0
+        assert len(result.skipped) == 1
+        assert result.skipped[0].outcome == OutcomeKind.ALREADY_APPLIED

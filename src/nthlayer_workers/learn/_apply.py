@@ -86,26 +86,36 @@ class ApplyResult:
 
     @property
     def exit_code(self) -> int:
-        """Per jmy.6 design § 7 deterministic rule.
+        """Per jmy.6 design § 7 deterministic rule (updated by opensrm-1mja).
 
         Empty plan → 0
-        All applied and each outcome is APPLY_CLEAN or ALREADY_APPLIED → 0
-        Any APPLY_CLEAN + any skipped → 1 (partial)
-        Zero APPLY_CLEAN + any skipped → 2 (complete failure)
+        All operations are clean OR idempotent no-ops → 0
+        Some clean operations + some real failures (drift / not-found) → 1 (partial)
+        Zero clean operations + some real failures → 2 (complete failure)
+
+        ALREADY_APPLIED is an idempotent no-op (lives in self.skipped after
+        opensrm-1mja). A plan whose every rec is either APPLY_CLEAN-applied
+        or ALREADY_APPLIED-skipped is a successful idempotent re-run; only
+        non-idempotent skips (DRIFT_DETECTED, MANIFEST_NOT_FOUND, etc.)
+        push the exit_code away from 0.
         """
         # Empty plan → 0
         if not self.applied and not self.skipped:
             return 0
+        non_idempotent_skips = [
+            r for r in self.skipped
+            if r.outcome != OutcomeKind.ALREADY_APPLIED
+        ]
+        # All applied are APPLY_CLEAN AND all skipped are ALREADY_APPLIED → 0
+        all_applied_clean = all(
+            r.outcome == OutcomeKind.APPLY_CLEAN for r in self.applied
+        )
+        if all_applied_clean and not non_idempotent_skips:
+            return 0
         any_clean = any(
             r.outcome == OutcomeKind.APPLY_CLEAN for r in self.applied
         )
-        all_clean_or_idempotent = all(
-            r.outcome in (OutcomeKind.APPLY_CLEAN, OutcomeKind.ALREADY_APPLIED)
-            for r in self.applied
-        ) and not self.skipped
-        if all_clean_or_idempotent:
-            return 0
-        if any_clean and self.skipped:
+        if any_clean and non_idempotent_skips:
             return 1  # partial
         return 2  # complete failure
 
@@ -173,7 +183,14 @@ def apply_recommendations(
                 outcome=outcome,
             ))
         elif outcome == OutcomeKind.ALREADY_APPLIED:
-            result.applied.append(RecOutcome(
+            # No-op skip: the manifest already matches the proposed
+            # value (scalar paths) or already contains the proposed
+            # item (list-append paths). Belongs in skipped, not
+            # applied — nothing was written to disk and downstream
+            # operators counting "applied" should not see no-ops.
+            # opensrm-1mja: discovered by the add_dependency integration
+            # test's idempotency check.
+            result.skipped.append(RecOutcome(
                 id=rec.id,
                 service=rec.service,
                 field=rec.field,
