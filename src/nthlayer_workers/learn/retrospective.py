@@ -142,7 +142,7 @@ def build_retrospective(
         incident.subject.service,
     )
 
-    custom: dict[str, Any] = {
+    retro_custom: dict[str, Any] = {
         "incident_verdict_id": incident_verdict_id,
         "duration_minutes": round(duration_minutes, 1),
         "decisions_affected": decisions_affected,
@@ -158,7 +158,7 @@ def build_retrospective(
         "declared_dependencies_by_service": declared_dependencies_by_service,
     }
     if trigger_service is not None:
-        custom["trigger_service"] = trigger_service
+        retro_custom["trigger_service"] = trigger_service
 
     # Create retrospective verdict
     retro = create(
@@ -178,7 +178,7 @@ def build_retrospective(
             "reasoning": f"{len(all_verdicts)} verdicts in chain, {duration_minutes:.0f}m duration",
         },
         producer={"system": "nthlayer-learn"},
-        metadata={"custom": custom},
+        metadata={"custom": retro_custom},
     )
     link(retro, context=[incident_verdict_id])
     verdict_store.put(retro)
