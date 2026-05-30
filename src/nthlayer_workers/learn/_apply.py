@@ -89,15 +89,17 @@ class ApplyResult:
         """Per jmy.6 design § 7 deterministic rule (updated by opensrm-1mja).
 
         Empty plan → 0
-        All operations are clean OR idempotent no-ops → 0
-        Some clean operations + some real failures (drift / not-found) → 1 (partial)
-        Zero clean operations + some real failures → 2 (complete failure)
+        Every entry in ``applied`` is APPLY_CLEAN AND every entry in
+            ``skipped`` is ALREADY_APPLIED → 0
+        At least one clean op (APPLY_CLEAN applied OR ALREADY_APPLIED
+            skipped) AND at least one non-idempotent skip → 1 (partial)
+        Otherwise (zero clean ops + at least one non-idempotent skip) → 2
 
-        ALREADY_APPLIED is an idempotent no-op (lives in self.skipped after
-        opensrm-1mja). A plan whose every rec is either APPLY_CLEAN-applied
-        or ALREADY_APPLIED-skipped is a successful idempotent re-run; only
-        non-idempotent skips (DRIFT_DETECTED, MANIFEST_NOT_FOUND, etc.)
-        push the exit_code away from 0.
+        ALREADY_APPLIED is an idempotent no-op (lives in ``self.skipped``
+        after opensrm-1mja). It counts as a "clean op" for the partial-
+        success boundary above — otherwise a re-run with one new drift
+        would regress from exit 1 to exit 2 purely because of the
+        ALREADY_APPLIED routing change.
         """
         # Empty plan → 0
         if not self.applied and not self.skipped:
