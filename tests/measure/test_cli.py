@@ -10,7 +10,6 @@ from nthlayer_workers.measure.cli import (
     cmd_calibrate,
     cmd_overrides_list,
     cmd_governance_show,
-    cmd_governance_restore,
     main,
 )
 from nthlayer_workers.measure.types import QualityScore, TrendWindow
@@ -194,32 +193,3 @@ def test_governance_show(config_file, capsys):
     assert result["autonomy"] == "supervised"
 
 
-@pytest.mark.skip(
-    reason=(
-        "CLI passes 'full' which is the pre-P3-C.2 enum value; the "
-        "current 5-level ladder uses 'fully_autonomous'. Tracked for "
-        "cleanup alongside legacy ErrorBudgetGovernance in opensrm-mnyj."
-    )
-)
-def test_governance_restore_requires_approver(config_file, capsys):
-    mock_store = AsyncMock()
-    mock_tracker = AsyncMock()
-
-    mock_gov = AsyncMock()
-    mock_gov.restore_autonomy = AsyncMock()
-
-    with patch("nthlayer_workers.measure.cli._build_store", return_value=mock_store), \
-         patch("nthlayer_workers.measure.cli._build_tracker", return_value=mock_tracker), \
-         patch("nthlayer_workers.measure.governance.engine.ErrorBudgetGovernance", return_value=mock_gov):
-        args = _make_args(
-            config=config_file,
-            agent_name="test-agent",
-            level="full",
-            approver="admin@example.com",
-        )
-        cmd_governance_restore(args)
-
-    captured = capsys.readouterr()
-    result = json.loads(captured.out)
-    assert result["approver"] == "admin@example.com"
-    assert result["restored_to"] == "full"
