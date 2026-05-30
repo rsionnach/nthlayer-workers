@@ -4,12 +4,13 @@ import argparse
 import asyncio
 import sys
 
+from nthlayer_workers import __version__
 from nthlayer_workers.runner import ModuleRunner
 
 
 def main():
     parser = argparse.ArgumentParser(description="NthLayer workers")
-    parser.add_argument("-V", "--version", action="version", version="%(prog)s 1.5.0")
+    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     # -- serve: start all worker modules --

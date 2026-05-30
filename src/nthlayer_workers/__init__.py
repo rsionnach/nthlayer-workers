@@ -3,3 +3,7 @@
 Internal modules: observe, measure, correlate, respond, learn.
 Communicates with nthlayer-core exclusively via HTTP API.
 """
+
+from importlib.metadata import version
+
+__version__ = version("nthlayer-workers")
