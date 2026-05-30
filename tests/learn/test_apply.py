@@ -391,6 +391,43 @@ class TestApplyIdempotency:
         # Idempotent re-run is success: exit_code 0, NOT 2.
         assert second.exit_code == 0
 
+    def test_exit_code_already_applied_plus_drift_is_partial(self):
+        """Boundary test (R5 correctness): ALREADY_APPLIED + DRIFT_DETECTED
+        in skipped (no APPLY_CLEAN in applied) → exit 1 (partial), not 2.
+
+        The idempotent no-op IS a clean operation for partial-success
+        purposes; mixing it with a real failure should preserve the
+        "partial" semantic operators rely on.
+        """
+        from nthlayer_workers.learn._apply import ApplyResult, RecOutcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = ApplyResult(
+            applied=[],
+            skipped=[
+                RecOutcome(id="r1", service="s", field="f1",
+                           outcome=OutcomeKind.ALREADY_APPLIED),
+                RecOutcome(id="r2", service="s", field="f2",
+                           outcome=OutcomeKind.DRIFT_DETECTED),
+            ],
+        )
+        assert result.exit_code == 1
+
+    def test_exit_code_only_drift_is_complete_failure(self):
+        """Counter-test: no clean op (neither APPLY_CLEAN nor
+        ALREADY_APPLIED) + drift → exit 2 (complete failure)."""
+        from nthlayer_workers.learn._apply import ApplyResult, RecOutcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = ApplyResult(
+            applied=[],
+            skipped=[
+                RecOutcome(id="r1", service="s", field="f1",
+                           outcome=OutcomeKind.DRIFT_DETECTED),
+            ],
+        )
+        assert result.exit_code == 2
+
     def test_tighten_slo_rerun_routes_to_skipped(self, tmp_path):
         """Same invariant for scalar paths (tighten_slo): re-applying a
         rec whose proposed_value already matches the manifest is a no-op

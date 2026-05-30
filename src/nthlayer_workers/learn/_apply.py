@@ -112,8 +112,14 @@ class ApplyResult:
         )
         if all_applied_clean and not non_idempotent_skips:
             return 0
-        any_clean = any(
-            r.outcome == OutcomeKind.APPLY_CLEAN for r in self.applied
+        # Partial-success boundary: an ALREADY_APPLIED no-op IS a "clean
+        # operation" for partial-vs-complete-failure purposes. Otherwise
+        # a re-run that succeeded for most recs but hit one new drift
+        # would regress from exit 1 (partial) to exit 2 (complete fail)
+        # purely because of the ALREADY_APPLIED→skipped routing change.
+        any_clean = (
+            any(r.outcome == OutcomeKind.APPLY_CLEAN for r in self.applied)
+            or any(r.outcome == OutcomeKind.ALREADY_APPLIED for r in self.skipped)
         )
         if any_clean and non_idempotent_skips:
             return 1  # partial
