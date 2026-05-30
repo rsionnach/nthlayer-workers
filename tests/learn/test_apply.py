@@ -428,6 +428,29 @@ class TestApplyIdempotency:
         )
         assert result.exit_code == 2
 
+    def test_exit_code_three_way_mix_is_partial(self):
+        """Three-way mix (R5 edge-cases gap): APPLY_CLEAN in applied
+        + ALREADY_APPLIED in skipped + DRIFT_DETECTED in skipped →
+        exit 1 (partial). The boundary tests above cover the empty-
+        applied cases; this pins the full mixed case the routing
+        change is most likely to encounter in a re-run with new drift."""
+        from nthlayer_workers.learn._apply import ApplyResult, RecOutcome
+        from nthlayer_workers.learn.recommendations import OutcomeKind
+
+        result = ApplyResult(
+            applied=[
+                RecOutcome(id="r1", service="s", field="f1",
+                           outcome=OutcomeKind.APPLY_CLEAN),
+            ],
+            skipped=[
+                RecOutcome(id="r2", service="s", field="f2",
+                           outcome=OutcomeKind.ALREADY_APPLIED),
+                RecOutcome(id="r3", service="s", field="f3",
+                           outcome=OutcomeKind.DRIFT_DETECTED),
+            ],
+        )
+        assert result.exit_code == 1
+
     def test_tighten_slo_rerun_routes_to_skipped(self, tmp_path):
         """Same invariant for scalar paths (tighten_slo): re-applying a
         rec whose proposed_value already matches the manifest is a no-op

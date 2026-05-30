@@ -282,7 +282,12 @@ def _cmd_recommendations(args: argparse.Namespace) -> None:
                 for o in applied
             ],
             "skipped": [
-                {"id": o.id, "service": o.service,
+                # field included so consumers reading "which YAML path
+                # was the skipped rec aimed at" don't lose data when
+                # ALREADY_APPLIED routes here (opensrm-1mja). Pre-1mja
+                # an ALREADY_APPLIED rec lived in applied[] and exposed
+                # field; symmetric serialisation preserves that.
+                {"id": o.id, "service": o.service, "field": o.field,
                  "outcome": o.outcome.value, "detail": o.detail}
                 for o in skipped
             ],
