@@ -48,3 +48,26 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+# Ruff configuration (opensrm-d96q floor). Explicit defaults so future
+# violations show up as new findings rather than blending in. Tightening
+# beyond E/F (isort/pyupgrade/simplify/bugbear) is tracked in
+# opensrm-d96q.1 .. d96q.4 — each rule family is its own bead because
+# the cumulative diff across all four is ~640 findings.
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# Mirrors ruff's literal default select (E4/E7/E9 + F) explicitly so
+# future additions are tracked in version control. Notably excludes
+# E501 (line-too-long, 393 hits today) and the full E/W families.
+# Widening tracked under opensrm-d96q.1 (I) / .2 (UP) / .3 (SIM) /
+# .4 (B); E501 / W are separate hygiene calls.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Correlate test files defer some imports until after pytest.importorskip
+# / pytestmark blocks (the modules under test optional-import heavy deps).
+# Pin E402 here instead of scattering noqa: E402 across the call sites.
+"tests/correlate/test_*.py" = ["E402"]

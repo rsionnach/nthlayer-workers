@@ -79,7 +79,7 @@ class TestStatusCommand:
 # Task 7: Config + CLI flags for trace backend
 # ---------------------------------------------------------------------------
 
-from nthlayer_workers.correlate.config import load_config  # noqa: E402
+from nthlayer_workers.correlate.config import load_config
 
 
 class TestConfigTraces:

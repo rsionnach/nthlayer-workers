@@ -527,8 +527,8 @@ class TestCorrelateCommandReasoning:
 # Task 6b: Trace evidence section in reasoning prompt
 # ---------------------------------------------------------------------------
 
-from datetime import datetime as dt, timezone  # noqa: E402
-from nthlayer_workers.correlate.traces.protocol import (  # noqa: E402
+from datetime import datetime as dt, timezone
+from nthlayer_workers.correlate.traces.protocol import (
     ErrorSummary,
     OperationLatency,
     ServiceCallEdge,
@@ -536,7 +536,7 @@ from nthlayer_workers.correlate.traces.protocol import (  # noqa: E402
     TopologyDivergence,
     TraceEvidence,
 )
-from nthlayer_workers.correlate.reasoning import _build_trace_evidence_section  # noqa: E402
+from nthlayer_workers.correlate.reasoning import _build_trace_evidence_section
 
 
 def _make_trace_evidence_for_reasoning() -> TraceEvidence:

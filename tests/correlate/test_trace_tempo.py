@@ -297,8 +297,8 @@ class TestParseTempoTimestamp:
 # Task 4: High-level query methods
 # ---------------------------------------------------------------------------
 
-from datetime import timedelta  # noqa: E402
-from nthlayer_workers.correlate.traces.tempo import _ServiceStats  # noqa: E402
+from datetime import timedelta
+from nthlayer_workers.correlate.traces.tempo import _ServiceStats
 
 
 class TestQueryServiceStats:
