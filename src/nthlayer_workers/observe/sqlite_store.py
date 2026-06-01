@@ -95,8 +95,8 @@ class SQLiteAssessmentStore(AssessmentStore):
                     data,
                 ),
             )
-        except sqlite3.IntegrityError:
-            raise ValueError(f"Assessment {assessment.id} already exists")
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"Assessment {assessment.id} already exists") from exc
         conn.commit()
 
     def get(self, assessment_id: str) -> Assessment | None:

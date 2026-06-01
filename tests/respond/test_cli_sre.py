@@ -28,7 +28,7 @@ class TestCLIParserSRECommands:
             "--verdict-store", "verdicts.db",
         ])
         assert args.command == "shift-report"
-        assert getattr(args, "from_time") == "2026-04-13T09:00:00Z"
+        assert args.from_time == "2026-04-13T09:00:00Z"
         assert args.to == "2026-04-14T09:00:00Z"
 
     def test_suppress_command_exists(self):

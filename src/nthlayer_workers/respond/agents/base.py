@@ -505,7 +505,7 @@ class AgentBase(ABC):
                 method="POST",
             )
             last_exc: Exception | None = None
-            for attempt in range(3):
+            for _ in range(3):
                 try:
                     with urllib.request.urlopen(req, timeout=10) as resp:
                         return json.loads(resp.read().decode())

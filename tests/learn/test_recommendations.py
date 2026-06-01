@@ -583,7 +583,7 @@ class TestAnalyzeIncidentAggregate:
         loaded = yaml.safe_load(result.to_yaml())
         assert loaded["metadata"]["incident"] == "INC-RT"
         assert len(loaded["recommendations"]) == len(result.recommendations)
-        for orig, lit in zip(result.recommendations, loaded["recommendations"]):
+        for orig, lit in zip(result.recommendations, loaded["recommendations"], strict=True):
             assert orig.type == lit["type"]
             assert orig.service == lit["service"]
 

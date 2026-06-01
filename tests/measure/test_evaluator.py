@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from nthlayer_workers.measure.pipeline.evaluator import (
     DimensionScore,
@@ -48,11 +49,11 @@ class TestPydanticModels:
         assert ds.reasoning == ""
 
     def test_out_of_range_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             DimensionScore(score=1.5)
 
     def test_negative_score_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             DimensionScore(score=-0.1)
 
 

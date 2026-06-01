@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from nthlayer_workers.correlate.summary import (
     SnapshotSummary,
@@ -41,7 +42,7 @@ class TestSnapshotSummaryModel:
         assert s.notable_omissions == []
 
     def test_max_length_enforced(self):
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError):
             SnapshotSummary(summary="x" * 501)
 
     def test_default_omissions(self):
@@ -65,11 +66,11 @@ class TestSnapshotSummaryModel:
         SnapshotSummary(summary="x", confidence=1.0)
 
     def test_confidence_above_one_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             SnapshotSummary(summary="x", confidence=1.5)
 
     def test_confidence_negative_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             SnapshotSummary(summary="x", confidence=-0.1)
 
 

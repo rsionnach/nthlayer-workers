@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from nthlayer_workers.measure.adapters.prometheus import (
-    _judgment_slo_query,
     SLODefinition,
+    _judgment_slo_query,
     count_consecutive_breaches,
     evaluate_slos,
     load_specs,

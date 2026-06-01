@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from nthlayer_workers.respond.agents.response_models import (
     CommunicationResponse,
@@ -15,17 +16,17 @@ class TestResponseModels:
     """Smoke-tests for the canonical model shapes."""
 
     def test_triage_severity_bounds(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TriageResponse(severity=5)  # > 4 invalid
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TriageResponse(severity=-1)
         TriageResponse(severity=0)
         TriageResponse(severity=4)
 
     def test_triage_confidence_bounds(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TriageResponse(severity=2, confidence=1.5)
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TriageResponse(severity=2, confidence=-0.1)
         TriageResponse(severity=2, confidence=0.5)
 

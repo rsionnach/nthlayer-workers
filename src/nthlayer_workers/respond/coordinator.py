@@ -389,7 +389,9 @@ class Coordinator:
         tasks = [self._agents[role].execute(context) for role in roles]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for role, result in zip(roles, results):
+        # strict=True: asyncio.gather preserves task order, so len(results)
+        # must equal len(roles) — surface any future drift loudly.
+        for role, result in zip(roles, results, strict=True):
             if isinstance(result, Exception):
                 if role == AgentRole.INVESTIGATION:
                     logger.error(

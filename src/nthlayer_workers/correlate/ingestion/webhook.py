@@ -66,8 +66,8 @@ class WebhookIngester:
         raw_type = data["type"]
         try:
             event_type = EventType(raw_type)
-        except ValueError:
-            raise ValueError(f"Unknown event type: {raw_type!r}")
+        except ValueError as exc:
+            raise ValueError(f"Unknown event type: {raw_type!r}") from exc
 
         # Auto-generate id and timestamp when absent
         event_id = data.get("id") or str(uuid.uuid4())
