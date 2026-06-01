@@ -120,10 +120,14 @@ def _judgment_slo_query(service: str, slo_name: str, window: str) -> str:
     """Build PromQL query for judgment SLOs using interim raw metrics."""
     builder = _JUDGMENT_SLO_QUERIES.get(slo_name)
     if builder is None:
+        # Stdlib logger (line 12) — use %-style formatting, not kwargs.
+        # Pre-existing bug surfaced by y7dd R5: a manifest shipping an
+        # unknown judgment SLO would have crashed in the original
+        # if/elif's fallthrough warning too.
         logger.warning(
-            "Unknown judgment SLO name, no PromQL query available",
-            slo_name=slo_name,
-            service=service,
+            "Unknown judgment SLO name '%s' for service '%s', no PromQL query available",
+            slo_name,
+            service,
         )
         return ""
     return builder(service, window)

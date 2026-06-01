@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from nthlayer_workers.measure.adapters.prometheus import (
+    _judgment_slo_query,
     SLODefinition,
     count_consecutive_breaches,
     evaluate_slos,
@@ -87,6 +88,42 @@ def test_load_specs_builds_promql(specs_dir):
 def test_load_specs_empty_dir(tmp_path):
     slos = load_specs(tmp_path)
     assert slos == []
+
+
+# --- _judgment_slo_query (opensrm-y7dd: lookup-dict refactor) ---
+
+
+def test_judgment_slo_query_reversal_rate():
+    q = _judgment_slo_query("fraud-detect", "reversal_rate", "5m")
+    assert "gen_ai_overrides_total" in q
+    assert 'service="fraud-detect"' in q
+    assert "[5m]" in q
+
+
+def test_judgment_slo_query_high_confidence_failure():
+    q = _judgment_slo_query("svc-a", "high_confidence_failure", "10m")
+    assert "gen_ai_overrides_hcf_total" in q
+    assert 'confidence_bucket="high"' in q
+
+
+def test_judgment_slo_query_calibration_window_agnostic():
+    # Calibration is a gauge: window argument is intentionally ignored.
+    q5 = _judgment_slo_query("svc", "calibration", "5m")
+    q1h = _judgment_slo_query("svc", "calibration", "1h")
+    assert q5 == q1h
+    assert q5 == 'gen_ai_calibration_error{service="svc"}'
+
+
+def test_judgment_slo_query_unknown_returns_empty():
+    # Unknown SLO name must take the warn+empty path, not raise nor
+    # invoke a lambda. Guards the lookup-dict against future regressions
+    # that drop the unknown-key fallback.
+    assert _judgment_slo_query("svc", "made_up_slo", "5m") == ""
+
+
+def test_judgment_slo_query_empty_slo_name_returns_empty():
+    # Empty string is not a known key — same fallback path as unknown.
+    assert _judgment_slo_query("svc", "", "5m") == ""
 
 
 # --- query_firing_alerts tests ---
