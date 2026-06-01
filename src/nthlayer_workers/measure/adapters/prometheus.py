@@ -97,6 +97,9 @@ def load_specs(specs_dir: Path) -> list[SLODefinition]:
     return slos
 
 
+# PromQL builders keyed by judgment SLO name. Lambdas take (service,
+# window); `_window` on calibration/feedback_latency indicates those
+# queries are window-agnostic (the raw metric is already a gauge).
 _JUDGMENT_SLO_QUERIES = {
     "reversal_rate": lambda service, window: (
         f'sum(increase(gen_ai_overrides_total{{service="{service}"}}[{window}]))'
