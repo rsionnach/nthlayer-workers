@@ -2,9 +2,9 @@
 
 from nthlayer_workers.observe.slo.collector import (
     BudgetSummary,
+    ServiceSLO,
     SLOMetricCollector,
     SLOResult,
-    ServiceSLO,
     results_to_assessments,
 )
 from nthlayer_workers.observe.slo.spec_loader import load_specs

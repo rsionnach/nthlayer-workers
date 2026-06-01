@@ -1,8 +1,8 @@
 """Tests for VerdictMetricsCollector — Prometheus metrics from verdict store."""
 from __future__ import annotations
 
-
-from nthlayer_common.verdicts import MemoryStore, create as verdict_create
+from nthlayer_common.verdicts import MemoryStore
+from nthlayer_common.verdicts import create as verdict_create
 
 from nthlayer_workers.respond.metrics import VerdictMetricsCollector
 

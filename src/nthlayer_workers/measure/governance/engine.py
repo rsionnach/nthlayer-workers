@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Protocol
 
 from nthlayer_common.prompts import load_prompt, render_user_prompt
+
 from nthlayer_workers.measure.store.protocol import ScoreStore
 from nthlayer_workers.measure.trends.tracker import TrendTracker
 from nthlayer_workers.measure.types import AutonomyLevel, GovernanceAction, TrendWindow

@@ -18,15 +18,16 @@ from typing import Any, Iterable
 
 import yaml as pyyaml  # lightweight read for the discovery walk only
 
-from nthlayer_workers.learn.recommendations import (
-    OutcomeKind, SpecRecommendation,
-)
 from nthlayer_workers.learn._yaml import (
     LIST_APPEND_SIGIL,
     apply_at_path,
     classify_outcome,
     get_yaml_round_trip,
     resolve_path,
+)
+from nthlayer_workers.learn.recommendations import (
+    OutcomeKind,
+    SpecRecommendation,
 )
 
 

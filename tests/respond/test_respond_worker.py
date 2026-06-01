@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nthlayer_workers.runner import WorkerModule
 from nthlayer_workers.respond.config import RespondConfig
 from nthlayer_workers.respond.types import (
     IncidentContext,
@@ -15,14 +14,14 @@ from nthlayer_workers.respond.types import (
 from nthlayer_workers.respond.worker import (
     Cursors,
     RespondModule,
-    _NoopContextStore,
     _is_terminal_and_aged,
+    _NoopContextStore,
 )
 from nthlayer_workers.respond.worker_helpers import (
     open_from_breach,
     open_from_snapshot,
 )
-
+from nthlayer_workers.runner import WorkerModule
 
 # ------------------------------------------------------------------ #
 # Fixtures                                                             #
@@ -619,6 +618,7 @@ async def test_first_verdict_from_snapshot_parents_to_trigger(fake_client, confi
     """Lineage bridge: first respond verdict's parent_ids points to upstream
     trigger (snapshot id + originating breach ids)."""
     from nthlayer_common.api_client import APIResult
+
     from nthlayer_workers.respond.agents.base import AgentBase
     from nthlayer_workers.respond.types import AgentRole, TriageResult
 
@@ -649,6 +649,7 @@ async def test_chained_verdicts_parent_to_previous(fake_client, config):
     """Subsequent respond verdicts chain to the previous respond verdict via
     parent_ids and lineage.parent."""
     from nthlayer_common.api_client import APIResult
+
     from nthlayer_workers.respond.agents.base import AgentBase
     from nthlayer_workers.respond.types import AgentRole, TriageResult
 
@@ -682,6 +683,7 @@ async def test_fallback_path_lineage_walk(fake_client, config):
     rules as opening from a snapshot. Walking parent_ids from a final verdict
     leads back through earlier respond verdicts to the originating breach."""
     from nthlayer_common.api_client import APIResult
+
     from nthlayer_workers.respond.agents.base import AgentBase
     from nthlayer_workers.respond.types import AgentRole, TriageResult
 

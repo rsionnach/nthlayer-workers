@@ -33,11 +33,13 @@ class TestOutputFlag:
     """--output writes plan.yaml from --from input."""
 
     def test_from_then_output_round_trip(self, tmp_path, capsys):
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation,
+            Recommendation,
+            SpecRecommendation,
         )
-        from datetime import datetime, timezone
 
         # Build a plan file
         plan = SpecRecommendation(
@@ -74,11 +76,13 @@ class TestApplyToFlag:
     """--apply-to applies the plan to specs in the target directory."""
 
     def test_from_then_apply_to(self, tmp_path):
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation,
+            Recommendation,
+            SpecRecommendation,
         )
-        from datetime import datetime, timezone
 
         # Seed manifest + plan
         specs_dir = tmp_path / "specs"
@@ -124,12 +128,14 @@ class TestPrPath:
 
     def test_pr_path_happy(self, tmp_path, monkeypatch, capsys):
         """End-to-end --pr with all git/gh subprocess calls stubbed."""
+        import subprocess
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation,
+            Recommendation,
+            SpecRecommendation,
         )
-        from datetime import datetime, timezone
-        import subprocess
 
         # Seed manifest + plan
         specs_dir = tmp_path / "specs"
@@ -218,10 +224,12 @@ class TestIncidentIdValidation:
     """jmy.6 R5-P3: pre-flight reject incident IDs with unsafe characters."""
 
     def _build_plan_with_incident(self, tmp_path, incident_id: str):
-        from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation,
-        )
         from datetime import datetime, timezone
+
+        from nthlayer_workers.learn.recommendations import (
+            Recommendation,
+            SpecRecommendation,
+        )
 
         plan = SpecRecommendation(
             incident=incident_id,
@@ -285,8 +293,9 @@ class TestIncidentIdValidation:
 
     def test_canonical_incident_id_accepted(self, tmp_path, monkeypatch, capsys):
         """Sanity: well-formed IDs flow through to the next stage."""
-        from nthlayer_workers.learn.cli import main
         import subprocess
+
+        from nthlayer_workers.learn.cli import main
 
         specs_dir = tmp_path / "specs"
         specs_dir.mkdir()
@@ -332,12 +341,14 @@ class TestExitCodes:
 
     def test_preflight_failure_exits_2(self, tmp_path, monkeypatch, capsys):
         """gh not installed → exits 2, not 1."""
+        import subprocess
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation,
+            Recommendation,
+            SpecRecommendation,
         )
-        from datetime import datetime, timezone
-        import subprocess
 
         specs_dir = tmp_path / "specs"
         specs_dir.mkdir()
@@ -386,12 +397,14 @@ class TestExitCodes:
 
     def test_pr_path_propagates_partial_skip_exit_code(self, tmp_path, monkeypatch):
         """When --pr succeeds but --apply-to had a partial-skip, exit code is 1 not 0."""
+        import subprocess
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation,
+            Recommendation,
+            SpecRecommendation,
         )
-        from datetime import datetime, timezone
-        import subprocess
 
         specs_dir = tmp_path / "specs"
         specs_dir.mkdir()
@@ -483,10 +496,12 @@ class TestJsonOutput:
     @staticmethod
     def _build_single_rec_plan(tmp_path, *, incident: str = "inc-jmy25"):
         """Helper: write a one-recommendation plan.yaml and return its path."""
-        from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation,
-        )
         from datetime import datetime, timezone
+
+        from nthlayer_workers.learn.recommendations import (
+            Recommendation,
+            SpecRecommendation,
+        )
 
         plan = SpecRecommendation(
             incident=incident,
@@ -578,6 +593,7 @@ class TestJsonOutput:
     def test_json_apply_clean_emits_valid_json_to_stdout(self, tmp_path, capsys):
         """Happy --apply-to --json: stdout parses to the documented shape."""
         import json
+
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_specs_dir(tmp_path)
@@ -616,11 +632,13 @@ class TestJsonOutput:
         which the --json emitter must round-trip verbatim.
         """
         import json
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation,
+            Recommendation,
+            SpecRecommendation,
         )
-        from datetime import datetime, timezone
 
         # specs_dir is empty — every recommendation will be MANIFEST_NOT_FOUND.
         specs_dir = tmp_path / "specs"
@@ -672,6 +690,7 @@ class TestJsonOutput:
         """--apply-to --pr --json: pr_url/pr_number populated from gh output."""
         import json
         import subprocess
+
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_specs_dir(tmp_path)
@@ -703,6 +722,7 @@ class TestJsonOutput:
         """gh pr create failure: pr_error populated, nulls for url/number, exit 1."""
         import json
         import subprocess
+
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_specs_dir(tmp_path)
@@ -745,6 +765,7 @@ class TestJsonOutput:
         """
         import json
         import subprocess
+
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_specs_dir(tmp_path)
@@ -783,6 +804,7 @@ class TestJsonOutput:
         """
         import json
         import subprocess
+
         from nthlayer_workers.learn.cli import main
 
         # Seed manifest already at the proposed_value (98.5) so the rec
@@ -845,6 +867,7 @@ class TestJsonOutput:
         """
         import json
         import subprocess
+
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_specs_dir(tmp_path)
@@ -877,11 +900,13 @@ class TestJsonOutput:
         Set up a partial-skip scenario (one applied, one MANIFEST_NOT_FOUND)
         and assert exit code is 1 in BOTH --apply-to alone and --apply-to --json.
         """
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation,
+            Recommendation,
+            SpecRecommendation,
         )
-        from datetime import datetime, timezone
 
         def _seed_partial(root):
             specs_dir = root / "specs"
@@ -973,10 +998,12 @@ class TestIncludeExcludeFlags:
 
     @staticmethod
     def _build_single_rec_plan(tmp_path, *, incident: str = "inc-jmy24"):
-        from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation,
-        )
         from datetime import datetime, timezone
+
+        from nthlayer_workers.learn.recommendations import (
+            Recommendation,
+            SpecRecommendation,
+        )
 
         plan = SpecRecommendation(
             incident=incident,
@@ -1007,10 +1034,13 @@ class TestIncludeExcludeFlags:
         computed via compute_rec_id so callers can reference them by
         their deterministic ids.
         """
-        from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation, compute_rec_id,
-        )
         from datetime import datetime, timezone
+
+        from nthlayer_workers.learn.recommendations import (
+            Recommendation,
+            SpecRecommendation,
+            compute_rec_id,
+        )
 
         field_tighten = "spec.slos.judgment.target"
         field_gate = "spec.gates.judgment_quality"
@@ -1156,6 +1186,7 @@ class TestIncludeExcludeFlags:
     def test_include_filters_plan_to_subset(self, tmp_path, capsys):
         """--include rec-abc only → JSON's applied contains only rec-abc."""
         import json
+
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_multi_specs_dir(tmp_path)
@@ -1178,6 +1209,7 @@ class TestIncludeExcludeFlags:
 
     def test_exclude_filters_out_subset(self, tmp_path, capsys):
         import json
+
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_multi_specs_dir(tmp_path)
@@ -1223,6 +1255,7 @@ class TestIncludeExcludeFlags:
     def test_include_with_json_mode_filters_doc(self, tmp_path, capsys):
         """--include rec-abc --json → JSON applied/skipped exclude filtered recs."""
         import json
+
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_multi_specs_dir(tmp_path)
@@ -1252,6 +1285,7 @@ class TestIncludeExcludeFlags:
     def test_no_filter_flags_applies_all(self, tmp_path, capsys):
         """Regression: without --include/--exclude, all plan recs flow through."""
         import json
+
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_multi_specs_dir(tmp_path)
@@ -1309,6 +1343,7 @@ class TestIncludeExcludeFlags:
         doesn't accidentally start rejecting empty-string values.
         """
         import json
+
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_multi_specs_dir(tmp_path)
@@ -1337,6 +1372,7 @@ class TestIncludeExcludeFlags:
         to []. Apply runs with empty plan, exits 0.
         """
         import json
+
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_multi_specs_dir(tmp_path)
@@ -1360,6 +1396,7 @@ class TestIncludeExcludeFlags:
         Reversing the --include args list must NOT reverse the applied list.
         """
         import json
+
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_multi_specs_dir(tmp_path)
@@ -1387,6 +1424,7 @@ class TestIncludeExcludeFlags:
         """jmy.24 P3 R5: --include of every rec id is a no-op filter
         (every rec survives). Behaves identically to omitting the flag."""
         import json
+
         from nthlayer_workers.learn.cli import main
 
         specs_dir = self._seed_multi_specs_dir(tmp_path)
@@ -1414,6 +1452,7 @@ class TestIncludeExcludeFlags:
         → every requested id is unknown → SystemExit(2).
         """
         from datetime import datetime, timezone
+
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import SpecRecommendation
 
@@ -1461,10 +1500,12 @@ class TestInteractiveFlag:
 
     @staticmethod
     def _build_single_rec_plan(tmp_path, *, incident: str = "inc-jmy22"):
-        from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation,
-        )
         from datetime import datetime, timezone
+
+        from nthlayer_workers.learn.recommendations import (
+            Recommendation,
+            SpecRecommendation,
+        )
 
         plan = SpecRecommendation(
             incident=incident,
@@ -1490,10 +1531,12 @@ class TestInteractiveFlag:
     @staticmethod
     def _build_multi_rec_plan(tmp_path, *, incident: str = "inc-jmy22-multi"):
         """Two recommendations with distinct rec ids ('rec-A' / 'rec-B')."""
-        from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation,
-        )
         from datetime import datetime, timezone
+
+        from nthlayer_workers.learn.recommendations import (
+            Recommendation,
+            SpecRecommendation,
+        )
 
         plan = SpecRecommendation(
             incident=incident,
@@ -1578,9 +1621,10 @@ class TestInteractiveFlag:
         self, tmp_path, monkeypatch,
     ):
         """Stub run_walkthrough → empty plan; no recs applied to manifest."""
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import SpecRecommendation
-        from datetime import datetime, timezone
 
         specs_dir = self._seed_specs_dir(tmp_path)
         plan_in = self._build_single_rec_plan(tmp_path)
@@ -1613,11 +1657,14 @@ class TestInteractiveFlag:
         self, tmp_path, monkeypatch,
     ):
         """Stub run_walkthrough → 1-rec plan; --output reflects that plan."""
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation, parse_plan_file,
+            Recommendation,
+            SpecRecommendation,
+            parse_plan_file,
         )
-        from datetime import datetime, timezone
 
         plan_in = self._build_single_rec_plan(tmp_path)
         out_path = tmp_path / "post.yaml"
@@ -1659,9 +1706,10 @@ class TestInteractiveFlag:
         self, tmp_path, monkeypatch,
     ):
         """--include rec-A runs before walkthrough; rec-B is filtered out."""
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import SpecRecommendation
-        from datetime import datetime, timezone
 
         specs_dir = self._seed_specs_dir(tmp_path)
         plan_in = self._build_multi_rec_plan(tmp_path)
@@ -1698,11 +1746,14 @@ class TestInteractiveFlag:
         """jmy.22 P3 R5: --interactive + --output + --apply-to → both the
         snapshot file AND the manifest reflect the post-walkthrough plan.
         """
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation, parse_plan_file,
+            Recommendation,
+            SpecRecommendation,
+            parse_plan_file,
         )
-        from datetime import datetime, timezone
 
         specs_dir = tmp_path / "specs"
         specs_dir.mkdir()
@@ -1769,11 +1820,13 @@ class TestRunWalkthroughAbort:
 
     def test_run_walkthrough_none_returns_empty_plan(self, monkeypatch, caplog):
         import logging
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn._interactive_app import run_walkthrough
         from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, Recommendation,
+            Recommendation,
+            SpecRecommendation,
         )
-        from datetime import datetime, timezone
 
         plan = SpecRecommendation(
             incident="inc-abort", generated_by="nthlayer-learn",

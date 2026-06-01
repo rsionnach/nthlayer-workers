@@ -8,8 +8,9 @@ data.
 from __future__ import annotations
 
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from nthlayer_workers.correlate.snapshot.model import ModelInterface
 from nthlayer_workers.correlate.types import CorrelationGroup

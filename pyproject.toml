@@ -59,12 +59,11 @@ target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-# Mirrors ruff's literal default select (E4/E7/E9 + F) explicitly so
-# future additions are tracked in version control. Notably excludes
-# E501 (line-too-long, 393 hits today) and the full E/W families.
-# Widening tracked under opensrm-d96q.1 (I) / .2 (UP) / .3 (SIM) /
-# .4 (B); E501 / W are separate hygiene calls.
-select = ["E4", "E7", "E9", "F"]
+# Mirrors ruff's literal default select (E4/E7/E9 + F) plus I (isort,
+# adopted under opensrm-ncy0). Future widenings tracked under
+# opensrm-6nn1 (UP) / opensrm-y7dd (SIM) / opensrm-po23 (B); E501 / W
+# are separate hygiene calls (line-too-long has 393 hits today).
+select = ["E4", "E7", "E9", "F", "I"]
 
 [tool.ruff.lint.per-file-ignores]
 # Correlate test files defer some imports until after pytest.importorskip

@@ -10,7 +10,6 @@ from __future__ import annotations
 import dataclasses
 from datetime import datetime, timezone
 
-
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
@@ -21,7 +20,8 @@ def _build_single_rec_plan(*, rec_id: str = "rec-aaaaaaaaaaaa",
                            field: str = "spec.slos.judgment.target"):
     """Build a SpecRecommendation with one Recommendation."""
     from nthlayer_workers.learn.recommendations import (
-        SpecRecommendation, Recommendation,
+        Recommendation,
+        SpecRecommendation,
     )
 
     return SpecRecommendation(
@@ -46,7 +46,8 @@ def _build_single_rec_plan(*, rec_id: str = "rec-aaaaaaaaaaaa",
 def _build_multi_rec_plan(rec_ids=("rec-a", "rec-b", "rec-c")):
     """Build a SpecRecommendation with N recommendations sharing one service."""
     from nthlayer_workers.learn.recommendations import (
-        SpecRecommendation, Recommendation,
+        Recommendation,
+        SpecRecommendation,
     )
 
     return SpecRecommendation(
@@ -110,7 +111,8 @@ class TestWalkthroughState:
 
     def test_progress_string_format(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, accept,
+            WalkthroughState,
+            accept,
         )
 
         plan = _build_multi_rec_plan()
@@ -123,7 +125,8 @@ class TestWalkthroughState:
 
     def test_current_is_none_at_end(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, accept,
+            WalkthroughState,
+            accept,
         )
 
         plan = _build_single_rec_plan()
@@ -141,7 +144,8 @@ class TestWalkthroughState:
 class TestAccept:
     def test_accept_adds_to_accepted_ids(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, accept,
+            WalkthroughState,
+            accept,
         )
 
         plan = _build_single_rec_plan(rec_id="rec-accept-1")
@@ -153,7 +157,8 @@ class TestAccept:
 
     def test_accept_advances_index(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, accept,
+            WalkthroughState,
+            accept,
         )
 
         plan = _build_multi_rec_plan()
@@ -165,7 +170,10 @@ class TestAccept:
 
     def test_accept_after_reject_swaps_buckets(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, accept, reject, prev_rec,
+            WalkthroughState,
+            accept,
+            prev_rec,
+            reject,
         )
 
         plan = _build_single_rec_plan(rec_id="rec-swap")
@@ -186,7 +194,8 @@ class TestAccept:
 class TestReject:
     def test_reject_adds_to_rejected_ids(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, reject,
+            WalkthroughState,
+            reject,
         )
 
         plan = _build_single_rec_plan(rec_id="rec-reject-1")
@@ -198,7 +207,10 @@ class TestReject:
 
     def test_reject_clears_accepted(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, accept, reject, prev_rec,
+            WalkthroughState,
+            accept,
+            prev_rec,
+            reject,
         )
 
         plan = _build_single_rec_plan(rec_id="rec-flip")
@@ -219,7 +231,8 @@ class TestReject:
 class TestModify:
     def test_modify_scalar_yaml_stores_parsed_value(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, modify,
+            WalkthroughState,
+            modify,
         )
 
         plan = _build_single_rec_plan(rec_id="rec-mod-scalar",
@@ -233,7 +246,8 @@ class TestModify:
 
     def test_modify_dict_yaml_stores_parsed_dict(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, modify,
+            WalkthroughState,
+            modify,
         )
 
         plan = _build_single_rec_plan(
@@ -250,7 +264,8 @@ class TestModify:
 
     def test_modify_invalid_yaml_keeps_state_unchanged_sets_error(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, modify,
+            WalkthroughState,
+            modify,
         )
 
         plan = _build_single_rec_plan(rec_id="rec-mod-bad")
@@ -266,7 +281,8 @@ class TestModify:
 
     def test_modify_auto_accepts(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, modify,
+            WalkthroughState,
+            modify,
         )
 
         plan = _build_single_rec_plan(rec_id="rec-mod-auto")
@@ -277,7 +293,9 @@ class TestModify:
 
     def test_modify_clears_last_error_on_success(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, modify, prev_rec,
+            WalkthroughState,
+            modify,
+            prev_rec,
         )
 
         plan = _build_single_rec_plan(rec_id="rec-mod-clear")
@@ -301,7 +319,8 @@ class TestModify:
 class TestNavigation:
     def test_next_advances_index(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, next_rec,
+            WalkthroughState,
+            next_rec,
         )
 
         plan = _build_multi_rec_plan()
@@ -312,7 +331,8 @@ class TestNavigation:
 
     def test_next_caps_at_total(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, next_rec,
+            WalkthroughState,
+            next_rec,
         )
 
         plan = _build_multi_rec_plan(rec_ids=("rec-a", "rec-b"))
@@ -324,7 +344,9 @@ class TestNavigation:
 
     def test_prev_decrements_index(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, next_rec, prev_rec,
+            WalkthroughState,
+            next_rec,
+            prev_rec,
         )
 
         plan = _build_multi_rec_plan()
@@ -336,7 +358,8 @@ class TestNavigation:
 
     def test_prev_floors_at_zero(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, prev_rec,
+            WalkthroughState,
+            prev_rec,
         )
 
         plan = _build_multi_rec_plan()
@@ -347,7 +370,9 @@ class TestNavigation:
 
     def test_next_clears_last_error(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, modify, next_rec,
+            WalkthroughState,
+            modify,
+            next_rec,
         )
 
         plan = _build_multi_rec_plan()
@@ -367,7 +392,10 @@ class TestNavigation:
 class TestFinalize:
     def test_finalize_keeps_only_accepted(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, accept, reject, finalize,
+            WalkthroughState,
+            accept,
+            finalize,
+            reject,
         )
 
         plan = _build_multi_rec_plan(rec_ids=("rec-a", "rec-b", "rec-c"))
@@ -382,7 +410,9 @@ class TestFinalize:
 
     def test_finalize_applies_modifications(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, modify, finalize,
+            WalkthroughState,
+            finalize,
+            modify,
         )
 
         plan = _build_single_rec_plan(rec_id="rec-mod-apply",
@@ -396,7 +426,11 @@ class TestFinalize:
 
     def test_finalize_preserves_plan_order_not_acceptance_order(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, accept, next_rec, prev_rec, finalize,
+            WalkthroughState,
+            accept,
+            finalize,
+            next_rec,
+            prev_rec,
         )
 
         plan = _build_multi_rec_plan(rec_ids=("rec-a", "rec-b", "rec-c"))
@@ -420,7 +454,9 @@ class TestFinalize:
 
     def test_finalize_empty_when_all_rejected(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, reject, finalize,
+            WalkthroughState,
+            finalize,
+            reject,
         )
 
         plan = _build_multi_rec_plan(rec_ids=("rec-a", "rec-b"))
@@ -433,7 +469,11 @@ class TestFinalize:
 
     def test_finalize_does_not_mutate_source_plan(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, accept, modify, prev_rec, finalize,
+            WalkthroughState,
+            accept,
+            finalize,
+            modify,
+            prev_rec,
         )
 
         plan = _build_multi_rec_plan(rec_ids=("rec-a", "rec-b"))
@@ -501,7 +541,8 @@ class TestModifyEmptyInputs:
 
     def test_modify_empty_string_does_not_overwrite_with_none(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, modify,
+            WalkthroughState,
+            modify,
         )
         plan = _build_multi_rec_plan(rec_ids=("rec-a",))
         original = plan.recommendations[0].proposed_value
@@ -515,7 +556,8 @@ class TestModifyEmptyInputs:
 
     def test_modify_whitespace_only_does_not_overwrite_with_none(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, modify,
+            WalkthroughState,
+            modify,
         )
         plan = _build_multi_rec_plan(rec_ids=("rec-a",))
         state = WalkthroughState.for_plan(plan)
@@ -528,7 +570,8 @@ class TestModifyEmptyInputs:
         """A bare 'null' or '~' parses to None — same footgun shape, same
         guard."""
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, modify,
+            WalkthroughState,
+            modify,
         )
         plan = _build_multi_rec_plan(rec_ids=("rec-a",))
         state = WalkthroughState.for_plan(plan)
@@ -543,7 +586,10 @@ class TestModifyRejectInteraction:
 
     def test_modify_then_reject_same_rec_drops_modification(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, modify, prev_rec, reject,
+            WalkthroughState,
+            modify,
+            prev_rec,
+            reject,
         )
         plan = _build_multi_rec_plan(rec_ids=("rec-a", "rec-b"))
         state = WalkthroughState.for_plan(plan)
@@ -563,7 +609,9 @@ class TestNavigationFromDoneState:
 
     def test_prev_from_done_state_returns_to_last_rec(self):
         from nthlayer_workers.learn._interactive import (
-            WalkthroughState, accept, prev_rec,
+            WalkthroughState,
+            accept,
+            prev_rec,
         )
         plan = _build_multi_rec_plan(rec_ids=("rec-a", "rec-b"))
         state = WalkthroughState.for_plan(plan)

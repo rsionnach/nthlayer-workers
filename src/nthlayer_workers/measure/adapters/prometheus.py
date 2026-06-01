@@ -1,13 +1,12 @@
 """Prometheus polling adapter — queries Prometheus HTTP API for SLO breaches."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import httpx
-import logging
-
 import yaml
 
 logger = logging.getLogger(__name__)

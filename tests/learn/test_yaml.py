@@ -30,13 +30,13 @@ class TestResolvePath:
         assert resolve_path(parsed_manifest, "spec.slos.judgment.target") == 95.0
 
     def test_resolve_path_missing_leaf(self, parsed_manifest):
-        from nthlayer_workers.learn._yaml import resolve_path, PATH_MISSING
+        from nthlayer_workers.learn._yaml import PATH_MISSING, resolve_path
 
         result = resolve_path(parsed_manifest, "spec.slos.judgment.nonexistent")
         assert result is PATH_MISSING
 
     def test_resolve_path_missing_intermediate(self, parsed_manifest):
-        from nthlayer_workers.learn._yaml import resolve_path, PATH_MISSING
+        from nthlayer_workers.learn._yaml import PATH_MISSING, resolve_path
 
         result = resolve_path(parsed_manifest, "spec.deployment.gates.judgment")
         assert result is PATH_MISSING
@@ -53,8 +53,9 @@ class TestApplyAtPath:
     """apply_at_path writes in-place; comments survive round-trip."""
 
     def test_apply_at_existing_leaf(self):
-        from nthlayer_workers.learn._yaml import apply_at_path, get_yaml_round_trip
         from io import StringIO
+
+        from nthlayer_workers.learn._yaml import apply_at_path, get_yaml_round_trip
 
         yaml = get_yaml_round_trip()
         text = (
@@ -79,8 +80,9 @@ class TestApplyAtPath:
         assert "# current SLO target" in output
 
     def test_apply_at_missing_intermediate_creates(self):
-        from nthlayer_workers.learn._yaml import apply_at_path, get_yaml_round_trip
         from io import StringIO
+
+        from nthlayer_workers.learn._yaml import apply_at_path, get_yaml_round_trip
 
         yaml = get_yaml_round_trip()
         text = "spec:\n  slos:\n    reversal_rate:\n      target: 98.5\n"
@@ -102,8 +104,9 @@ class TestApplyAtPath:
         assert "enabled: true" in output
 
     def test_apply_at_path_preserves_sibling_comments(self):
-        from nthlayer_workers.learn._yaml import apply_at_path, get_yaml_round_trip
         from io import StringIO
+
+        from nthlayer_workers.learn._yaml import apply_at_path, get_yaml_round_trip
 
         yaml = get_yaml_round_trip()
         text = (
@@ -200,7 +203,7 @@ class TestClassifyOutcome:
     # 4 cells for "modifying existing" (current_value present)
 
     def test_with_current_path_missing_target_path_missing(self, rec_with_current):
-        from nthlayer_workers.learn._yaml import classify_outcome, PATH_MISSING
+        from nthlayer_workers.learn._yaml import PATH_MISSING, classify_outcome
         from nthlayer_workers.learn.recommendations import OutcomeKind
 
         result = classify_outcome(PATH_MISSING, rec_with_current)
@@ -230,7 +233,7 @@ class TestClassifyOutcome:
     # 3 cells for "adding new" (current_value None)
 
     def test_without_current_path_missing_apply_clean(self, rec_without_current):
-        from nthlayer_workers.learn._yaml import classify_outcome, PATH_MISSING
+        from nthlayer_workers.learn._yaml import PATH_MISSING, classify_outcome
         from nthlayer_workers.learn.recommendations import OutcomeKind
 
         result = classify_outcome(PATH_MISSING, rec_without_current)

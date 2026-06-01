@@ -3,8 +3,8 @@
 import pytest
 import pytest_asyncio
 
-from nthlayer_workers.measure.store.sqlite import SQLiteScoreStore
 from nthlayer_workers.measure.calibration.loop import OverrideCalibration
+from nthlayer_workers.measure.store.sqlite import SQLiteScoreStore
 from nthlayer_workers.measure.types import QualityScore
 
 

@@ -440,7 +440,7 @@ async def test_recover_pending_approvals_expired_immediately_rejects():
     store = MagicMock()
     ctx = _awaiting_context()
     # Set updated_at to 20 minutes ago (well past 15 min timeout)
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
     ctx.updated_at = (datetime.now(tz=timezone.utc) - timedelta(minutes=20)).isoformat()
 
     store.list_active.return_value = ["INC-TEST-001"]

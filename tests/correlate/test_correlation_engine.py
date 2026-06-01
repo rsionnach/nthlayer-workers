@@ -1,8 +1,9 @@
 """Tests for the full correlation engine."""
 from __future__ import annotations
 
-import yaml
 from datetime import datetime, timedelta, timezone
+
+import yaml
 
 from nthlayer_workers.correlate.correlation.engine import CorrelationEngine
 from nthlayer_workers.correlate.store.sqlite import SQLiteEventStore

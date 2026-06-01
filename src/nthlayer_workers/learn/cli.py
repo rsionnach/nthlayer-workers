@@ -14,6 +14,7 @@ from typing import Any
 from nthlayer_common.verdicts.serialise import to_dict
 from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
 from nthlayer_common.verdicts.store import AccuracyFilter, VerdictFilter
+
 from nthlayer_workers.learn._apply import apply_recommendations, format_summary
 from nthlayer_workers.learn._gh import (
     PreflightError,

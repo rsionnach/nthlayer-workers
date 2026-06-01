@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+
 import pytest
 from nthlayer_common.verdicts import MemoryStore
 
@@ -17,7 +18,6 @@ from nthlayer_workers.respond.types import (
     RemediationResult,
     TriageResult,
 )
-
 
 # ------------------------------------------------------------------ #
 # Fixtures                                                             #

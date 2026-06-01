@@ -1,8 +1,9 @@
 """Unit tests for nthlayer_workers.learn._apply (jmy.6)."""
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 class TestResolveManifestPath:
@@ -65,11 +66,14 @@ class TestApplyHappyPath:
     """apply_recommendations orchestration: happy path."""
 
     def test_single_rec_applied(self, tmp_path):
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn._apply import apply_recommendations
         from nthlayer_workers.learn.recommendations import (
-            Recommendation, SpecRecommendation, OutcomeKind,
+            OutcomeKind,
+            Recommendation,
+            SpecRecommendation,
         )
-        from datetime import datetime, timezone
 
         # Seed manifest
         (tmp_path / "fraud-detect.yaml").write_text(
@@ -105,11 +109,14 @@ class TestApplyHappyPath:
         assert "target: 95.0" not in (tmp_path / "fraud-detect.yaml").read_text()
 
     def test_skipped_when_manifest_missing(self, tmp_path):
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn._apply import apply_recommendations
         from nthlayer_workers.learn.recommendations import (
-            Recommendation, SpecRecommendation, OutcomeKind,
+            OutcomeKind,
+            Recommendation,
+            SpecRecommendation,
         )
-        from datetime import datetime, timezone
 
         # No manifest seeded
         plan = SpecRecommendation(
@@ -141,11 +148,13 @@ class TestApplyAtomicity:
 
     def test_alphabetical_write_order(self, tmp_path):
         """Files are written in alphabetical order, not encounter order."""
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn._apply import apply_recommendations
         from nthlayer_workers.learn.recommendations import (
-            Recommendation, SpecRecommendation,
+            Recommendation,
+            SpecRecommendation,
         )
-        from datetime import datetime, timezone
 
         # Seed two manifests
         (tmp_path / "z-service.yaml").write_text(
@@ -197,11 +206,13 @@ class TestApplyAtomicity:
         self, tmp_path, monkeypatch,
     ):
         """Filename-based failure injection per jmy.6 design § 8."""
+        from datetime import datetime, timezone
+
         from nthlayer_workers.learn._apply import apply_recommendations
         from nthlayer_workers.learn.recommendations import (
-            Recommendation, SpecRecommendation,
+            Recommendation,
+            SpecRecommendation,
         )
-        from datetime import datetime, timezone
 
         # Seed two manifests
         (tmp_path / "a-service.yaml").write_text(
@@ -264,7 +275,9 @@ class TestSummaryBuilder:
 
     def test_summary_applied_section(self):
         from nthlayer_workers.learn._apply import (
-            ApplyResult, RecOutcome, format_summary,
+            ApplyResult,
+            RecOutcome,
+            format_summary,
         )
         from nthlayer_workers.learn.recommendations import OutcomeKind
 
@@ -287,7 +300,9 @@ class TestSummaryBuilder:
 
     def test_summary_skipped_section_with_drift_detail(self):
         from nthlayer_workers.learn._apply import (
-            ApplyResult, RecOutcome, format_summary,
+            ApplyResult,
+            RecOutcome,
+            format_summary,
         )
         from nthlayer_workers.learn.recommendations import OutcomeKind
 
@@ -311,7 +326,9 @@ class TestSummaryBuilder:
 
     def test_summary_exit_code_line(self):
         from nthlayer_workers.learn._apply import (
-            ApplyResult, RecOutcome, format_summary,
+            ApplyResult,
+            RecOutcome,
+            format_summary,
         )
         from nthlayer_workers.learn.recommendations import OutcomeKind
 
@@ -347,9 +364,12 @@ class TestApplyIdempotency:
         """Apply add_dependency once → applied. Apply same plan again →
         skipped (outcome=already_applied), manifest unchanged."""
         from datetime import datetime, timezone
+
         from nthlayer_workers.learn._apply import apply_recommendations
         from nthlayer_workers.learn.recommendations import (
-            OutcomeKind, Recommendation, SpecRecommendation,
+            OutcomeKind,
+            Recommendation,
+            SpecRecommendation,
         )
 
         (tmp_path / "payments-api.yaml").write_text(
@@ -456,9 +476,12 @@ class TestApplyIdempotency:
         rec whose proposed_value already matches the manifest is a no-op
         skip, not a re-application."""
         from datetime import datetime, timezone
+
         from nthlayer_workers.learn._apply import apply_recommendations
         from nthlayer_workers.learn.recommendations import (
-            OutcomeKind, Recommendation, SpecRecommendation,
+            OutcomeKind,
+            Recommendation,
+            SpecRecommendation,
         )
 
         # Seed manifest where the target ALREADY equals the proposed value.

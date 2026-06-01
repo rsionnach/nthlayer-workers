@@ -1,6 +1,8 @@
 """Ingester protocol — the ingestion contract for SitRep."""
 from __future__ import annotations
+
 from typing import Awaitable, Callable, Protocol, Union
+
 from nthlayer_workers.correlate.types import SitRepEvent
 
 

@@ -3,7 +3,6 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
 from nthlayer_common.verdicts import SQLiteVerdictStore
 from nthlayer_common.verdicts.core import create as create_verdict
 

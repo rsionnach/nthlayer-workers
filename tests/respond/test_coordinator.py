@@ -2,13 +2,13 @@
 """Tests for coordinator state machine."""
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from nthlayer_common.verdicts import create as verdict_create
 
-from nthlayer_workers.respond.coordinator import Coordinator, PIPELINE
 from nthlayer_workers.respond.context_store import SQLiteContextStore
+from nthlayer_workers.respond.coordinator import PIPELINE, Coordinator
 from nthlayer_workers.respond.types import (
     AgentRole,
     CommunicationResult,
@@ -19,7 +19,6 @@ from nthlayer_workers.respond.types import (
     RemediationResult,
     TriageResult,
 )
-
 
 # ------------------------------------------------------------------ #
 # Helpers                                                              #

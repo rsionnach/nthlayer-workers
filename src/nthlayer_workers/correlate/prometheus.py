@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+
 import httpx
 import structlog
 
@@ -152,8 +153,9 @@ def load_dependency_graph(specs_dir: str) -> dict[str, dict]:
 
     Returns dict mapping service name → {tier, dependencies, dependents}.
     """
-    import yaml
     from pathlib import Path
+
+    import yaml
 
     graph: dict[str, dict] = {}
     specs_path = Path(specs_dir)

@@ -2,10 +2,10 @@
 
 import argparse
 
-
+from nthlayer_common.records.hashing import verify_hash
 from nthlayer_common.records.models import ZERO_HASH
 from nthlayer_common.records.sqlite_store import SQLiteDecisionRecordStore
-from nthlayer_common.records.hashing import verify_hash
+
 from nthlayer_workers.observe.assessment import create as create_assessment
 from nthlayer_workers.observe.cli import _write_decision_record
 

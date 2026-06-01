@@ -2,8 +2,8 @@
 
 from nthlayer_workers.observe.dependencies.discovery import (
     DependencyDiscovery,
-    DiscoveryError,
     DependencyDiscoveryResult,
+    DiscoveryError,
     create_demo_discovery,
 )
 from nthlayer_workers.observe.dependencies.providers.base import BaseDepProvider, ProviderHealth

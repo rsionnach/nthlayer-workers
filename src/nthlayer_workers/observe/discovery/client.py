@@ -8,7 +8,12 @@ import httpx
 import structlog
 
 from nthlayer_workers.observe.discovery.classifier import MetricClassifier
-from nthlayer_workers.observe.discovery.models import DiscoveredMetric, DiscoveryResult, MetricType, TechnologyGroup
+from nthlayer_workers.observe.discovery.models import (
+    DiscoveredMetric,
+    DiscoveryResult,
+    MetricType,
+    TechnologyGroup,
+)
 
 logger = structlog.get_logger()
 

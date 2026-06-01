@@ -12,7 +12,6 @@ import argparse
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from nthlayer_common.api_client import APIResult
 
 

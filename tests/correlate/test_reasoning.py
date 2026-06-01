@@ -24,7 +24,6 @@ from nthlayer_workers.correlate.types import (
     TopologyCorrelation,
 )
 
-
 # --- Fixtures ---
 
 def _make_group(
@@ -330,7 +329,9 @@ class TestReasonAboutCorrelations:
 class TestCorrelateCommandReasoning:
     def test_no_reasoning_produces_heuristic_verdict(self, tmp_path):
         """--no-reasoning flag produces verdict with reasoning_mode=heuristic."""
-        from nthlayer_common.verdicts import SQLiteVerdictStore, create as verdict_create
+        from nthlayer_common.verdicts import SQLiteVerdictStore
+        from nthlayer_common.verdicts import create as verdict_create
+
         from nthlayer_workers.correlate.cli import correlate_command
 
         store_path = str(tmp_path / "verdicts.db")
@@ -352,7 +353,7 @@ class TestCorrelateCommandReasoning:
         )
 
         async def mock_alerts(client, url, services):
-            from nthlayer_workers.correlate.types import SitRepEvent, EventType
+            from nthlayer_workers.correlate.types import EventType, SitRepEvent
             return [SitRepEvent(
                 id="alert-1", timestamp="2026-03-25T10:00:00Z",
                 source="prometheus", type=EventType.ALERT,
@@ -386,7 +387,9 @@ class TestCorrelateCommandReasoning:
 
     def test_reasoning_enabled_without_api_key_falls_back(self, tmp_path, monkeypatch):
         """reasoning=True but no API key falls back to heuristic."""
-        from nthlayer_common.verdicts import SQLiteVerdictStore, create as verdict_create
+        from nthlayer_common.verdicts import SQLiteVerdictStore
+        from nthlayer_common.verdicts import create as verdict_create
+
         from nthlayer_workers.correlate.cli import correlate_command
 
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -411,7 +414,7 @@ class TestCorrelateCommandReasoning:
         )
 
         async def mock_alerts(client, url, services):
-            from nthlayer_workers.correlate.types import SitRepEvent, EventType
+            from nthlayer_workers.correlate.types import EventType, SitRepEvent
             return [SitRepEvent(
                 id="alert-1", timestamp="2026-03-25T10:00:00Z",
                 source="prometheus", type=EventType.ALERT,
@@ -442,7 +445,9 @@ class TestCorrelateCommandReasoning:
 
     def test_reasoning_enabled_with_model_success(self, tmp_path, monkeypatch):
         """reasoning=True with API key and successful model call sets reasoning_mode=model."""
-        from nthlayer_common.verdicts import SQLiteVerdictStore, create as verdict_create
+        from nthlayer_common.verdicts import SQLiteVerdictStore
+        from nthlayer_common.verdicts import create as verdict_create
+
         from nthlayer_workers.correlate.cli import correlate_command
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
@@ -466,7 +471,7 @@ class TestCorrelateCommandReasoning:
         )
 
         async def mock_alerts(client, url, services):
-            from nthlayer_workers.correlate.types import SitRepEvent, EventType
+            from nthlayer_workers.correlate.types import EventType, SitRepEvent
             return [SitRepEvent(
                 id="alert-1", timestamp="2026-03-25T10:00:00Z",
                 source="prometheus", type=EventType.ALERT,
@@ -527,7 +532,10 @@ class TestCorrelateCommandReasoning:
 # Task 6b: Trace evidence section in reasoning prompt
 # ---------------------------------------------------------------------------
 
-from datetime import datetime as dt, timezone
+from datetime import datetime as dt
+from datetime import timezone
+
+from nthlayer_workers.correlate.reasoning import _build_trace_evidence_section
 from nthlayer_workers.correlate.traces.protocol import (
     ErrorSummary,
     OperationLatency,
@@ -536,7 +544,6 @@ from nthlayer_workers.correlate.traces.protocol import (
     TopologyDivergence,
     TraceEvidence,
 )
-from nthlayer_workers.correlate.reasoning import _build_trace_evidence_section
 
 
 def _make_trace_evidence_for_reasoning() -> TraceEvidence:

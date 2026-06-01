@@ -9,10 +9,13 @@ from __future__ import annotations
 from nthlayer_common.records.hashing import canonical_json, compute_hash
 from nthlayer_common.records.models import (
     Assessment as DecisionAssessment,
+)
+from nthlayer_common.records.models import (
     AssessmentType,
     Severity,
     Summaries,
 )
+
 from nthlayer_workers.observe.assessment import Assessment as LegacyAssessment
 
 __all__ = [

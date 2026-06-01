@@ -5,15 +5,17 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import urllib.request
 import urllib.error
+import urllib.request
 from abc import ABC, abstractmethod
 from typing import Any
 
 import structlog
 from nthlayer_common.llm_structured import structured_call_with_usage
 from nthlayer_common.telemetry import emit_llm_event
-from nthlayer_common.verdicts import create as verdict_create, Verdict
+from nthlayer_common.verdicts import Verdict
+from nthlayer_common.verdicts import create as verdict_create
+
 from nthlayer_workers.respond.types import AgentRole, IncidentContext
 
 log = structlog.get_logger(__name__)
@@ -612,10 +614,10 @@ class AgentBase(ABC):
         if not os.environ.get("SLACK_WEBHOOK_URL"):
             return
         try:
-            from nthlayer_workers.respond.notifications import send_slack_notification
             from nthlayer_workers.respond.notifications import (
-                build_triage_blocks,
                 build_remediation_blocks,
+                build_triage_blocks,
+                send_slack_notification,
             )
 
             role = self.role.value

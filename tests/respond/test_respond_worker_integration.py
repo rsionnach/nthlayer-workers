@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-
 from nthlayer_common.api_client import APIResult
 
 from nthlayer_workers.respond.agents.base import AgentBase
@@ -29,7 +28,6 @@ from nthlayer_workers.respond.types import (
     TriageResult,
 )
 from nthlayer_workers.respond.worker import RespondModule
-
 
 # ------------------------------------------------------------------ #
 # Stub agents — deterministic results without LLM calls               #

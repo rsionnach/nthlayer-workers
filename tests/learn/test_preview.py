@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 
-
 class TestBuildPreviewScalar:
     """build_preview for scalar-valued recommendations (tighten_slo)."""
 
@@ -61,8 +60,8 @@ class TestBuildPreviewStructural:
 
     def test_add_deploy_gate_preview_shape(self):
         from nthlayer_workers.learn._preview import build_preview
-        from nthlayer_workers.learn.recommendations import Recommendation
         from nthlayer_workers.learn._yaml import PATH_MISSING
+        from nthlayer_workers.learn.recommendations import Recommendation
 
         rec = Recommendation(
             id="rec-deadbeef0124",

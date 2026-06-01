@@ -13,11 +13,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
-
-from nthlayer_common.verdicts import SQLiteVerdictStore, AccuracyFilter, VerdictFilter, create as verdict_create
+from nthlayer_common.verdicts import AccuracyFilter, SQLiteVerdictStore, VerdictFilter
+from nthlayer_common.verdicts import create as verdict_create
 
 from nthlayer_workers.measure.calibration.verdict_calibration import VerdictCalibration
-from nthlayer_workers.measure.cli import cmd_calibrate, _build_pipeline
+from nthlayer_workers.measure.cli import _build_pipeline, cmd_calibrate
 from nthlayer_workers.measure.config import MeasureConfig, VerdictConfig, load_config
 from nthlayer_workers.measure.pipeline.router import DEFAULT_APPROVE_THRESHOLD, PipelineRouter
 from nthlayer_workers.measure.store.sqlite import SQLiteScoreStore

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from nthlayer_common.prompts import extract_confidence, load_prompt
+
 from nthlayer_workers.respond.agents.base import AgentBase
 from nthlayer_workers.respond.agents.response_models import CommunicationResponse
 from nthlayer_workers.respond.types import (

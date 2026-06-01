@@ -3,7 +3,6 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-
 from nthlayer_workers.respond.sre.shift_report import (
     ShiftReport,
     build_shift_report,

@@ -15,7 +15,6 @@ from nthlayer_workers.measure.adapters.prometheus import (
     query_prometheus,
 )
 
-
 # --- Fixtures ---
 
 SAMPLE_SPEC = """\

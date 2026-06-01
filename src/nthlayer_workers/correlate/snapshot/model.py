@@ -17,8 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import structlog
-
 from nthlayer_common.prompts import load_prompt
+
 from nthlayer_workers.correlate.types import CorrelationGroup
 from nthlayer_workers.observe.assessment import Assessment
 
@@ -155,6 +155,7 @@ class ModelInterface:
     async def _call_model(self, prompt: str) -> str:
         """Call the LLM via the shared nthlayer-common wrapper."""
         import asyncio
+
         from nthlayer_common.llm import llm_call
 
         result = await asyncio.to_thread(

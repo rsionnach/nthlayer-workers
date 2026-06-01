@@ -14,7 +14,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 import structlog
-
 from nthlayer_common.api_client import CoreAPIClient
 from nthlayer_common.cloudevents import wrap_assessment
 from nthlayer_common.manifest.models import SLODefinition
@@ -22,9 +21,9 @@ from nthlayer_common.manifest.models import SLODefinition
 from nthlayer_workers.observe.assessment import create, to_dict
 from nthlayer_workers.observe.portfolio.aggregator import build_portfolio_from_results
 from nthlayer_workers.observe.slo.collector import (
+    ServiceSLO,
     SLOMetricCollector,
     SLOResult,
-    ServiceSLO,
     results_to_assessments,
 )
 

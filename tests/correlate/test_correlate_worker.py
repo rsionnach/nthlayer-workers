@@ -5,14 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
-
 from nthlayer_common.api_client import APIResult
+
+from nthlayer_workers.correlate.types import EventType
 from nthlayer_workers.correlate.worker import (
     CorrelateSessionModule,
     assessment_to_event,
     verdict_to_event,
 )
-from nthlayer_workers.correlate.types import EventType
 
 
 class TestCorrelateSessionModuleProtocol:

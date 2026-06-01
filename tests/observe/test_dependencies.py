@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-
 from nthlayer_common.dependency_models import (
     DependencyGraph,
     DependencyType,

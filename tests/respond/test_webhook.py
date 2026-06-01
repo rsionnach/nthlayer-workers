@@ -12,7 +12,6 @@ from nthlayer_workers.respond.safe_actions.webhook import (
     resolve_secrets,
 )
 
-
 # --- Template rendering ---
 
 class TestRenderTemplates:

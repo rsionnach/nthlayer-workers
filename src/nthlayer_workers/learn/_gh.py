@@ -12,7 +12,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-
 _PR_URL_RE = re.compile(r"https://[^\s]+/pull/(\d+)")
 
 

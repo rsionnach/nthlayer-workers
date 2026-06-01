@@ -12,7 +12,6 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-
 CONSOLE_SCRIPT = "nthlayer-workers"
 
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-
 from nthlayer_workers.correlate.session import (
     CorrelationDomain,
     SessionWindow,

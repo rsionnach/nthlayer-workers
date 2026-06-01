@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import inspect
-import structlog
 import sqlite3
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
+
+import structlog
 
 from nthlayer_workers.respond.types import IncidentContext
 

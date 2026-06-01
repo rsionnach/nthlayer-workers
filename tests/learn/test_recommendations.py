@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 import pytest
 import yaml
-
 from nthlayer_common.outcomes import FinancialImpact
 
 from nthlayer_workers.learn.recommendations import (
@@ -13,7 +12,6 @@ from nthlayer_workers.learn.recommendations import (
     SpecRecommendation,
     analyze_incident,
 )
-
 
 # ---------------------------------------------------------------------------
 # SpecRecommendation model
@@ -734,8 +732,9 @@ class TestPlanArtefactRename:
     """jmy.6: apiVersion + kind rename for the plan-file artefact."""
 
     def test_to_yaml_emits_new_api_version(self):
-        from nthlayer_workers.learn.recommendations import SpecRecommendation, Recommendation
         from datetime import datetime, timezone
+
+        from nthlayer_workers.learn.recommendations import Recommendation, SpecRecommendation
 
         sr = SpecRecommendation(
             incident="inc-test",
@@ -795,10 +794,12 @@ class TestParsePlanFile:
     """jmy.6: --from <plan.yaml> validation."""
 
     def test_parse_plan_file_happy_path(self, tmp_path):
-        from nthlayer_workers.learn.recommendations import (
-            SpecRecommendation, parse_plan_file,
-        )
         from datetime import datetime, timezone
+
+        from nthlayer_workers.learn.recommendations import (
+            SpecRecommendation,
+            parse_plan_file,
+        )
 
         original = SpecRecommendation(
             incident="inc-test",
@@ -817,7 +818,8 @@ class TestParsePlanFile:
 
     def test_parse_plan_file_unknown_api_version_raises(self, tmp_path):
         from nthlayer_workers.learn.recommendations import (
-            parse_plan_file, PlanFileUnknownVersionError,
+            PlanFileUnknownVersionError,
+            parse_plan_file,
         )
 
         plan_path = tmp_path / "plan.yaml"
@@ -833,7 +835,8 @@ class TestParsePlanFile:
 
     def test_parse_plan_file_missing_recommendations_key_raises(self, tmp_path):
         from nthlayer_workers.learn.recommendations import (
-            parse_plan_file, PlanFileInvalidError,
+            PlanFileInvalidError,
+            parse_plan_file,
         )
 
         plan_path = tmp_path / "plan.yaml"
@@ -848,7 +851,8 @@ class TestParsePlanFile:
 
     def test_parse_plan_file_non_list_recommendations_raises(self, tmp_path):
         from nthlayer_workers.learn.recommendations import (
-            parse_plan_file, PlanFileInvalidError,
+            PlanFileInvalidError,
+            parse_plan_file,
         )
 
         plan_path = tmp_path / "plan.yaml"
@@ -864,8 +868,9 @@ class TestParsePlanFile:
 
     def test_parse_plan_file_coerces_naive_datetime_to_utc(self, tmp_path):
         """jmy.6 P1 R5: naive generated_at coerced to UTC to prevent comparison bugs."""
-        from nthlayer_workers.learn.recommendations import parse_plan_file
         from datetime import timezone
+
+        from nthlayer_workers.learn.recommendations import parse_plan_file
 
         plan_path = tmp_path / "plan.yaml"
         plan_path.write_text(
@@ -916,7 +921,8 @@ class TestParsePlanFile:
     def test_parse_plan_file_rejects_malformed_financial_impact_wrong_type(self, tmp_path):
         """jmy.23: non-dict financial_impact raises PlanFileInvalidError."""
         from nthlayer_workers.learn.recommendations import (
-            parse_plan_file, PlanFileInvalidError,
+            PlanFileInvalidError,
+            parse_plan_file,
         )
 
         plan_path = tmp_path / "plan.yaml"
@@ -938,7 +944,8 @@ class TestParsePlanFile:
     def test_parse_plan_file_rejects_malformed_financial_impact_missing_keys(self, tmp_path):
         """jmy.23: dict missing required FinancialImpact keys → PlanFileInvalidError."""
         from nthlayer_workers.learn.recommendations import (
-            parse_plan_file, PlanFileInvalidError,
+            PlanFileInvalidError,
+            parse_plan_file,
         )
 
         plan_path = tmp_path / "plan.yaml"

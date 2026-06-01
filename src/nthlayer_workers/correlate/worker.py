@@ -14,7 +14,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import structlog
-
 from nthlayer_common.api_client import CoreAPIClient
 from nthlayer_common.cloudevents import wrap_assessment
 

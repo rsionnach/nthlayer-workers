@@ -23,7 +23,6 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 import structlog
-
 from nthlayer_common.api_client import CoreAPIClient
 
 logger = structlog.get_logger()

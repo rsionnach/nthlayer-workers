@@ -3,7 +3,6 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-
 from nthlayer_workers.respond.sre.brief import PagingBrief, build_paging_brief, render_brief
 
 

@@ -2,8 +2,8 @@
 
 from nthlayer_workers.observe.portfolio.aggregator import (
     PortfolioSummary,
-    SLOHealth,
     ServiceHealth,
+    SLOHealth,
     build_portfolio,
 )
 from nthlayer_workers.observe.portfolio.scorer import score_service

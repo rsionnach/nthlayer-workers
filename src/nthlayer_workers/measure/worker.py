@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import structlog
-
 from nthlayer_common.api_client import CoreAPIClient
 from nthlayer_common.cloudevents import wrap_assessment, wrap_verdict
 from nthlayer_common.providers import PrometheusProvider

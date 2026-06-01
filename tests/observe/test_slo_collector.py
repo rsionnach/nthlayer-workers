@@ -3,12 +3,12 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from nthlayer_common.manifest.models import SLODefinition
+
 from nthlayer_workers.observe.slo.collector import (
+    ServiceSLO,
     SLOMetricCollector,
     SLOResult,
-    ServiceSLO,
     _determine_status,
     _parse_window_minutes,
     results_to_assessments,

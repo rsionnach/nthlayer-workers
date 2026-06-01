@@ -13,7 +13,6 @@ from ruamel.yaml.comments import CommentedMap
 
 from nthlayer_workers.learn.recommendations import OutcomeKind, Recommendation
 
-
 # Singleton sentinel for "path doesn't resolve in this document".
 # Using a singleton object (not None) lets callers distinguish absent
 # from a real None-valued leaf.

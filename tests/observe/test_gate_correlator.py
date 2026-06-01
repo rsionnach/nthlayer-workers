@@ -11,12 +11,12 @@ from nthlayer_workers.observe.gate.correlator import (
     MEDIUM_CONFIDENCE,
     CorrelationInput,
     CorrelationResult,
-    correlate,
     _calculate_burn_rate_score,
     _calculate_dependency_score,
     _calculate_history_score,
     _calculate_magnitude_score,
     _calculate_proximity_score,
+    correlate,
 )
 
 

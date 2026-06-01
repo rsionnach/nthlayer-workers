@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+
 from nthlayer_workers.correlate.store.sqlite import SQLiteEventStore
 from nthlayer_workers.correlate.types import EventType, SitRepEvent
 

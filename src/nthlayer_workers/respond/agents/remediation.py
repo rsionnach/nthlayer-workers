@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-import structlog
 from pathlib import Path
 
+import structlog
 from nthlayer_common.prompts import extract_confidence, load_prompt, render_user_prompt
+
 from nthlayer_workers.respond.agents.base import AgentBase
 from nthlayer_workers.respond.agents.response_models import RemediationResponse
 from nthlayer_workers.respond.safe_actions.registry import SafeActionRegistry

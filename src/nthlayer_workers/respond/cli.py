@@ -13,6 +13,7 @@ from typing import Any
 import structlog
 import yaml
 from nthlayer_common.verdicts import MemoryStore, SQLiteVerdictStore
+
 from nthlayer_workers.respond.agents.communication import CommunicationAgent
 from nthlayer_workers.respond.agents.investigation import InvestigationAgent
 from nthlayer_workers.respond.agents.remediation import RemediationAgent

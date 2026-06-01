@@ -2,7 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-
 from nthlayer_workers.measure.detection.protocol import Alert
 from nthlayer_workers.measure.types import QualityScore
 

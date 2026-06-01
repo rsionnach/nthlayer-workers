@@ -16,8 +16,8 @@ import os
 from pathlib import Path
 
 import structlog
-
 from nthlayer_common.prompts import load_prompt
+
 from nthlayer_workers.correlate.types import CorrelationGroup
 
 _PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "reasoning.yaml"

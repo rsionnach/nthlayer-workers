@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 from nthlayer_common.verdicts import MemoryStore
 
 from nthlayer_workers.respond.agents.remediation import RemediationAgent
-from nthlayer_workers.respond.safe_actions.registry import SafeActionRegistry
 from nthlayer_workers.respond.safe_actions.actions import register_builtin_actions
+from nthlayer_workers.respond.safe_actions.registry import SafeActionRegistry
 from nthlayer_workers.respond.types import (
     AgentRole,
     Hypothesis,
@@ -19,7 +20,6 @@ from nthlayer_workers.respond.types import (
     RemediationResult,
     TriageResult,
 )
-
 
 # ------------------------------------------------------------------ #
 # Helpers                                                              #
@@ -620,7 +620,7 @@ def test_degraded_metadata_survives_http_round_trip_to_bench(bare_agent):
     to_dict/from_dict round-trip so bench brief sees the same data the worker
     emitted."""
     from nthlayer_common.verdicts import create as verdict_create
-    from nthlayer_common.verdicts.serialise import to_dict, from_dict
+    from nthlayer_common.verdicts.serialise import from_dict, to_dict
 
     md = bare_agent._build_degraded_metadata()
     v = verdict_create(

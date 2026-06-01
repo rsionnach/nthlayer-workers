@@ -1,7 +1,7 @@
 """Tests for snapshot generator."""
 from __future__ import annotations
 
-from nthlayer_workers.correlate.snapshot.generator import SnapshotGenerator, SnapshotBudget
+from nthlayer_workers.correlate.snapshot.generator import SnapshotBudget, SnapshotGenerator
 from nthlayer_workers.correlate.types import AgentState, CorrelationGroup
 
 

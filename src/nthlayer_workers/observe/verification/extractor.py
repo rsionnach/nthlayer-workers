@@ -6,7 +6,11 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from nthlayer_workers.observe.verification.models import DeclaredMetric, MetricContract, MetricSource
+from nthlayer_workers.observe.verification.models import (
+    DeclaredMetric,
+    MetricContract,
+    MetricSource,
+)
 
 
 @dataclass

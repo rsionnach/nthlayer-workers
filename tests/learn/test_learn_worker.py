@@ -5,15 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
-
 from nthlayer_common.api_client import APIResult
+
 from nthlayer_workers.learn.worker import (
     LearnOutcomeModule,
     LearnRetrospectiveModule,
     _build_chain_timeline,
     _generate_recommendations,
 )
-
 
 # ---------------------------------------------------------------------------
 # LearnOutcomeModule

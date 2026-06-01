@@ -14,12 +14,12 @@ from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from typing import Any
 
+from nthlayer_common.slack_web import SlackWebClient
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from nthlayer_common.slack_web import SlackWebClient
 from nthlayer_workers.respond.config import RespondConfig
 from nthlayer_workers.respond.metrics import VerdictMetricsCollector
 from nthlayer_workers.respond.types import IncidentState

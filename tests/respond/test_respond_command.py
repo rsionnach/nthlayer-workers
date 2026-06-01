@@ -2,10 +2,9 @@
 """Tests for the respond CLI subcommand with verdict-triggered incidents."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 FRAUD_SPEC = """\
 apiVersion: srm/v1
@@ -125,7 +124,8 @@ def test_respond_command_missing_verdict(tmp_path):
 
 def test_respond_command_severity_mapping(specs_dir, tmp_path):
     """High confidence correlation verdict maps to severity 1 (critical)."""
-    from nthlayer_common.verdicts import SQLiteVerdictStore, create as verdict_create
+    from nthlayer_common.verdicts import SQLiteVerdictStore
+    from nthlayer_common.verdicts import create as verdict_create
 
     store_path = str(tmp_path / "verdicts.db")
     store = SQLiteVerdictStore(store_path)

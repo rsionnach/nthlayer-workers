@@ -2,7 +2,6 @@
 
 from datetime import datetime, timedelta, timezone
 
-
 from nthlayer_workers.respond.oncall.escalation import (
     EscalationState,
     EscalationStatus,

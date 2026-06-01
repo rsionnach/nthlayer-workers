@@ -14,10 +14,10 @@ from typing import Any
 import structlog
 
 from nthlayer_workers.respond.types import (
+    TERMINAL_STATES,
     AgentRole,
     IncidentContext,
     IncidentState,
-    TERMINAL_STATES,
 )
 
 logger = structlog.get_logger(__name__)

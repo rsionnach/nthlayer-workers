@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 import structlog
-
 from nthlayer_common.api_client import CoreAPIClient
 
 from nthlayer_workers.respond.config import RespondConfig
@@ -26,9 +25,9 @@ from nthlayer_workers.respond.context_store import (
 )
 from nthlayer_workers.respond.coordinator import Coordinator
 from nthlayer_workers.respond.types import (
+    TERMINAL_STATES,
     IncidentContext,
     IncidentState,
-    TERMINAL_STATES,
 )
 from nthlayer_workers.respond.worker_helpers import (
     breach_ids_with_snapshots,

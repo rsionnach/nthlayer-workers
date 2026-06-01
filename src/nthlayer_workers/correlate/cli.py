@@ -540,7 +540,10 @@ def correlate_command(
     reasoning_mode = "heuristic"
 
     if reasoning:
-        from nthlayer_workers.correlate.reasoning import reason_about_correlations, reasoning_available
+        from nthlayer_workers.correlate.reasoning import (
+            reason_about_correlations,
+            reasoning_available,
+        )
 
         if reasoning_available():
             kwargs = {}
@@ -629,6 +632,7 @@ def correlate_command(
     # canonical primitive). correlation_snapshot is in ASSESSMENT_KINDS;
     # producing a "correlation"-typed verdict here was a category error.
     import uuid as _uuid
+
     from nthlayer_workers.observe.assessment import Assessment as _Assessment
     from nthlayer_workers.observe.sqlite_store import SQLiteAssessmentStore
 

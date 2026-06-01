@@ -1,12 +1,16 @@
 # tests/test_agent_base.py
 """Tests for AgentBase ABC."""
 import json
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from nthlayer_workers.respond.agents.base import AgentBase
 from nthlayer_workers.respond.types import (
-    AgentRole, IncidentContext, IncidentState, TriageResult,
+    AgentRole,
+    IncidentContext,
+    IncidentState,
+    TriageResult,
 )
 
 
@@ -351,6 +355,7 @@ class StructuredStubAgent(AgentBase):
 async def test_structured_path_routes_through_structured_call(verdict_store, triggered_context):
     """When response_model is set, execute() goes through Instructor."""
     from nthlayer_common.llm_structured import StructuredCallResult, StructuredCallUsage
+
     from nthlayer_workers.respond.agents.response_models import TriageResponse
 
     canned = TriageResponse(
@@ -384,6 +389,7 @@ async def test_structured_path_routes_through_structured_call(verdict_store, tri
 async def test_structured_path_emits_otel_cost_event(verdict_store):
     """Each structured call emits an OTel event with token usage."""
     from nthlayer_common.llm_structured import StructuredCallResult, StructuredCallUsage
+
     from nthlayer_workers.respond.agents.response_models import TriageResponse
 
     canned = TriageResponse(
@@ -430,6 +436,7 @@ async def test_response_model_none_uses_raw_text_path(verdict_store):
 async def test_structured_path_emits_otel_event_on_failure(verdict_store):
     """Failed structured calls also emit an OTel event (cost-accounting parity)."""
     from nthlayer_common.llm import LLMError
+
     from nthlayer_workers.respond.agents.response_models import TriageResponse
 
     agent = StructuredStubAgent(

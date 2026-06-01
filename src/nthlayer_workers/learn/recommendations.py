@@ -43,7 +43,6 @@ from typing import Any
 
 import structlog
 import yaml
-
 from nthlayer_common.outcomes import FinancialImpact
 
 log = structlog.get_logger(__name__)

@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import structlog
-
 from nthlayer_common.manifest.models import SLODefinition
 from nthlayer_common.providers import PrometheusProvider
 from nthlayer_common.providers.prometheus import PrometheusProviderError

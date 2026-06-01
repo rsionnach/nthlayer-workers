@@ -6,13 +6,13 @@ import pytest
 
 from nthlayer_workers.observe.assessment import create
 from nthlayer_workers.observe.portfolio.aggregator import (
-    SLOHealth,
     ServiceHealth,
+    SLOHealth,
     build_portfolio,
     build_portfolio_from_results,
 )
-from nthlayer_workers.observe.slo.collector import SLOResult
 from nthlayer_workers.observe.portfolio.scorer import score_service
+from nthlayer_workers.observe.slo.collector import SLOResult
 from nthlayer_workers.observe.store import MemoryAssessmentStore
 
 

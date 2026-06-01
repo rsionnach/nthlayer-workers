@@ -7,6 +7,7 @@ import sqlite3
 from typing import Protocol
 
 from nthlayer_workers.respond.types import (
+    TERMINAL_STATES,
     CommunicationResult,
     CommunicationUpdate,
     Hypothesis,
@@ -14,7 +15,6 @@ from nthlayer_workers.respond.types import (
     IncidentState,
     InvestigationResult,
     RemediationResult,
-    TERMINAL_STATES,
     TriageResult,
 )
 

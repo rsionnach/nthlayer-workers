@@ -6,15 +6,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nthlayer_workers.observe.verification.extractor import (
-    Resource,
-    _extract_metrics_from_query,
-    extract_metric_contract,
-)
 from nthlayer_workers.observe.verification.exporter_guidance import (
     detect_missing_exporters,
     format_exporter_guidance,
     get_exporter_guidance,
+)
+from nthlayer_workers.observe.verification.extractor import (
+    Resource,
+    _extract_metrics_from_query,
+    extract_metric_contract,
 )
 from nthlayer_workers.observe.verification.models import (
     ContractVerificationResult,

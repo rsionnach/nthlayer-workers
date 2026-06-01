@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-
 from nthlayer_common.api_client import APIResult
+
 from nthlayer_workers.observe.worker import (
     ObserveCollectModule,
     ObserveDriftModule,
@@ -386,8 +386,13 @@ class TestDriftCycleHappyPath:
     async def test_drift_signal_submitted(self, mock_analyzer_cls):
         """A successful drift analysis submits a drift_signal assessment."""
         from datetime import datetime
+
         from nthlayer_workers.observe.drift.models import (
-            DriftMetrics, DriftPattern, DriftProjection, DriftResult, DriftSeverity,
+            DriftMetrics,
+            DriftPattern,
+            DriftProjection,
+            DriftResult,
+            DriftSeverity,
         )
 
         mock_analyzer = AsyncMock()

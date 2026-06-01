@@ -1,8 +1,11 @@
 """Tests for WebhookIngester."""
 from __future__ import annotations
+
 import asyncio
 import json
+
 import pytest
+
 from nthlayer_workers.correlate.ingestion.webhook import WebhookIngester
 from nthlayer_workers.correlate.types import EventType
 

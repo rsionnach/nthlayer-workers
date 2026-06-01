@@ -1,5 +1,6 @@
 """Tests for severity pre-scoring."""
 from __future__ import annotations
+
 from nthlayer_workers.correlate.ingestion.severity import pre_score
 from nthlayer_workers.correlate.types import EventType, SitRepEvent
 

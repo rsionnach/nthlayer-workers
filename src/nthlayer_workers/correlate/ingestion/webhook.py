@@ -6,7 +6,7 @@ import json
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
 
 from nthlayer_workers.correlate.ingestion import severity as _severity
 from nthlayer_workers.correlate.types import EventType, SitRepEvent

@@ -1,8 +1,9 @@
 """Tests for SQLiteScoreStore — round-trip save/get for scores, overrides, autonomy."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 import pytest_asyncio
-from datetime import datetime, timedelta, timezone
 
 from nthlayer_workers.measure.store.sqlite import SQLiteScoreStore
 from nthlayer_workers.measure.types import QualityScore

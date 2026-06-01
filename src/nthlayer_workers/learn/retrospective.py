@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-
 from nthlayer_common.manifest import (
     ManifestLoadError,
     extract_declared_dependencies,
@@ -18,7 +17,7 @@ from nthlayer_common.outcomes import (
 )
 from nthlayer_common.verdicts.core import create, link
 from nthlayer_common.verdicts.models import Verdict
-from nthlayer_common.verdicts.store import VerdictStore, VerdictFilter
+from nthlayer_common.verdicts.store import VerdictFilter, VerdictStore
 
 from nthlayer_workers.learn._trigger import resolve_trigger_service
 

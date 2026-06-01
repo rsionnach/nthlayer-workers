@@ -17,8 +17,9 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
-from nthlayer_common.errors import ProviderError
 from nthlayer_common.dependency_models import DependencyType, DiscoveredDependency
+from nthlayer_common.errors import ProviderError
+
 from nthlayer_workers.observe.dependencies.providers.base import (
     BaseDepProvider,
     ProviderHealth,

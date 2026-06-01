@@ -10,7 +10,6 @@ import pytest
 
 from nthlayer_workers.correlate.traces.tempo import TempoTraceBackend
 
-
 # ---------------------------------------------------------------------------
 # Task 2: Constructor + health check + low-level HTTP transport
 # ---------------------------------------------------------------------------
@@ -298,6 +297,7 @@ class TestParseTempoTimestamp:
 # ---------------------------------------------------------------------------
 
 from datetime import timedelta
+
 from nthlayer_workers.correlate.traces.tempo import _ServiceStats
 
 

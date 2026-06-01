@@ -1,5 +1,6 @@
 """Tests for context store."""
 import pytest
+
 from nthlayer_workers.respond.context_store import SQLiteContextStore
 from nthlayer_workers.respond.types import (
     CommunicationResult,

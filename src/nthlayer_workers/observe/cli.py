@@ -43,6 +43,7 @@ def _write_decision_record(
     try:
         from nthlayer_common.records.models import ZERO_HASH
         from nthlayer_common.records.sqlite_store import SQLiteDecisionRecordStore
+
         from nthlayer_workers.observe.decision_records import build_decision_record, build_stream
 
         store = SQLiteDecisionRecordStore(args.decision_store)
@@ -70,7 +71,11 @@ def _cmd_collect(args: argparse.Namespace) -> int:
 
     Exit codes: 0 = all healthy, 2 = SLO breach detected (EXHAUSTED or CRITICAL).
     """
-    from nthlayer_workers.observe.slo.collector import ServiceSLO, SLOMetricCollector, results_to_assessments
+    from nthlayer_workers.observe.slo.collector import (
+        ServiceSLO,
+        SLOMetricCollector,
+        results_to_assessments,
+    )
     from nthlayer_workers.observe.slo.spec_loader import load_specs
     from nthlayer_workers.observe.sqlite_store import SQLiteAssessmentStore
 
@@ -409,6 +414,7 @@ def _cmd_explain(args: argparse.Namespace) -> int:
     import json
 
     from nthlayer_common.explanation import format_explanation
+
     from nthlayer_workers.observe.explanation import ExplanationEngine
     from nthlayer_workers.observe.sqlite_store import SQLiteAssessmentStore
     from nthlayer_workers.observe.store import AssessmentFilter

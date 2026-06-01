@@ -1,6 +1,7 @@
 # tests/test_config.py
 """Tests for nthlayer-respond configuration."""
 import textwrap
+
 from nthlayer_workers.respond.config import RespondConfig, load_config
 
 

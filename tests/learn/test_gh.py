@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import subprocess
+
 import pytest
 
 
@@ -9,7 +10,7 @@ class TestPreflightChecks:
     """gh + git pre-flight checks per jmy.6 design § 7 Category A."""
 
     def test_check_gh_installed_raises_when_missing(self, monkeypatch):
-        from nthlayer_workers.learn._gh import check_gh_installed, PreflightError
+        from nthlayer_workers.learn._gh import PreflightError, check_gh_installed
 
         def fake_run(*args, **kwargs):
             raise FileNotFoundError("no such file")
@@ -29,7 +30,7 @@ class TestPreflightChecks:
         check_gh_installed()  # no raise
 
     def test_check_gh_auth_raises_on_not_authenticated(self, monkeypatch):
-        from nthlayer_workers.learn._gh import check_gh_auth, PreflightError
+        from nthlayer_workers.learn._gh import PreflightError, check_gh_auth
 
         result = subprocess.CompletedProcess(
             args=["gh", "auth", "status"], returncode=1, stdout="", stderr="not logged in",
@@ -40,7 +41,7 @@ class TestPreflightChecks:
             check_gh_auth()
 
     def test_check_git_repo_raises_outside_repo(self, monkeypatch, tmp_path):
-        from nthlayer_workers.learn._gh import check_git_repo, PreflightError
+        from nthlayer_workers.learn._gh import PreflightError, check_git_repo
 
         result = subprocess.CompletedProcess(
             args=["git", "rev-parse", "--git-dir"], returncode=128, stdout="", stderr="fatal",
@@ -51,7 +52,7 @@ class TestPreflightChecks:
             check_git_repo(tmp_path)
 
     def test_check_remote_raises_when_no_origin(self, monkeypatch, tmp_path):
-        from nthlayer_workers.learn._gh import check_remote, PreflightError
+        from nthlayer_workers.learn._gh import PreflightError, check_remote
 
         result = subprocess.CompletedProcess(
             args=["git", "remote", "get-url", "origin"], returncode=128, stdout="", stderr="",
@@ -62,7 +63,7 @@ class TestPreflightChecks:
             check_remote(tmp_path)
 
     def test_check_branch_available_raises_when_local_exists(self, monkeypatch, tmp_path):
-        from nthlayer_workers.learn._gh import check_branch_available, PreflightError
+        from nthlayer_workers.learn._gh import PreflightError, check_branch_available
 
         def fake_run(args, **kwargs):
             if "show-ref" in args:
@@ -77,7 +78,7 @@ class TestPreflightChecks:
             check_branch_available(tmp_path, "learn/recommendations/inc-test")
 
     def test_check_branch_available_raises_when_remote_exists(self, monkeypatch, tmp_path):
-        from nthlayer_workers.learn._gh import check_branch_available, PreflightError
+        from nthlayer_workers.learn._gh import PreflightError, check_branch_available
 
         def fake_run(args, **kwargs):
             if "show-ref" in args:
@@ -102,8 +103,9 @@ class TestCreatePr:
     """create_pr_via_gh: shell out to gh pr create, parse PRResult."""
 
     def test_happy_path_returns_pr_url(self, monkeypatch, tmp_path):
-        from nthlayer_workers.learn._gh import create_pr_via_gh
         import subprocess
+
+        from nthlayer_workers.learn._gh import create_pr_via_gh
 
         result = subprocess.CompletedProcess(
             args=["gh", "pr", "create"],
@@ -136,8 +138,9 @@ class TestCreatePr:
         assert "--base" in captured["args"]
 
     def test_base_and_draft_kwargs_flow_to_argv(self, monkeypatch, tmp_path):
-        from nthlayer_workers.learn._gh import create_pr_via_gh
         import subprocess
+
+        from nthlayer_workers.learn._gh import create_pr_via_gh
 
         result = subprocess.CompletedProcess(
             args=["gh", "pr", "create"],
@@ -165,8 +168,9 @@ class TestCreatePr:
         assert "--draft" in captured["args"]
 
     def test_failure_returns_pr_result_with_error(self, monkeypatch, tmp_path):
-        from nthlayer_workers.learn._gh import create_pr_via_gh
         import subprocess
+
+        from nthlayer_workers.learn._gh import create_pr_via_gh
 
         result = subprocess.CompletedProcess(
             args=["gh", "pr", "create"],
@@ -189,8 +193,9 @@ class TestCreatePr:
 
     def test_gh_succeeds_with_empty_stdout_returns_failure(self, monkeypatch, tmp_path):
         """gh pr create returned 0 but printed no URL — treat as failure."""
-        from nthlayer_workers.learn._gh import create_pr_via_gh
         import subprocess
+
+        from nthlayer_workers.learn._gh import create_pr_via_gh
 
         result = subprocess.CompletedProcess(
             args=["gh", "pr", "create"], returncode=0, stdout="", stderr="",
@@ -209,8 +214,9 @@ class TestCreatePr:
 
     def test_gh_succeeds_with_unparseable_stdout_returns_failure(self, monkeypatch, tmp_path):
         """gh pr create returned 0 but stdout doesn't contain a recognisable PR URL."""
-        from nthlayer_workers.learn._gh import create_pr_via_gh
         import subprocess
+
+        from nthlayer_workers.learn._gh import create_pr_via_gh
 
         result = subprocess.CompletedProcess(
             args=["gh", "pr", "create"],

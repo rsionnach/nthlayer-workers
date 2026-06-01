@@ -14,7 +14,6 @@ from nthlayer_common.tiers import TIER_CONFIGS
 
 from nthlayer_workers.observe.store import AssessmentFilter, AssessmentStore
 
-
 # Default thresholds from tier config
 THRESHOLDS: dict[str, dict[str, float | None]] = {
     tier: {

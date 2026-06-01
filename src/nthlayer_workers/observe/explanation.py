@@ -9,6 +9,7 @@ alongside the SLI gap and budget consumption percentages.
 from __future__ import annotations
 
 from nthlayer_common.explanation import BudgetExplanation
+
 from nthlayer_workers.observe.assessment import Assessment
 from nthlayer_workers.observe.store import AssessmentFilter, AssessmentStore
 

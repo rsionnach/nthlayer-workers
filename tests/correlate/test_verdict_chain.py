@@ -9,7 +9,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
 from nthlayer_common.verdicts.models import (
     Judgment,
     Lineage,
@@ -19,11 +18,11 @@ from nthlayer_common.verdicts.models import (
     Verdict,
 )
 from nthlayer_common.verdicts.store import MemoryStore
+
 from nthlayer_workers.correlate.verdict_chain import (
     VerdictChainAnalyzer,
     VerdictChainResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

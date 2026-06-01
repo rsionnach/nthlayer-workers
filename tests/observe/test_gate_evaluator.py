@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from nthlayer_common.gate_models import GatePolicy, GateResult
 
 from nthlayer_workers.observe.assessment import create

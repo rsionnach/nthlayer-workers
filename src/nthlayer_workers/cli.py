@@ -61,6 +61,7 @@ def main():
 
     if args.command == "serve":
         from nthlayer_common.api_client import CoreAPIClient
+
         from nthlayer_workers.observe.worker import (
             ObserveCollectModule,
             ObserveDriftModule,

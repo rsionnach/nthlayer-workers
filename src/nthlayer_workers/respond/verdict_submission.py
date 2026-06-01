@@ -9,7 +9,6 @@ verdict will still chain correctly.
 from __future__ import annotations
 
 import structlog
-
 from nthlayer_common.api_client import CoreAPIClient
 from nthlayer_common.cloudevents import wrap_verdict
 from nthlayer_common.metrics import errors_total

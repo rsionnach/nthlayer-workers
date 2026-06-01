@@ -17,7 +17,6 @@ import pkgutil
 
 import pytest
 
-
 PACKAGE_NAME = "nthlayer_workers"
 
 

@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
+
+from nthlayer_common.verdicts import VerdictStore as VerdictStoreBase
+from nthlayer_common.verdicts import create as verdict_create
 
 from nthlayer_workers.measure.adapters.protocol import Adapter
 from nthlayer_workers.measure.detection.protocol import DegradationDetector
@@ -14,9 +18,6 @@ from nthlayer_workers.measure.telemetry import emit_decision_event
 from nthlayer_workers.measure.tiering.classifier import TierClassifier
 from nthlayer_workers.measure.trends.tracker import TrendTracker
 from nthlayer_workers.measure.types import QualityScore
-from nthlayer_common.verdicts import create as verdict_create, VerdictStore as VerdictStoreBase
-
-import logging
 
 logger = logging.getLogger(__name__)
 

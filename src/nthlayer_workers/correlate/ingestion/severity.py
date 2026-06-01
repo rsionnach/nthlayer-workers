@@ -1,5 +1,6 @@
 """Severity pre-scoring from SLO targets. Pure arithmetic, no judgment."""
 from __future__ import annotations
+
 from nthlayer_workers.correlate.types import SitRepEvent
 
 

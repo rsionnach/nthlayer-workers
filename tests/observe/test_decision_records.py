@@ -2,22 +2,24 @@
 
 from datetime import datetime, timezone
 
+from nthlayer_common.records.hashing import verify_hash
+from nthlayer_common.records.models import (
+    ZERO_HASH,
+    AssessmentType,
+    Severity,
+    Summaries,
+)
+from nthlayer_common.records.models import (
+    Assessment as DecisionAssessment,
+)
 
 from nthlayer_workers.observe.assessment import Assessment as LegacyAssessment
 from nthlayer_workers.observe.decision_records import (
     build_decision_record,
-    map_severity,
     build_stream,
     generate_summaries,
+    map_severity,
 )
-from nthlayer_common.records.models import (
-    Assessment as DecisionAssessment,
-    AssessmentType,
-    Severity,
-    Summaries,
-    ZERO_HASH,
-)
-from nthlayer_common.records.hashing import verify_hash
 
 NOW = datetime(2026, 4, 11, 12, 0, 0, tzinfo=timezone.utc)
 

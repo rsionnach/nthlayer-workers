@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import os
 
-
 from nthlayer_workers.respond.cli import replay_command
-
 
 # All replay tests use --no-model mode (mock responses from YAML).
 

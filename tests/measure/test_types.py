@@ -1,6 +1,7 @@
 """Tests for Arbiter data types."""
 
 import pytest
+
 from nthlayer_workers.measure.types import (
     AgentOutput,
     QualityScore,

@@ -13,9 +13,9 @@ from __future__ import annotations
 import asyncio
 
 import structlog
+from nthlayer_common.llm_structured import structured_call
 from pydantic import BaseModel, Field
 
-from nthlayer_common.llm_structured import structured_call
 from nthlayer_workers.correlate.types import SitRepEvent
 
 logger = structlog.get_logger()

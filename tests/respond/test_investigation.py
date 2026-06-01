@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+
 import pytest
-from nthlayer_common.verdicts import MemoryStore, create as verdict_create
+from nthlayer_common.verdicts import MemoryStore
+from nthlayer_common.verdicts import create as verdict_create
 
 from nthlayer_workers.respond.agents.investigation import InvestigationAgent
 from nthlayer_workers.respond.types import (
@@ -15,7 +17,6 @@ from nthlayer_workers.respond.types import (
     InvestigationResult,
     TriageResult,
 )
-
 
 # ------------------------------------------------------------------ #
 # Fixtures                                                             #

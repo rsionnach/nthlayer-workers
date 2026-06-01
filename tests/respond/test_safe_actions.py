@@ -1,8 +1,9 @@
 # tests/test_safe_actions.py
 """Tests for safe action registry."""
 import pytest
-from nthlayer_workers.respond.safe_actions.registry import SafeAction, SafeActionRegistry
+
 from nthlayer_workers.respond.safe_actions.actions import register_builtin_actions
+from nthlayer_workers.respond.safe_actions.registry import SafeAction, SafeActionRegistry
 from nthlayer_workers.respond.types import IncidentContext, IncidentState
 
 

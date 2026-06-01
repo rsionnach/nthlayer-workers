@@ -134,7 +134,8 @@ def test_verdict_to_event():
 
 def test_correlate_command_writes_correlation_verdict(specs_dir, tmp_path):
     """Full correlate command with mocked Prometheus returns correlation verdict."""
-    from nthlayer_common.verdicts import SQLiteVerdictStore, create as verdict_create
+    from nthlayer_common.verdicts import SQLiteVerdictStore
+    from nthlayer_common.verdicts import create as verdict_create
 
     # Set up verdict store with a trigger evaluation verdict
     store_path = str(tmp_path / "verdicts.db")
@@ -154,7 +155,7 @@ def test_correlate_command_writes_correlation_verdict(specs_dir, tmp_path):
 
     # Mock Prometheus to return some alerts and metric breaches
     async def mock_fetch_alerts(client, url, services):
-        from nthlayer_workers.correlate.types import SitRepEvent, EventType
+        from nthlayer_workers.correlate.types import EventType, SitRepEvent
         return [SitRepEvent(
             id="alert-1",
             timestamp="2026-03-25T10:00:00Z",
@@ -167,7 +168,7 @@ def test_correlate_command_writes_correlation_verdict(specs_dir, tmp_path):
         )]
 
     async def mock_fetch_breaches(client, url, services, window_minutes=30):
-        from nthlayer_workers.correlate.types import SitRepEvent, EventType
+        from nthlayer_workers.correlate.types import EventType, SitRepEvent
         return [SitRepEvent(
             id="breach-1",
             timestamp="2026-03-25T10:01:00Z",
@@ -256,8 +257,10 @@ def _make_trace_evidence() -> TraceEvidence:
 
 def _setup_trigger_and_mocks(specs_dir, tmp_path):
     """Create a trigger verdict and return (store_path, trigger_id, mock_alerts, mock_breaches)."""
-    from nthlayer_common.verdicts import SQLiteVerdictStore, create as verdict_create
-    from nthlayer_workers.correlate.types import SitRepEvent, EventType
+    from nthlayer_common.verdicts import SQLiteVerdictStore
+    from nthlayer_common.verdicts import create as verdict_create
+
+    from nthlayer_workers.correlate.types import EventType, SitRepEvent
 
     store_path = str(tmp_path / "verdicts.db")
     store = SQLiteVerdictStore(store_path)
@@ -338,6 +341,7 @@ def test_correlate_without_trace_backend(specs_dir, tmp_path):
 def test_trace_backend_connect_error_degrades(specs_dir, tmp_path):
     """Trace backend failure does not break correlate."""
     import httpx
+
     from nthlayer_workers.correlate.cli import correlate_command
 
     store_path, trigger_id, mock_alerts, mock_breaches = _setup_trigger_and_mocks(specs_dir, tmp_path)
@@ -364,6 +368,7 @@ def test_trace_backend_connect_error_degrades(specs_dir, tmp_path):
 def test_trace_backend_timeout_degrades(specs_dir, tmp_path):
     """Trace backend timeout does not break correlate."""
     import asyncio as aio
+
     from nthlayer_workers.correlate.cli import correlate_command
 
     store_path, trigger_id, mock_alerts, mock_breaches = _setup_trigger_and_mocks(specs_dir, tmp_path)
@@ -397,6 +402,7 @@ def test_trace_backend_timeout_degrades(specs_dir, tmp_path):
 def test_decision_record_includes_trace_context(specs_dir, tmp_path):
     """Decision record action dict and summaries include trace evidence context."""
     from unittest.mock import MagicMock
+
     from nthlayer_workers.correlate.cli import correlate_command
 
     store_path, trigger_id, mock_alerts, mock_breaches = _setup_trigger_and_mocks(specs_dir, tmp_path)
@@ -436,6 +442,7 @@ def test_decision_record_includes_trace_context(specs_dir, tmp_path):
 def test_trace_baseline_window_passed_through(specs_dir, tmp_path):
     """trace_baseline_window param is forwarded to get_trace_evidence."""
     from datetime import timedelta
+
     from nthlayer_workers.correlate.cli import correlate_command
 
     store_path, trigger_id, mock_alerts, mock_breaches = _setup_trigger_and_mocks(specs_dir, tmp_path)

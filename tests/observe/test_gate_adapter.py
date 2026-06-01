@@ -5,8 +5,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-
 from nthlayer_common.api_client import APIResult
+
 from nthlayer_workers.observe.gate_adapter import CoreAPIAssessmentStore
 from nthlayer_workers.observe.store import AssessmentFilter
 

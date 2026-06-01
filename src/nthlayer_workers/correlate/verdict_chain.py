@@ -41,7 +41,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 import structlog
-
 from nthlayer_common.verdicts.models import Verdict
 from nthlayer_common.verdicts.store import VerdictFilter, VerdictStore
 

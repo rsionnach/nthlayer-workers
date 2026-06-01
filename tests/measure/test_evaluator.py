@@ -125,8 +125,9 @@ class TestEvaluate:
     @patch("nthlayer_workers.measure.pipeline.evaluator.load_prompt")
     @patch("nthlayer_workers.measure.pipeline.evaluator.structured_call_with_usage")
     async def test_evaluate_returns_quality_score(self, mock_call, mock_prompt, evaluator, sample_output):
-        from nthlayer_common.llm_structured import StructuredCallResult, StructuredCallUsage
         from unittest.mock import MagicMock
+
+        from nthlayer_common.llm_structured import StructuredCallResult, StructuredCallUsage
 
         mock_spec = MagicMock()
         mock_spec.system = "evaluate this"
@@ -149,8 +150,9 @@ class TestEvaluate:
     @patch("nthlayer_workers.measure.pipeline.evaluator.load_prompt")
     @patch("nthlayer_workers.measure.pipeline.evaluator.structured_call_with_usage")
     async def test_evaluate_preserves_cost(self, mock_call, mock_prompt, sample_output):
-        from nthlayer_common.llm_structured import StructuredCallResult, StructuredCallUsage
         from unittest.mock import MagicMock
+
+        from nthlayer_common.llm_structured import StructuredCallResult, StructuredCallUsage
 
         mock_spec = MagicMock()
         mock_spec.system = "eval"
@@ -173,8 +175,9 @@ class TestEvaluate:
     @patch("nthlayer_workers.measure.pipeline.evaluator.load_prompt")
     @patch("nthlayer_workers.measure.pipeline.evaluator.structured_call_with_usage")
     async def test_evaluate_with_model_override(self, mock_call, mock_prompt, evaluator, sample_output):
-        from nthlayer_common.llm_structured import StructuredCallResult, StructuredCallUsage
         from unittest.mock import MagicMock
+
+        from nthlayer_common.llm_structured import StructuredCallResult, StructuredCallUsage
 
         mock_spec = MagicMock()
         mock_spec.system = "eval"

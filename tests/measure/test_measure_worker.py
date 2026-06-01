@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-
 from nthlayer_common.api_client import APIResult
+
 from nthlayer_workers.measure.worker import (
     MeasureModule,
     _detect_transitions,

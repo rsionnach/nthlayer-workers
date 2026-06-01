@@ -79,8 +79,9 @@ def _build_adapter(config: MeasureConfig):
             bd_path=ac.get("bd_path", "bd"),
         )
     elif agent.adapter == "devin":
-        from nthlayer_workers.measure.adapters.devin import DevinAdapter
         import os
+
+        from nthlayer_workers.measure.adapters.devin import DevinAdapter
 
         api_key_env = ac.get("api_key_env", "DEVIN_API_KEY")
         return DevinAdapter(
@@ -146,7 +147,8 @@ def _build_pipeline(config: MeasureConfig):
 
 def cmd_evaluate_once(args: argparse.Namespace) -> None:
     """One-shot Prometheus SLO evaluation — evaluate all SLOs, write verdicts, exit."""
-    from nthlayer_common.verdicts import SQLiteVerdictStore, create as verdict_create
+    from nthlayer_common.verdicts import SQLiteVerdictStore
+    from nthlayer_common.verdicts import create as verdict_create
 
     from nthlayer_workers.measure.adapters.prometheus import evaluate_slos, load_specs
 
@@ -223,6 +225,7 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
                 slack_url = os.environ.get("SLACK_WEBHOOK_URL", "")
                 if slack_url:
                     from nthlayer_common.slack import SlackNotifier
+
                     from nthlayer_workers.measure.notifications import build_breach_blocks
                     blocks, text = build_breach_blocks(v)
                     notifier = SlackNotifier(slack_url)
@@ -428,6 +431,7 @@ def cmd_calibrate(args: argparse.Namespace) -> None:
             sys.exit(1)
 
         from nthlayer_common.verdicts import SQLiteVerdictStore
+
         from nthlayer_workers.measure.calibration.verdict_calibration import VerdictCalibration
 
         verdict_store = SQLiteVerdictStore(config.verdict.store_path)

@@ -1,8 +1,9 @@
 # tests/test_triage.py
 """Tests for triage agent."""
 import json
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 from nthlayer_common.verdicts import create as verdict_create
 
 from nthlayer_workers.respond.agents.triage import TriageAgent
