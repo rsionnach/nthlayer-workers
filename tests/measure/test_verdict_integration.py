@@ -492,9 +492,8 @@ class TestCalibrateVerdictFlag:
         )
 
         buf = io.StringIO()
-        with contextlib.redirect_stderr(buf):
-            with pytest.raises(SystemExit):
-                cmd_calibrate(args)
+        with contextlib.redirect_stderr(buf), pytest.raises(SystemExit):
+            cmd_calibrate(args)
         assert "verdict" in buf.getvalue().lower()
 
 
@@ -714,9 +713,8 @@ class TestOverrideCreateCLI:
             dimension=["bad-format"],
         )
         buf = io.StringIO()
-        with contextlib.redirect_stderr(buf):
-            with pytest.raises(SystemExit):
-                cmd_overrides_create(args)
+        with contextlib.redirect_stderr(buf), pytest.raises(SystemExit):
+            cmd_overrides_create(args)
         assert "dimension" in buf.getvalue().lower()
 
 

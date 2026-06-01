@@ -34,10 +34,7 @@ async def _send_request(host: str, port: int, request: bytes) -> tuple[int, byte
     first_line = response.split(b"\r\n", 1)[0].decode()
     status = int(first_line.split(" ", 2)[1])
     # Split headers from body
-    if b"\r\n\r\n" in response:
-        body = response.split(b"\r\n\r\n", 1)[1]
-    else:
-        body = b""
+    body = response.split(b"\r\n\r\n", 1)[1] if b"\r\n\r\n" in response else b""
     return status, body
 
 

@@ -271,14 +271,10 @@ class EtcdDepProvider(BaseDepProvider):
                     if isinstance(key, bytes):
                         key = key.decode("utf-8")
 
-                    # Extract service name from key
+                    # Extract top-level service name from key.
                     # Key format: /services/service-name or /services/service-name/sub
                     relative = key[len(prefix) :]
-                    if "/" in relative:
-                        # Get top-level service name
-                        service_name = relative.split("/")[0]
-                    else:
-                        service_name = relative
+                    service_name = relative.split("/")[0] if "/" in relative else relative
 
                     if service_name and not service_name.startswith("_"):
                         services.append(service_name)

@@ -363,10 +363,7 @@ def cmd_evaluate(args: argparse.Namespace) -> None:
     store = _build_store(config)
     evaluator = _build_evaluator(config)
 
-    if args.file:
-        content = Path(args.file).read_text()
-    else:
-        content = sys.stdin.read()
+    content = Path(args.file).read_text() if args.file else sys.stdin.read()
 
     output = AgentOutput(
         agent_name=args.agent_name,

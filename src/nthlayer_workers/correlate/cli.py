@@ -245,10 +245,7 @@ def status_command(config_path: str | None, store_dir: str | None = None) -> int
     config = load_config(config_path) if config_path else SitRepConfig()
 
     # Use store_dir if provided (for testing), otherwise use config path
-    if store_dir:
-        db_path = os.path.join(store_dir, "sitrep-events.db")
-    else:
-        db_path = config.store_path
+    db_path = os.path.join(store_dir, "sitrep-events.db") if store_dir else config.store_path
 
     store = SQLiteEventStore(db_path)
     try:

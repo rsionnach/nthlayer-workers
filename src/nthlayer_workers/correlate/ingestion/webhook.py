@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import uuid
 from collections.abc import Awaitable, Callable
@@ -103,10 +104,8 @@ class WebhookIngester:
             )
         except TimeoutError:
             writer.close()
-            try:
+            with contextlib.suppress(Exception):
                 await writer.wait_closed()
-            except Exception:
-                pass
 
     async def _handle_request(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -191,7 +190,5 @@ class WebhookIngester:
 
         finally:
             writer.close()
-            try:
+            with contextlib.suppress(Exception):
                 await writer.wait_closed()
-            except Exception:
-                pass

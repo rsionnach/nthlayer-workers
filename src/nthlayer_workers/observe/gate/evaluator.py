@@ -90,10 +90,7 @@ def check_deploy(
         if d.get("percent_consumed") is not None
     ]
 
-    if not consumed_values:
-        avg_consumed = 0.0
-    else:
-        avg_consumed = sum(consumed_values) / len(consumed_values)
+    avg_consumed = 0.0 if not consumed_values else sum(consumed_values) / len(consumed_values)
 
     budget_remaining_pct = max(0.0, 100.0 - avg_consumed)
 
@@ -146,20 +143,19 @@ def _evaluate_thresholds(
     recommendations: list[str] = []
 
     # Check exhaustion
-    if budget_remaining_pct <= 0:
-        if policy and policy.on_exhausted:
-            if "freeze_deploys" in policy.on_exhausted:
-                return (
-                    GateResult.BLOCKED,
-                    "Error budget exhausted (0% remaining). Deployment frozen per policy.",
-                    ["Wait for error budget to recover before deploying"],
-                )
-            if "require_approval" in policy.on_exhausted:
-                return (
-                    GateResult.WARNING,
-                    "Error budget exhausted. Manual approval required per policy.",
-                    ["Get explicit approval before proceeding"],
-                )
+    if budget_remaining_pct <= 0 and policy and policy.on_exhausted:
+        if "freeze_deploys" in policy.on_exhausted:
+            return (
+                GateResult.BLOCKED,
+                "Error budget exhausted (0% remaining). Deployment frozen per policy.",
+                ["Wait for error budget to recover before deploying"],
+            )
+        if "require_approval" in policy.on_exhausted:
+            return (
+                GateResult.WARNING,
+                "Error budget exhausted. Manual approval required per policy.",
+                ["Get explicit approval before proceeding"],
+            )
 
     # Check blocking threshold
     if blocking_threshold is not None and budget_remaining_pct <= blocking_threshold:

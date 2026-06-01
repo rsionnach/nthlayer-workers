@@ -561,10 +561,7 @@ class KubernetesDepProvider(BaseDepProvider):
 
         # Check K8s service discovery env var format
         service_env = service_lower.replace("-", "_")
-        if f"{service_env}_service_host" in value_lower:
-            return True
-
-        return False
+        return f"{service_env}_service_host" in value_lower
 
     def _infer_dep_type_from_env(self, env_name: str) -> DependencyType:
         """Infer dependency type from environment variable name."""

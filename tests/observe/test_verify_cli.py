@@ -1,5 +1,6 @@
 """Tests for the verify subcommand — chain and incident verification via CLI."""
 
+import contextlib
 from datetime import UTC, datetime
 
 from nthlayer_common.records.hashing import canonical_json, compute_hash
@@ -171,10 +172,8 @@ class TestVerifyCLI:
         assert exit_code == 2
 
     def test_verify_help(self, capsys):
-        try:
+        with contextlib.suppress(SystemExit):
             main(["verify-records", "--help"])
-        except SystemExit:
-            pass
         captured = capsys.readouterr()
         assert "verify" in captured.out
 

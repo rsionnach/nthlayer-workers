@@ -64,10 +64,7 @@ class DriftAnalyzer:
         """Analyze drift for a service's SLO."""
         defaults = get_drift_defaults(tier)
 
-        if drift_config:
-            config = {**defaults, **drift_config}
-        else:
-            config = defaults.copy()
+        config = {**defaults, **drift_config} if drift_config else defaults.copy()
 
         analysis_window = window or config["window"]
         analysis_thresholds = thresholds or config["thresholds"]
@@ -257,9 +254,8 @@ class DriftAnalyzer:
         exhaustion_warn = self._parse_days(projection_config["exhaustion_warn"])
         exhaustion_critical = self._parse_days(projection_config["exhaustion_critical"])
 
-        if days_until_exhaustion is not None:
-            if days_until_exhaustion <= exhaustion_critical:
-                return DriftSeverity.CRITICAL
+        if days_until_exhaustion is not None and days_until_exhaustion <= exhaustion_critical:
+            return DriftSeverity.CRITICAL
 
         if pattern == DriftPattern.STEP_CHANGE_DOWN:
             return DriftSeverity.CRITICAL
@@ -267,9 +263,8 @@ class DriftAnalyzer:
         if slope_per_week <= critical_slope:
             return DriftSeverity.CRITICAL
 
-        if days_until_exhaustion is not None:
-            if days_until_exhaustion <= exhaustion_warn:
-                return DriftSeverity.WARN
+        if days_until_exhaustion is not None and days_until_exhaustion <= exhaustion_warn:
+            return DriftSeverity.WARN
 
         if slope_per_week <= warn_slope:
             return DriftSeverity.WARN

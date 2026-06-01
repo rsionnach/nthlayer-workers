@@ -283,7 +283,4 @@ def _list_contains_proposed(manifest_list: list, proposed: Any) -> bool:
             if isinstance(item, dict) and item.get("name") == proposed_name:
                 return True
         return False
-    for item in manifest_list:
-        if item == proposed:
-            return True
-    return False
+    return any(item == proposed for item in manifest_list)

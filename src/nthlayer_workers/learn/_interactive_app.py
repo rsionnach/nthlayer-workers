@@ -8,6 +8,7 @@ app, runs it, and returns the finalized plan.
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 from pathlib import Path
 
@@ -199,10 +200,8 @@ class InteractiveWalkthroughApp(App[SpecRecommendation]):
     def on_key(self, event) -> None:
         # Esc cancels modify
         if self._modify_mode and event.key == "escape":
-            try:
+            with contextlib.suppress(Exception):
                 self.query_one("#modify-input", Input).remove()
-            except Exception:
-                pass
             self._modify_mode = False
             self._state.last_error = None
             self._refresh()

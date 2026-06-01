@@ -446,7 +446,7 @@ class ConsulDepProvider(BaseDepProvider):
         """
         catalog = await self._get_catalog_services()
         # Exclude Consul itself
-        services = [name for name in catalog.keys() if name != "consul"]
+        services = [name for name in catalog if name != "consul"]
         return sorted(services)
 
     async def health_check(self) -> ProviderHealth:

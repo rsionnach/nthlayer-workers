@@ -176,7 +176,7 @@ def _make_sequenced_mock(responses: list[dict | None]):
     async def mock_call_model(system_prompt: str, user_prompt: str) -> str:
         idx = call_index["n"]
         call_index["n"] += 1
-        if idx < len(responses):
+        if idx < len(responses):  # noqa: SIM108 — flattened nested ternary is harder to read
             resp = responses[idx]
         else:
             resp = responses[-1] if responses else None
@@ -467,18 +467,22 @@ async def replay_command(
                 f"FAIL: final_state expected={expected['final_state']!r} "
                 f"got={results['final_state']!r}"
             )
-        if expected.get("verdict_count") is not None:
-            if results["verdict_count"] < expected["verdict_count"]:
-                checks.append(
-                    f"FAIL: verdict_count expected>={expected['verdict_count']} "
-                    f"got={results['verdict_count']}"
-                )
-        if expected.get("remediation_executed") is not None:
-            if results["remediation_executed"] != expected["remediation_executed"]:
-                checks.append(
-                    f"FAIL: remediation_executed expected={expected['remediation_executed']} "
-                    f"got={results['remediation_executed']}"
-                )
+        if (
+            expected.get("verdict_count") is not None
+            and results["verdict_count"] < expected["verdict_count"]
+        ):
+            checks.append(
+                f"FAIL: verdict_count expected>={expected['verdict_count']} "
+                f"got={results['verdict_count']}"
+            )
+        if (
+            expected.get("remediation_executed") is not None
+            and results["remediation_executed"] != expected["remediation_executed"]
+        ):
+            checks.append(
+                f"FAIL: remediation_executed expected={expected['remediation_executed']} "
+                f"got={results['remediation_executed']}"
+            )
         results["checks"] = checks
 
     # Clean up

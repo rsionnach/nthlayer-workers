@@ -1,6 +1,7 @@
 """Unit tests for the recommendations CLI subcommand (jmy.6)."""
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC
 
 import pytest
@@ -1217,7 +1218,9 @@ class TestIncludeExcludeFlags:
         specs_dir = self._seed_multi_specs_dir(tmp_path)
         plan_in, rec_abc_id, rec_def_id = self._build_multi_rec_plan(tmp_path)
 
-        try:
+        # Acceptable: a non-zero exit can happen if anything else skipped.
+        # We only care that rec_def_id was filtered out.
+        with contextlib.suppress(SystemExit):
             main([
                 "recommendations",
                 "--from", str(plan_in),
@@ -1225,10 +1228,6 @@ class TestIncludeExcludeFlags:
                 "--exclude", rec_def_id,
                 "--json",
             ])
-        except SystemExit:
-            # Acceptable: a non-zero exit can happen if anything else skipped.
-            # We only care that rec_def_id was filtered out.
-            pass
 
         out = capsys.readouterr().out
         doc = json.loads(out)
@@ -1293,17 +1292,15 @@ class TestIncludeExcludeFlags:
         specs_dir = self._seed_multi_specs_dir(tmp_path)
         plan_in, rec_abc_id, rec_def_id = self._build_multi_rec_plan(tmp_path)
 
-        try:
+        # apply may exit non-zero if any rec skipped; the contract here
+        # is purely that BOTH ids appear in the JSON.
+        with contextlib.suppress(SystemExit):
             main([
                 "recommendations",
                 "--from", str(plan_in),
                 "--apply-to", str(specs_dir),
                 "--json",
             ])
-        except SystemExit:
-            # apply may exit non-zero if any rec skipped; the contract here
-            # is purely that BOTH ids appear in the JSON.
-            pass
 
         out = capsys.readouterr().out
         doc = json.loads(out)
@@ -1324,7 +1321,7 @@ class TestIncludeExcludeFlags:
         plan_in, rec_abc_id, _rec_def_id = self._build_multi_rec_plan(tmp_path)
         snapshot = tmp_path / "snapshot.yaml"
 
-        try:
+        with contextlib.suppress(SystemExit):
             main([
                 "recommendations",
                 "--from", str(plan_in),
@@ -1332,8 +1329,6 @@ class TestIncludeExcludeFlags:
                 "--output", str(snapshot),
                 "--include", rec_abc_id,
             ])
-        except SystemExit:
-            pass
 
         saved = parse_plan_file(snapshot)
         saved_ids = {r.id for r in saved.recommendations}
@@ -1351,7 +1346,7 @@ class TestIncludeExcludeFlags:
         specs_dir = self._seed_multi_specs_dir(tmp_path)
         plan_in, rec_abc_id, rec_def_id = self._build_multi_rec_plan(tmp_path)
 
-        try:
+        with contextlib.suppress(SystemExit):
             main([
                 "recommendations",
                 "--from", str(plan_in),
@@ -1359,8 +1354,6 @@ class TestIncludeExcludeFlags:
                 "--include", "",
                 "--json",
             ])
-        except SystemExit:
-            pass
 
         doc = json.loads(capsys.readouterr().out)
         all_ids = {e["id"] for e in doc["applied"]} | {e["id"] for e in doc["skipped"]}
@@ -1405,7 +1398,7 @@ class TestIncludeExcludeFlags:
         plan_in, rec_abc_id, rec_def_id = self._build_multi_rec_plan(tmp_path)
         # rec_abc_id appears first in the plan. Pass --include in reverse
         # order — the applied/skipped lists must still match plan order.
-        try:
+        with contextlib.suppress(SystemExit):
             main([
                 "recommendations",
                 "--from", str(plan_in),
@@ -1413,8 +1406,6 @@ class TestIncludeExcludeFlags:
                 "--include", f"{rec_def_id},{rec_abc_id}",
                 "--json",
             ])
-        except SystemExit:
-            pass
 
         doc = json.loads(capsys.readouterr().out)
         all_ids = [e["id"] for e in doc["applied"]] + [e["id"] for e in doc["skipped"]]
@@ -1432,7 +1423,7 @@ class TestIncludeExcludeFlags:
         specs_dir = self._seed_multi_specs_dir(tmp_path)
         plan_in, rec_abc_id, rec_def_id = self._build_multi_rec_plan(tmp_path)
 
-        try:
+        with contextlib.suppress(SystemExit):
             main([
                 "recommendations",
                 "--from", str(plan_in),
@@ -1440,8 +1431,6 @@ class TestIncludeExcludeFlags:
                 "--include", f"{rec_abc_id},{rec_def_id}",
                 "--json",
             ])
-        except SystemExit:
-            pass
 
         doc = json.loads(capsys.readouterr().out)
         all_ids = {e["id"] for e in doc["applied"]} | {e["id"] for e in doc["skipped"]}
@@ -1795,7 +1784,7 @@ class TestInteractiveFlag:
             return replace(plan_in_arg, recommendations=kept)
         self._install_fake_walkthrough(monkeypatch, fake_walkthrough)
 
-        try:
+        with contextlib.suppress(SystemExit):
             main([
                 "recommendations",
                 "--from", str(plan_in),
@@ -1803,8 +1792,6 @@ class TestInteractiveFlag:
                 "--output", str(plan_out),
                 "--interactive",
             ])
-        except SystemExit:
-            pass
 
         # Snapshot has only rec-combo-a.
         snap = parse_plan_file(plan_out)

@@ -51,9 +51,12 @@ class SnapshotGenerator:
         content_hash = self._compute_hash(groups)
 
         # Check cache (skip in INCIDENT mode)
-        if not force_refresh and state != AgentState.INCIDENT:
-            if self._is_cache_valid(content_hash, state):
-                return self._cached_prompt or "", True
+        if (
+            not force_refresh
+            and state != AgentState.INCIDENT
+            and self._is_cache_valid(content_hash, state)
+        ):
+            return self._cached_prompt or "", True
 
         # Sort groups by priority (P0 first)
         sorted_groups = sorted(groups, key=lambda g: g.priority)

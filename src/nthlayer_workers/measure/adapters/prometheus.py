@@ -97,26 +97,33 @@ def load_specs(specs_dir: Path) -> list[SLODefinition]:
     return slos
 
 
+_JUDGMENT_SLO_QUERIES = {
+    "reversal_rate": lambda service, window: (
+        f'sum(increase(gen_ai_overrides_total{{service="{service}"}}[{window}]))'
+        f' / '
+        f'sum(increase(gen_ai_decisions_total{{service="{service}"}}[{window}]))'
+    ),
+    "high_confidence_failure": lambda service, window: (
+        f'sum(increase(gen_ai_overrides_hcf_total{{service="{service}"}}[{window}]))'
+        f' / '
+        f'sum(increase(gen_ai_decisions_total{{service="{service}",confidence_bucket="high"}}[{window}]))'
+    ),
+    "calibration": lambda service, _window: f'gen_ai_calibration_error{{service="{service}"}}',
+    "feedback_latency": lambda service, _window: f'gen_ai_feedback_latency_seconds{{service="{service}"}}',
+}
+
+
 def _judgment_slo_query(service: str, slo_name: str, window: str) -> str:
     """Build PromQL query for judgment SLOs using interim raw metrics."""
-    if slo_name == "reversal_rate":
-        return (
-            f'sum(increase(gen_ai_overrides_total{{service="{service}"}}[{window}]))'
-            f' / '
-            f'sum(increase(gen_ai_decisions_total{{service="{service}"}}[{window}]))'
+    builder = _JUDGMENT_SLO_QUERIES.get(slo_name)
+    if builder is None:
+        logger.warning(
+            "Unknown judgment SLO name, no PromQL query available",
+            slo_name=slo_name,
+            service=service,
         )
-    elif slo_name == "high_confidence_failure":
-        return (
-            f'sum(increase(gen_ai_overrides_hcf_total{{service="{service}"}}[{window}]))'
-            f' / '
-            f'sum(increase(gen_ai_decisions_total{{service="{service}",confidence_bucket="high"}}[{window}]))'
-        )
-    elif slo_name == "calibration":
-        return f'gen_ai_calibration_error{{service="{service}"}}'
-    elif slo_name == "feedback_latency":
-        return f'gen_ai_feedback_latency_seconds{{service="{service}"}}'
-    logger.warning("Unknown judgment SLO name, no PromQL query available", slo_name=slo_name, service=service)
-    return ""
+        return ""
+    return builder(service, window)
 
 
 async def query_prometheus(

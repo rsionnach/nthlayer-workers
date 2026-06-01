@@ -352,15 +352,15 @@ class Coordinator:
                 return context
 
             # Gate: human approval (after remediation step, index 2)
-            if step_index == 2:
-                if (
-                    context.remediation is not None
-                    and context.remediation.requires_human_approval
-                ):
-                    context.state = IncidentState.AWAITING_APPROVAL
-                    context.updated_at = datetime.now(UTC).isoformat()
-                    self._context_store.save(context)
-                    return context
+            if (
+                step_index == 2
+                and context.remediation is not None
+                and context.remediation.requires_human_approval
+            ):
+                context.state = IncidentState.AWAITING_APPROVAL
+                context.updated_at = datetime.now(UTC).isoformat()
+                self._context_store.save(context)
+                return context
 
         # All steps complete
         if context.state not in TERMINAL_STATES:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -54,10 +55,8 @@ class WebhookAdapter:
             )
         except TimeoutError:
             writer.close()
-            try:
+            with contextlib.suppress(Exception):
                 await writer.wait_closed()
-            except Exception:
-                pass
 
     async def _handle_request(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -135,10 +134,8 @@ class WebhookAdapter:
             await writer.drain()
         finally:
             writer.close()
-            try:
+            with contextlib.suppress(Exception):
                 await writer.wait_closed()
-            except Exception:
-                pass
 
     async def start_server(self) -> asyncio.AbstractServer:
         """Start the HTTP server. Returns the server for lifecycle management."""

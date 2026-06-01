@@ -9,6 +9,7 @@ Every field comes from a verdict field. No model call.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -64,10 +65,8 @@ def build_paging_brief(incident_id: str, verdict_store: Any) -> PagingBrief:
     # Walk lineage from triage to find related verdicts
     related = []
     if triage:
-        try:
+        with contextlib.suppress(Exception):
             related = verdict_store.by_lineage(triage.id, direction="both")
-        except Exception:
-            pass
 
     # Classify related verdicts
     correlation_verdicts = [

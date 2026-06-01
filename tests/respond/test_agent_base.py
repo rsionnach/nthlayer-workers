@@ -449,9 +449,8 @@ async def test_structured_path_emits_otel_event_on_failure(verdict_store):
         side_effect=LLMError("boom", provider="anthropic", model="claude"),
     ), patch(
         "nthlayer_workers.respond.agents.base.emit_llm_event",
-    ) as mock_emit:
-        with pytest.raises(LLMError):
-            await agent._call_model_structured("s", "u", TriageResponse)
+    ) as mock_emit, pytest.raises(LLMError):
+        await agent._call_model_structured("s", "u", TriageResponse)
 
     mock_emit.assert_called_once()
     kwargs = mock_emit.call_args.kwargs
