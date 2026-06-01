@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 from dataclasses import asdict
+from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,19 +30,19 @@ def _load_config(args: argparse.Namespace) -> MeasureConfig:
     return load_config(config_path)
 
 
-def _build_store(config: MeasureConfig) -> "SQLiteScoreStore":
+def _build_store(config: MeasureConfig) -> SQLiteScoreStore:
     from nthlayer_workers.measure.store.sqlite import SQLiteScoreStore
 
     return SQLiteScoreStore(config.store.path)
 
 
-def _build_tracker(store: "SQLiteScoreStore") -> "StoreTrendTracker":
+def _build_tracker(store: SQLiteScoreStore) -> StoreTrendTracker:
     from nthlayer_workers.measure.trends.tracker import StoreTrendTracker
 
     return StoreTrendTracker(store)
 
 
-def _build_evaluator(config: MeasureConfig) -> "ModelEvaluator":
+def _build_evaluator(config: MeasureConfig) -> ModelEvaluator:
     from nthlayer_workers.measure.pipeline.evaluator import ModelEvaluator
 
     return ModelEvaluator(
@@ -527,13 +528,13 @@ def cmd_overrides_create(args: argparse.Namespace) -> None:
 
 def cmd_overrides_list(args: argparse.Namespace) -> None:
     """List recent overrides."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     config = _load_config(args)
     store = _build_store(config)
 
     async def _run():
-        since = datetime.now(timezone.utc) - timedelta(days=args.days)
+        since = datetime.now(UTC) - timedelta(days=args.days)
         return await store.get_overrides(
             since=since, limit=100, agent_name=args.agent
         )

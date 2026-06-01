@@ -1,7 +1,7 @@
 """Tests for RespondModule worker (P3-E.1)."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -52,7 +52,7 @@ def make_context(
     updated_at: str | None = None,
     verdict_chain: list[str] | None = None,
 ) -> IncidentContext:
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     return IncidentContext(
         id=incident_id,
         state=state,
@@ -112,7 +112,7 @@ async def test_get_state_serializes_cursors_and_incidents(fake_client, config):
 async def test_get_state_keeps_active_incidents_regardless_of_age(fake_client, config):
     """Active (non-terminal) incidents are never pruned."""
     module = RespondModule(client=fake_client, config=config)
-    old_time = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    old_time = (datetime.now(UTC) - timedelta(days=30)).isoformat()
     ctx = make_context(state=IncidentState.TRIAGING, updated_at=old_time)
     module._incidents[ctx.id] = ctx
 
@@ -124,8 +124,8 @@ async def test_get_state_prunes_terminal_aged_incidents(fake_client, config):
     """Terminal incidents older than terminal_retention_seconds are pruned."""
     module = RespondModule(client=fake_client, config=config)
     # config.terminal_retention_seconds is 10s in the test config
-    too_old = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
-    fresh = datetime.now(timezone.utc).isoformat()
+    too_old = (datetime.now(UTC) - timedelta(seconds=60)).isoformat()
+    fresh = datetime.now(UTC).isoformat()
 
     aged = make_context(
         incident_id="INC-AGED",
@@ -230,7 +230,7 @@ def test_is_terminal_and_aged_terminal_recent_returns_false():
 
 
 def test_is_terminal_and_aged_terminal_aged_returns_true():
-    old = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    old = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     ctx = make_context(state=IncidentState.RESOLVED, updated_at=old)
     assert _is_terminal_and_aged(ctx, 10.0) is True
 
@@ -244,7 +244,7 @@ def test_is_terminal_and_aged_malformed_timestamp_returns_false():
 def test_is_terminal_and_aged_naive_datetime_handled():
     """R5 edge case fix: a naive (no-timezone) updated_at must not crash with
     TypeError when subtracted from now(tz=utc). Worker treats naive as UTC."""
-    naive_old = (datetime.now(timezone.utc) - timedelta(hours=1)).replace(tzinfo=None).isoformat()
+    naive_old = (datetime.now(UTC) - timedelta(hours=1)).replace(tzinfo=None).isoformat()
     ctx = make_context(state=IncidentState.RESOLVED, updated_at=naive_old)
     # Should successfully classify as aged (1h > 10s retention)
     assert _is_terminal_and_aged(ctx, 10.0) is True
@@ -813,7 +813,7 @@ async def test_fallback_skipped_when_cursor_ahead_of_cutoff(fake_client, config)
 
     module = RespondModule(client=fake_client, config=config)
     # Cursor far in the future relative to (now - fallback_threshold_seconds)
-    future = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat()
+    future = (datetime.now(UTC) + timedelta(days=365)).isoformat()
     module._cursors.breach_after = future
 
     await module._ingest_triggers()

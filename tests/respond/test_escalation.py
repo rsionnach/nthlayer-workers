@@ -1,6 +1,6 @@
 """Tests for escalation state machine and runner."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from nthlayer_workers.respond.oncall.escalation import (
     EscalationState,
@@ -23,7 +23,7 @@ def _make_steps() -> list[EscalationStep]:
 
 
 def _now() -> datetime:
-    return datetime(2026, 4, 13, 14, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 4, 13, 14, 0, 0, tzinfo=UTC)
 
 
 class TestEscalationState:

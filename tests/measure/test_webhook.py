@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC
 
 import pytest
 
@@ -139,14 +140,14 @@ async def test_oversized_headers_returns_431(adapter):
 async def test_queue_full_returns_503(adapter):
     a, port = adapter
     # Fill the queue
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from nthlayer_workers.measure.types import AgentOutput
     for i in range(1000):
         a._queue.put_nowait(AgentOutput(
             agent_name="filler", task_id=f"t-{i}",
             output_content="x", output_type="text",
-            metadata={}, timestamp=datetime.now(timezone.utc),
+            metadata={}, timestamp=datetime.now(UTC),
         ))
     request = _make_request("POST", VALID_PAYLOAD)
     status, resp_body = await _send_request("127.0.0.1", port, request)

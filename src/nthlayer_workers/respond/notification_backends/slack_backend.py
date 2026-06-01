@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -72,7 +72,7 @@ class SlackNotificationBackend:
                 delivered=True,
                 channel="slack_dm",
                 recipient=recipient.name,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 message_id=message_ts,
                 error=None,
             )
@@ -86,7 +86,7 @@ class SlackNotificationBackend:
                 delivered=False,
                 channel="slack_dm",
                 recipient=recipient.name,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 message_id=None,
                 error=str(exc),
             )
@@ -125,7 +125,7 @@ class SlackNotificationBackend:
                 delivered=True,
                 channel="slack_channel",
                 recipient=channel,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 message_id=message_ts,
                 error=None,
             )
@@ -139,7 +139,7 @@ class SlackNotificationBackend:
                 delivered=False,
                 channel="slack_channel",
                 recipient=channel,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 message_id=None,
                 error=str(exc),
             )

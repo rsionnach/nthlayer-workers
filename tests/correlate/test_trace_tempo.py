@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -80,8 +80,8 @@ class TestTraceQLMetricsQuery:
         mock_response.raise_for_status = MagicMock()
         backend._client.get = AsyncMock(return_value=mock_response)
 
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         result = await backend._traceql_metrics_query(
             '{ resource.service.name = "svc" }', start, end, "60s"
@@ -104,8 +104,8 @@ class TestTraceQLSearch:
         mock_response.raise_for_status = MagicMock()
         backend._client.get = AsyncMock(return_value=mock_response)
 
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         result = await backend._traceql_search(
             '{ resource.service.name = "svc" }', start, end, limit=5
@@ -127,7 +127,7 @@ class TestPrometheusQuery:
         mock_response.raise_for_status = MagicMock()
         backend._client.get = AsyncMock(return_value=mock_response)
 
-        at = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        at = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
         result = await backend._prometheus_query("up", at)
 
         call_kwargs = backend._client.get.call_args
@@ -136,7 +136,7 @@ class TestPrometheusQuery:
 
     async def test_no_url_returns_empty(self):
         backend = TempoTraceBackend(prometheus_url=None)
-        result = await backend._prometheus_query("up", datetime.now(tz=timezone.utc))
+        result = await backend._prometheus_query("up", datetime.now(tz=UTC))
         assert result == {}
 
 
@@ -289,7 +289,7 @@ class TestParseTempoTimestamp:
         result = TempoTraceBackend._parse_tempo_timestamp(nanos)
         assert result.year == 2026
         assert result.month == 4
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
 
 
 # ---------------------------------------------------------------------------
@@ -326,8 +326,8 @@ class TestQueryServiceStats:
             }]}
 
         backend._traceql_metrics_query = mock_metrics  # type: ignore
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         result = await backend._query_service_stats(["fraud-detect"], start, end)
         assert "fraud-detect" in result
@@ -349,8 +349,8 @@ class TestQueryServiceStats:
             return {"series": []}
 
         backend._traceql_metrics_query = mock_metrics  # type: ignore
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
         result = await backend._query_service_stats(["ghost-svc"], start, end)
         assert "ghost-svc" not in result
 
@@ -370,8 +370,8 @@ class TestQueryOperationBreakdown:
             return {"series": series}
 
         backend._traceql_metrics_query = mock_metrics  # type: ignore
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         result = await backend._query_operation_breakdown(
             ["svc"], start, end, start - timedelta(hours=1),
@@ -402,8 +402,8 @@ class TestQueryOperationBreakdown:
             }]}
 
         backend._traceql_metrics_query = mock_metrics  # type: ignore
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         result = await backend._query_operation_breakdown(
             ["svc"], start, end, start - timedelta(hours=1),
@@ -427,8 +427,8 @@ class TestQueryEdgesFromTraces:
             ]
 
         backend._traceql_search = mock_search  # type: ignore
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         edges = await backend._query_edges_from_traces(["a", "b"], start, end)
         assert len(edges) == 1
@@ -447,8 +447,8 @@ class TestQueryEdgesFromTraces:
             ]
 
         backend._traceql_search = mock_search  # type: ignore
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         edges = await backend._query_edges_from_traces(["a"], start, end)
         assert edges == []
@@ -463,8 +463,8 @@ class TestQueryEdgesFromTraces:
             ]
 
         backend._traceql_search = mock_search  # type: ignore
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         edges = await backend._query_edges_from_traces(["a"], start, end)
         assert edges == []
@@ -493,8 +493,8 @@ class TestQueryServiceGraphsFromPrometheus:
             ]}}
 
         backend._prometheus_query = mock_prom  # type: ignore
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         edges = await backend._query_service_graphs_from_prometheus(["x", "y"], start, end)
         assert len(edges) == 1
@@ -519,8 +519,8 @@ class TestQueryTopErrors:
             return spans
 
         backend._traceql_search = mock_search  # type: ignore
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         result = await backend._query_top_errors(["svc"], start, end)
         assert "svc" in result
@@ -541,8 +541,8 @@ class TestQuerySampleTraces:
             return spans[:limit]
 
         backend._traceql_search = mock_search  # type: ignore
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         result = await backend._query_sample_traces(["svc"], start, end)
         assert "svc" in result
@@ -578,8 +578,8 @@ class TestGetTraceEvidence:
         backend._query_top_errors = mock_errors  # type: ignore
         backend._query_sample_traces = mock_samples  # type: ignore
 
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         evidence = await backend.get_trace_evidence(["fraud-detect"], start, end)
         assert evidence.backend == "tempo"
@@ -626,8 +626,8 @@ class TestGetTraceEvidence:
         backend._query_top_errors = mock_errors  # type: ignore
         backend._query_sample_traces = mock_samples  # type: ignore
 
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
         await backend.get_trace_evidence(["svc"], start, end)
         assert prom_called is True
         assert trace_search_called is False
@@ -659,8 +659,8 @@ class TestGetTraceEvidence:
         backend._query_top_errors = mock_errors  # type: ignore
         backend._query_sample_traces = mock_samples  # type: ignore
 
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
         await backend.get_trace_evidence(["svc"], start, end)
         assert trace_search_called is True
 
@@ -678,8 +678,8 @@ class TestGetServiceDependencies:
             return []
 
         backend._query_service_graphs_from_prometheus = mock_edges_prom  # type: ignore
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         await backend.get_service_dependencies("fraud-detect", start, end)
         assert called_with["services"] == ["fraud-detect"]
@@ -694,8 +694,8 @@ class TestGetServiceDependencies:
             return []
 
         backend._query_edges_from_traces = mock_edges_traces  # type: ignore
-        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 4, 10, 10, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 4, 10, 10, 30, 0, tzinfo=UTC)
 
         await backend.get_service_dependencies("svc", start, end)
         assert called is True

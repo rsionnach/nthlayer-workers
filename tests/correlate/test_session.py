@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from nthlayer_workers.correlate.session import (
     CorrelationDomain,
@@ -60,7 +60,7 @@ class TestCorrelationDomain:
 
 class TestSessionWindow:
     def test_closes_on_gap(self):
-        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
         window = SessionWindow(
             domain=CorrelationDomain("svc", "prod"),
             opened_at=now - timedelta(seconds=30),
@@ -70,7 +70,7 @@ class TestSessionWindow:
         assert window.close_reason(now, gap_seconds=60.0) == "gap"
 
     def test_does_not_close_before_gap(self):
-        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
         window = SessionWindow(
             domain=CorrelationDomain("svc", "prod"),
             opened_at=now - timedelta(seconds=30),
@@ -79,7 +79,7 @@ class TestSessionWindow:
         assert window.should_close(now, gap_seconds=60.0) is False
 
     def test_closes_on_max_duration(self):
-        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
         window = SessionWindow(
             domain=CorrelationDomain("svc", "prod"),
             opened_at=now - timedelta(minutes=16),
@@ -89,7 +89,7 @@ class TestSessionWindow:
         assert window.close_reason(now, max_duration_seconds=900.0) == "max_duration"
 
     def test_closes_on_trigger(self):
-        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
         window = SessionWindow(
             domain=CorrelationDomain("svc", "prod"),
             opened_at=now - timedelta(seconds=10),
@@ -100,7 +100,7 @@ class TestSessionWindow:
         assert window.close_reason(now) == "trigger"
 
     def test_add_event_updates_last_event_at(self):
-        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
         window = SessionWindow(
             domain=CorrelationDomain("svc", "prod"),
             opened_at=now,
@@ -140,7 +140,7 @@ class TestSessionWindowManager:
 
     def test_close_ready_returns_closed_windows(self):
         mgr = SessionWindowManager(gap_seconds=60.0)
-        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
         mgr.ingest(_event(timestamp=(now - timedelta(seconds=120)).isoformat()))
 
         closed = mgr.close_ready(now)
@@ -149,7 +149,7 @@ class TestSessionWindowManager:
 
     def test_close_ready_leaves_active_windows(self):
         mgr = SessionWindowManager(gap_seconds=60.0)
-        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
         mgr.ingest(_event(timestamp=(now - timedelta(seconds=10)).isoformat()))
 
         closed = mgr.close_ready(now)
@@ -164,7 +164,7 @@ class TestSessionWindowManager:
 
     def test_to_state_and_restore(self):
         mgr = SessionWindowManager()
-        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
         mgr.ingest(_event(timestamp=now.isoformat()))
 
         state = mgr.to_state()

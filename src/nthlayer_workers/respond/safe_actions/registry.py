@@ -6,9 +6,9 @@ import inspect
 import sqlite3
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Callable
+from datetime import UTC, datetime
 
 import structlog
 
@@ -159,7 +159,7 @@ class SafeActionRegistry:
         # Record execution for cooldown tracking
         self._record_execution(name, target)
 
-        timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = datetime.now(UTC).isoformat()
         logger.info(
             "Executed safe action %r on target %r at %s — success=%s",
             name, target, timestamp, result.get("success"),

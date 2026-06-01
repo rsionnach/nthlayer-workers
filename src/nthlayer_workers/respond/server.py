@@ -11,7 +11,7 @@ import json
 import logging
 import time as _time
 from collections.abc import AsyncGenerator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from nthlayer_common.slack_web import SlackWebClient
@@ -337,7 +337,7 @@ class ApprovalServer:
 
             try:
                 updated = datetime.fromisoformat(ctx.updated_at)
-                elapsed = _time.time() - updated.replace(tzinfo=timezone.utc).timestamp()
+                elapsed = _time.time() - updated.replace(tzinfo=UTC).timestamp()
                 remaining = self._config.approval_timeout_seconds - elapsed
             except (ValueError, TypeError):
                 remaining = self._config.approval_timeout_seconds

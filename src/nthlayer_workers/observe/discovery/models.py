@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class MetricType(str, Enum):
+class MetricType(StrEnum):
     """Prometheus metric types."""
 
     COUNTER = "counter"
@@ -16,7 +16,7 @@ class MetricType(str, Enum):
     UNKNOWN = "unknown"
 
 
-class TechnologyGroup(str, Enum):
+class TechnologyGroup(StrEnum):
     """Technology classification for metrics."""
 
     POSTGRESQL = "postgresql"

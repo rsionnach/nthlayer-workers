@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from nthlayer_workers.correlate.traces.protocol import (
     ErrorSummary,
@@ -69,7 +69,7 @@ class TestServiceCallEdge:
 
 class TestErrorSummary:
     def test_construction(self):
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         err = ErrorSummary(
             error_message="ConnectionPool exhausted",
             count=4821,
@@ -123,7 +123,7 @@ class TestTopologyDivergence:
 
 class TestServiceTraceProfile:
     def test_construction_with_all_fields(self):
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         profile = ServiceTraceProfile(
             service="fraud-detect",
             time_window_start=now - timedelta(minutes=30),

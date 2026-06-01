@@ -1,6 +1,6 @@
 """Tests for shift report — summary of what happened during an on-call shift."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from nthlayer_workers.respond.sre.shift_report import (
@@ -33,7 +33,7 @@ def _make_verdict(
     v.judgment.tags = []
     v.outcome.status = status
     v.metadata.custom = custom or {}
-    v.timestamp = timestamp or datetime(2026, 4, 13, 14, 0, 0, tzinfo=timezone.utc)
+    v.timestamp = timestamp or datetime(2026, 4, 13, 14, 0, 0, tzinfo=UTC)
     v.id = f"vrd-{subject_type}-001"
     return v
 
@@ -66,8 +66,8 @@ class TestBuildShiftReport:
 
     def test_returns_shift_report(self):
         store = _make_store()
-        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc)
-        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=timezone.utc)
+        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=UTC)
+        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=UTC)
 
         report = build_shift_report(shift_start, shift_end, store)
 
@@ -77,8 +77,8 @@ class TestBuildShiftReport:
 
     def test_quiet_shift(self):
         store = _make_store()
-        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc)
-        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=timezone.utc)
+        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=UTC)
+        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=UTC)
 
         report = build_shift_report(shift_start, shift_end, store)
 
@@ -91,11 +91,11 @@ class TestBuildShiftReport:
             subject_type="triage",
             producer_system="nthlayer-respond",
             custom={"severity": 2},
-            timestamp=datetime(2026, 4, 13, 14, 22, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 4, 13, 14, 22, tzinfo=UTC),
         )
         store = _make_store(incident)
-        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc)
-        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=timezone.utc)
+        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=UTC)
+        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=UTC)
 
         report = build_shift_report(shift_start, shift_end, store)
 
@@ -107,11 +107,11 @@ class TestBuildShiftReport:
         incident = _make_verdict(
             subject_type="custom",
             custom={"incident_type": "incident", "severity": 2, "duration": "16 minutes"},
-            timestamp=datetime(2026, 4, 13, 14, 22, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 4, 13, 14, 22, tzinfo=UTC),
         )
         store = _make_store(incident)
-        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc)
-        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=timezone.utc)
+        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=UTC)
+        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=UTC)
 
         report = build_shift_report(shift_start, shift_end, store)
 
@@ -123,11 +123,11 @@ class TestBuildShiftReport:
             subject_type="evaluation",
             producer_system="nthlayer-measure",
             custom={"slo_type": "judgment", "breach": False},
-            timestamp=datetime(2026, 4, 13, 16, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 4, 13, 16, 0, tzinfo=UTC),
         )
         store = _make_store(deploy)
-        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc)
-        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=timezone.utc)
+        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=UTC)
+        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=UTC)
 
         report = build_shift_report(shift_start, shift_end, store)
 
@@ -136,8 +136,8 @@ class TestBuildShiftReport:
     def test_pending_reviews(self):
         pending = _make_verdict(status="pending")
         store = _make_store(pending)
-        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc)
-        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=timezone.utc)
+        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=UTC)
+        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=UTC)
 
         report = build_shift_report(shift_start, shift_end, store)
 
@@ -147,11 +147,11 @@ class TestBuildShiftReport:
         outside = _make_verdict(
             subject_type="triage",
             producer_system="nthlayer-respond",
-            timestamp=datetime(2026, 4, 12, 8, 0, tzinfo=timezone.utc),  # Before shift
+            timestamp=datetime(2026, 4, 12, 8, 0, tzinfo=UTC),  # Before shift
         )
         store = _make_store(outside)
-        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc)
-        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=timezone.utc)
+        shift_start = datetime(2026, 4, 13, 9, 0, tzinfo=UTC)
+        shift_end = datetime(2026, 4, 14, 9, 0, tzinfo=UTC)
 
         report = build_shift_report(shift_start, shift_end, store)
 
@@ -163,23 +163,23 @@ class TestIsQuiet:
 
     def test_quiet_when_empty(self):
         report = ShiftReport(
-            window_start=datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc),
-            window_end=datetime(2026, 4, 14, 9, 0, tzinfo=timezone.utc),
+            window_start=datetime(2026, 4, 13, 9, 0, tzinfo=UTC),
+            window_end=datetime(2026, 4, 14, 9, 0, tzinfo=UTC),
         )
         assert is_quiet(report)
 
     def test_not_quiet_with_incidents(self):
         report = ShiftReport(
-            window_start=datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc),
-            window_end=datetime(2026, 4, 14, 9, 0, tzinfo=timezone.utc),
+            window_start=datetime(2026, 4, 13, 9, 0, tzinfo=UTC),
+            window_end=datetime(2026, 4, 14, 9, 0, tzinfo=UTC),
             incidents=[MagicMock()],
         )
         assert not is_quiet(report)
 
     def test_not_quiet_with_pending_reviews(self):
         report = ShiftReport(
-            window_start=datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc),
-            window_end=datetime(2026, 4, 14, 9, 0, tzinfo=timezone.utc),
+            window_start=datetime(2026, 4, 13, 9, 0, tzinfo=UTC),
+            window_end=datetime(2026, 4, 14, 9, 0, tzinfo=UTC),
             pending_reviews=3,
         )
         assert not is_quiet(report)
@@ -190,8 +190,8 @@ class TestRenderShiftReport:
 
     def test_quiet_shift_render(self):
         report = ShiftReport(
-            window_start=datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc),
-            window_end=datetime(2026, 4, 14, 9, 0, tzinfo=timezone.utc),
+            window_start=datetime(2026, 4, 13, 9, 0, tzinfo=UTC),
+            window_end=datetime(2026, 4, 14, 9, 0, tzinfo=UTC),
         )
         text = render_shift_report(report)
 
@@ -203,8 +203,8 @@ class TestRenderShiftReport:
             custom={"incident_type": "incident", "severity": 2},
         )
         report = ShiftReport(
-            window_start=datetime(2026, 4, 13, 9, 0, tzinfo=timezone.utc),
-            window_end=datetime(2026, 4, 14, 9, 0, tzinfo=timezone.utc),
+            window_start=datetime(2026, 4, 13, 9, 0, tzinfo=UTC),
+            window_end=datetime(2026, 4, 14, 9, 0, tzinfo=UTC),
             incidents=[incident],
             evaluations_count=3,
             pending_reviews=2,

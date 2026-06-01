@@ -1,6 +1,6 @@
 """Tests for assessment store implementations."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from nthlayer_common.verdicts import SQLiteVerdictStore
@@ -90,7 +90,7 @@ class TestStoreQuery:
         assert results[0].created_at >= results[1].created_at
 
     def test_query_by_time_range(self, store):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         old = create("slo_status", "svc", {})
         # Manually set created_at to 2 hours ago
         from nthlayer_workers.observe.assessment import Assessment

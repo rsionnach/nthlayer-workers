@@ -8,7 +8,7 @@ state machine.
 from __future__ import annotations
 
 import dataclasses
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -27,7 +27,7 @@ def _build_single_rec_plan(*, rec_id: str = "rec-aaaaaaaaaaaa",
     return SpecRecommendation(
         incident="inc-jmy22",
         generated_by="nthlayer-learn",
-        generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+        generated_at=datetime(2026, 5, 29, tzinfo=UTC),
         confidence=0.7,
         recommendations=[
             Recommendation(
@@ -53,7 +53,7 @@ def _build_multi_rec_plan(rec_ids=("rec-a", "rec-b", "rec-c")):
     return SpecRecommendation(
         incident="inc-jmy22-multi",
         generated_by="nthlayer-learn",
-        generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+        generated_at=datetime(2026, 5, 29, tzinfo=UTC),
         confidence=0.7,
         recommendations=[
             Recommendation(
@@ -76,7 +76,7 @@ def _build_empty_plan():
     return SpecRecommendation(
         incident="inc-empty",
         generated_by="nthlayer-learn",
-        generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+        generated_at=datetime(2026, 5, 29, tzinfo=UTC),
         confidence=0.0,
         recommendations=[],
     )

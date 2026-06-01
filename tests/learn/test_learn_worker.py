@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 from nthlayer_common.api_client import APIResult
@@ -56,7 +56,7 @@ class TestOutcomeCycle:
 
     async def test_resolution_via_lineage(self):
         """Downstream execution verdict resolves parent via lineage path."""
-        old_time = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        old_time = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
         client = AsyncMock()
         client.get_verdicts = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
             {
@@ -87,7 +87,7 @@ class TestOutcomeCycle:
 
     async def test_resolution_via_expiry(self):
         """Old pending verdict past threshold marked expired."""
-        very_old = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        very_old = (datetime.now(UTC) - timedelta(days=10)).isoformat()
         client = AsyncMock()
         client.get_verdicts = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
             {
@@ -115,7 +115,7 @@ class TestOutcomeCycle:
 
     async def test_calibration_signal_has_delta(self):
         """Calibration signal includes correct delta computation."""
-        old_time = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        old_time = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
         client = AsyncMock()
         client.get_verdicts = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
             {
@@ -149,7 +149,7 @@ class TestOutcomeCycle:
 
     async def test_resolution_failure_continues(self):
         """One verdict fails resolution, others still processed."""
-        old_time = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        old_time = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
         client = AsyncMock()
         client.get_verdicts = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
             {"id": "vrd-a", "created_at": old_time, "outcome": {"status": "pending"}, "judgment": {}, "producer": {}},
@@ -174,7 +174,7 @@ class TestOutcomeCycle:
 
     async def test_resolution_via_divergence(self):
         """Descendant with overridden outcome resolves parent via divergence path."""
-        old_time = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        old_time = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
         client = AsyncMock()
         client.get_verdicts = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
             {
@@ -209,7 +209,7 @@ class TestOutcomeCycle:
 
     async def test_cursor_advances_after_cycle(self):
         """Outcome module cursor advances after processing verdicts."""
-        old_time = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        old_time = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
         client = AsyncMock()
         client.get_verdicts = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
             {

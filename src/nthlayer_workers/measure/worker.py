@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 from nthlayer_common.api_client import CoreAPIClient
@@ -122,7 +122,7 @@ class MeasureModule:
                 breach_verdict_ids[slo_key] = breach_id
                 breach_verdict = {
                     "id": breach_id,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                     "type": "quality_breach",
                     "service": service,
                     "parent_ids": [evaluation_ids.get(slo_key, "")],
@@ -161,7 +161,7 @@ class MeasureModule:
 
                 action, steps = self._compute_governance(service, breaching_keys)
 
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 for k in undecided:
                     self._breach_decisions[k] = {
                         "decided": True,
@@ -247,7 +247,7 @@ class MeasureModule:
         status = "healthy" if current_pct >= target else "breach"
         current_status[slo_key] = status
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assessment_id = f"jse-{service}-{slo_name}-{uuid.uuid4().hex[:8]}"
         evaluation_ids[slo_key] = assessment_id
         evaluation_ids[f"__val__{slo_key}"] = current_pct  # for severity classification (percentage)

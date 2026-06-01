@@ -9,7 +9,7 @@ the loop is started explicitly via ``start_escalation()``.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -55,7 +55,7 @@ class EscalationRunner:
         steps: list[EscalationStep],
     ) -> EscalationState:
         """Start a new escalation for an incident."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         state = EscalationState(
             incident_id=incident_id,
             started_at=now,
@@ -86,7 +86,7 @@ class EscalationRunner:
         """Acknowledge an escalation. Called from webhook handler."""
         state = self._active_escalations.get(incident_id)
         if state and state.status == EscalationStatus.ACTIVE:
-            state.acknowledge(user, datetime.now(timezone.utc))
+            state.acknowledge(user, datetime.now(UTC))
             self._cancel_task(incident_id)
             logger.info(
                 "escalation_acknowledged",
@@ -99,7 +99,7 @@ class EscalationRunner:
     ) -> None:
         """Background loop: check for due steps, dispatch, sleep."""
         while state.status == EscalationStatus.ACTIVE:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             step = state.next_due_step(now)
 
             if step:
@@ -126,7 +126,7 @@ class EscalationRunner:
         payload: NotificationPayload,
     ) -> None:
         """Execute a single escalation step."""
-        oncall = resolve_oncall(self._oncall_config, datetime.now(timezone.utc))
+        oncall = resolve_oncall(self._oncall_config, datetime.now(UTC))
 
         # slack_channel: post to team channel
         if step.notify == "slack_channel":
@@ -225,7 +225,7 @@ class EscalationRunner:
                 delivered=False,
                 channel=channel,
                 recipient=recipient_name,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 message_id=None,
                 error=f"{type(exc).__name__}: {exc}",
             )

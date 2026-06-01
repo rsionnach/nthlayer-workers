@@ -37,7 +37,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -55,7 +55,7 @@ def compute_rec_id(incident_id: str, rec_type: str, field: str) -> str:
     Algorithm pinned in jmy.6 design § 6.1 so future contributors don't
     accidentally change the hash basis.
     """
-    payload = f"{incident_id}|{rec_type}|{field}".encode("utf-8")
+    payload = f"{incident_id}|{rec_type}|{field}".encode()
     return "rec-" + hashlib.sha256(payload).hexdigest()[:12]
 
 
@@ -260,7 +260,7 @@ def analyze_incident(
     return SpecRecommendation(
         incident=incident_id,
         generated_by=generated_by,
-        generated_at=datetime.now(timezone.utc),
+        generated_at=datetime.now(UTC),
         confidence=round(overall_confidence, 2),
         recommendations=recs,
         financial_impact=financial_impact,
@@ -583,7 +583,7 @@ def parse_plan_file(path) -> SpecRecommendation:
     try:
         generated_at_parsed = datetime.fromisoformat(generated_at_str)
         if generated_at_parsed.tzinfo is None:
-            generated_at_parsed = generated_at_parsed.replace(tzinfo=timezone.utc)
+            generated_at_parsed = generated_at_parsed.replace(tzinfo=UTC)
         return SpecRecommendation(
             incident=metadata.get("incident", ""),
             generated_by=metadata.get("generated_by", "nthlayer-learn"),

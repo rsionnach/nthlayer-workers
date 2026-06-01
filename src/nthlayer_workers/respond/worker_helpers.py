@@ -9,7 +9,7 @@ into the open helpers as the ``tiers`` mapping.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from nthlayer_workers.respond.config import RespondConfig
 from nthlayer_workers.respond.types import (
@@ -25,7 +25,7 @@ def _make_incident_id(service: str) -> str:
     the same second for the same service (rare but possible — two snapshots
     flushing back-to-back, or a snapshot + its orphan-breach fallback racing).
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stamp = now.strftime("%Y%m%d-%H%M%S")
     safe_svc = service.upper().replace("/", "-")
     suffix = uuid.uuid4().hex[:8]
@@ -57,7 +57,7 @@ def open_from_snapshot(
     # See docs/superpowers/decisions/eager-case-creation.md
     parent_ids = list(data.get("parent_ids") or [])
     trigger_ids = [snap["id"], *parent_ids]
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     metadata: dict = {
         "blast_radius": data.get("blast_radius", []),
@@ -98,7 +98,7 @@ def open_from_breach(
     degraded.
     """
     service = breach.get("service") or breach.get("subject", {}).get("service") or "unknown"
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     metadata: dict = {
         # Static reason — threshold is logged separately by _ingest_orphan_breaches

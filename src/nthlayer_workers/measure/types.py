@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 
-class AutonomyLevel(str, Enum):
+class AutonomyLevel(StrEnum):
     """Agent autonomy levels managed by governance.
 
     Five named levels ordered from most to least autonomous.
@@ -31,7 +31,7 @@ class AgentOutput:
     output_content: str
     output_type: str
     metadata: dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,7 @@ class QualityScore:
     confidence: float = 0.0
     evaluator_model: str = ""
     cost_usd: float | None = None
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     tier: str | None = None
     auto_approved: bool = False
 
@@ -58,7 +58,7 @@ class GovernanceAction:
     agent_name: str
     target_level: AutonomyLevel
     reason: str
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(frozen=True)

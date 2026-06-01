@@ -5,7 +5,7 @@ Plain text exposition format — no prometheus_client dependency.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from nthlayer_common.verdicts import VerdictFilter
@@ -45,7 +45,7 @@ class VerdictMetricsCollector:
         lines.append("# HELP nthlayer_verdicts_total Total number of verdicts by component and type")
         lines.append("# TYPE nthlayer_verdicts_total gauge")
 
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         windows = {"7d": timedelta(days=7), "30d": timedelta(days=30)}
 
         # Collect accuracy/reversal lines separately so we can emit headers only if needed

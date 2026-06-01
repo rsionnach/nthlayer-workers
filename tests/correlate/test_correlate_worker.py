@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 from nthlayer_common.api_client import APIResult
@@ -54,7 +54,7 @@ class TestProcessCycle:
 
     async def test_events_open_window_no_immediate_close(self):
         """Events arrive but gap hasn't elapsed — no snapshot yet."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         client = AsyncMock()
         client.get_verdicts = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[]))
         client.get_assessments = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
@@ -77,7 +77,7 @@ class TestProcessCycle:
 
     async def test_trigger_verdict_force_closes_window(self):
         """quality_breach verdict closes window immediately."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         breach = {
             "id": "vrd-001",
             "created_at": now.isoformat(),
@@ -108,7 +108,7 @@ class TestProcessCycle:
 
     async def test_gap_timeout_closes_window(self):
         """Window closes when gap timeout elapses across cycles."""
-        old_time = datetime.now(timezone.utc) - timedelta(seconds=120)
+        old_time = datetime.now(UTC) - timedelta(seconds=120)
         client = AsyncMock()
 
         # First cycle: events arrive
@@ -133,7 +133,7 @@ class TestProcessCycle:
 
     async def test_state_persistence_roundtrip(self):
         """Cursor and window state persist and restore."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         client = AsyncMock()
         client.get_verdicts = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[]))
         client.get_assessments = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[

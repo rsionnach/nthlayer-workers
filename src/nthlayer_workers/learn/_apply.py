@@ -11,10 +11,11 @@ Hidden directories excluded from the walk.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import yaml as pyyaml  # lightweight read for the discovery walk only
 

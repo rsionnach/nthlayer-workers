@@ -6,7 +6,7 @@ Strangler fig: runs alongside JudgmentSLOChecker, does not replace it.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from nthlayer_common.verdicts import AccuracyFilter, AccuracyReport, VerdictStore
 
@@ -24,7 +24,7 @@ class VerdictCalibration:
         self._store = verdict_store
 
     async def check(self, window_days: int = 30) -> AccuracyReport:
-        from_time = datetime.now(timezone.utc) - timedelta(days=window_days)
+        from_time = datetime.now(UTC) - timedelta(days=window_days)
         return await asyncio.to_thread(
             self._store.accuracy,
             AccuracyFilter(producer_system="arbiter", from_time=from_time),

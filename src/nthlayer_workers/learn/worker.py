@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -64,7 +64,7 @@ class LearnOutcomeModule:
             self._cursor = state.get("cursor")
 
     async def process_cycle(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Minimum age floor: skip verdicts younger than threshold because
         # downstream signals may not have arrived yet. Premature resolution
@@ -172,7 +172,7 @@ class LearnOutcomeModule:
         if confidence is not None and outcome_status in _OUTCOME_SCORES:
             delta = abs(confidence - _OUTCOME_SCORES[outcome_status])
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assessment = {
             "id": f"cal-{verdict.get('id', 'unknown')}-{uuid.uuid4().hex[:8]}",
             "created_at": now.isoformat(),
@@ -337,7 +337,7 @@ class LearnRetrospectiveModule:
         # Build recommendations
         recommendations = _generate_recommendations(chain, snapshot_data)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         duration = snapshot_data.get("window", {}).get("duration_seconds", 0)
 
         data: dict[str, Any] = {

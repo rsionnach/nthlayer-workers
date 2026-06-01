@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -146,7 +146,7 @@ class CorrelateSessionModule:
             # Orphaned window from crash recovery with no re-fetched events.
             # Skip rather than producing a phantom empty snapshot.
             return
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         reason = window.close_reason(now, self.gap_seconds, self.max_duration_seconds)
 
         # Verdict IDs of QUALITY_SCORE events that triggered this snapshot.
@@ -221,7 +221,7 @@ def verdict_to_event(verdict: dict) -> SitRepEvent:
     """Convert a core verdict dict to a SitRepEvent."""
     return SitRepEvent(
         id=verdict.get("id", "unknown"),
-        timestamp=verdict.get("created_at", datetime.now(timezone.utc).isoformat()),
+        timestamp=verdict.get("created_at", datetime.now(UTC).isoformat()),
         source=f"verdict:{verdict.get('type', 'unknown')}",
         type=EventType.QUALITY_SCORE if verdict.get("type") == "quality_breach" else EventType.VERDICT,
         service=verdict.get("service", "unknown"),
@@ -235,7 +235,7 @@ def assessment_to_event(assessment: dict) -> SitRepEvent:
     """Convert a core assessment dict to a SitRepEvent."""
     return SitRepEvent(
         id=assessment.get("id", "unknown"),
-        timestamp=assessment.get("created_at", datetime.now(timezone.utc).isoformat()),
+        timestamp=assessment.get("created_at", datetime.now(UTC).isoformat()),
         source=f"assessment:{assessment.get('kind', 'unknown')}",
         type=EventType.METRIC_BREACH if _is_breach(assessment) else EventType.ALERT,
         service=assessment.get("service", "unknown"),
@@ -349,7 +349,7 @@ class CorrelateTopologyModule:
         # Get trace evidence for all services
         service_names = list(declared_deps.keys())
         try:
-            end = datetime.now(timezone.utc)
+            end = datetime.now(UTC)
             start = end - timedelta(hours=1)
             evidence = await self.trace_backend.get_trace_evidence(
                 services=service_names,
@@ -379,7 +379,7 @@ class CorrelateTopologyModule:
             return
 
         # Emit one assessment per divergence (org-level)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assessment = {
             "id": f"tdr-topology-{uuid.uuid4().hex[:8]}",
             "created_at": now.isoformat(),
@@ -580,7 +580,7 @@ class CorrelateContractModule:
             if not divergences:
                 continue
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             assessment = {
                 "id": f"cdv-{service}-{uuid.uuid4().hex[:8]}",
                 "created_at": now.isoformat(),

@@ -6,7 +6,7 @@ docs/roadmap/NTHLAYER_MISSING_CAPABILITIES_SPEC.md § 3.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from nthlayer_common.verdicts.models import (
@@ -152,7 +152,7 @@ class TestAnalyzerConfig:
 class TestSpecScenarios:
     @pytest.fixture
     def incident_start(self):
-        return datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc)
+        return datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
 
     def test_1_upstream_degraded_finds_root_cause(self, incident_start):
         """Spec 1: Agent B degrades AND Agent A degrades → identifies Agent A."""
@@ -263,7 +263,7 @@ class TestSpecScenarios:
 class TestEarlyTermination:
     @pytest.fixture
     def incident_start(self):
-        return datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc)
+        return datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
 
     def test_min_representation_filters_diffuse_upstream(self, incident_start):
         """Reversed verdicts with many one-off upstream contexts → no qualifying upstream."""
@@ -316,7 +316,7 @@ class TestEarlyTermination:
 class TestResultShape:
     @pytest.fixture
     def incident_start(self):
-        return datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc)
+        return datetime(2026, 5, 9, 12, 0, tzinfo=UTC)
 
     def test_result_contains_assessment_string(self, incident_start):
         store = _fresh_store()

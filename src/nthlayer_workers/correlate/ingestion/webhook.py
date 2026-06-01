@@ -4,9 +4,9 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
-from datetime import datetime, timezone
-from typing import Awaitable, Callable
+from datetime import UTC, datetime
 
 from nthlayer_workers.correlate.ingestion import severity as _severity
 from nthlayer_workers.correlate.types import EventType, SitRepEvent
@@ -70,7 +70,7 @@ class WebhookIngester:
 
         # Auto-generate id and timestamp when absent
         event_id = data.get("id") or str(uuid.uuid4())
-        timestamp = data.get("timestamp") or datetime.now(timezone.utc).isoformat()
+        timestamp = data.get("timestamp") or datetime.now(UTC).isoformat()
 
         event = SitRepEvent(
             id=event_id,
@@ -101,7 +101,7 @@ class WebhookIngester:
             await asyncio.wait_for(
                 self._handle_request(reader, writer), timeout=_CONNECTION_TIMEOUT
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             writer.close()
             try:
                 await writer.wait_closed()

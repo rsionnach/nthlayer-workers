@@ -1,6 +1,6 @@
 """Tests for the decision records bridge — converting observe assessments to content-addressed records."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from nthlayer_common.records.hashing import verify_hash
 from nthlayer_common.records.models import (
@@ -21,7 +21,7 @@ from nthlayer_workers.observe.decision_records import (
     map_severity,
 )
 
-NOW = datetime(2026, 4, 11, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 4, 11, 12, 0, 0, tzinfo=UTC)
 
 
 # --- Fixtures ---

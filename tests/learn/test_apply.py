@@ -1,6 +1,7 @@
 """Unit tests for nthlayer_workers.learn._apply (jmy.6)."""
 from __future__ import annotations
 
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -66,7 +67,7 @@ class TestApplyHappyPath:
     """apply_recommendations orchestration: happy path."""
 
     def test_single_rec_applied(self, tmp_path):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn._apply import apply_recommendations
         from nthlayer_workers.learn.recommendations import (
@@ -83,7 +84,7 @@ class TestApplyHappyPath:
         plan = SpecRecommendation(
             incident="inc-test",
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 26, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -109,7 +110,7 @@ class TestApplyHappyPath:
         assert "target: 95.0" not in (tmp_path / "fraud-detect.yaml").read_text()
 
     def test_skipped_when_manifest_missing(self, tmp_path):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn._apply import apply_recommendations
         from nthlayer_workers.learn.recommendations import (
@@ -122,7 +123,7 @@ class TestApplyHappyPath:
         plan = SpecRecommendation(
             incident="inc-test",
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 26, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -148,7 +149,7 @@ class TestApplyAtomicity:
 
     def test_alphabetical_write_order(self, tmp_path):
         """Files are written in alphabetical order, not encounter order."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn._apply import apply_recommendations
         from nthlayer_workers.learn.recommendations import (
@@ -170,7 +171,7 @@ class TestApplyAtomicity:
         plan = SpecRecommendation(
             incident="inc-test",
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 26, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -206,7 +207,7 @@ class TestApplyAtomicity:
         self, tmp_path, monkeypatch,
     ):
         """Filename-based failure injection per jmy.6 design § 8."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn._apply import apply_recommendations
         from nthlayer_workers.learn.recommendations import (
@@ -237,7 +238,7 @@ class TestApplyAtomicity:
         plan = SpecRecommendation(
             incident="inc-test",
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 26, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -363,7 +364,7 @@ class TestApplyIdempotency:
     def test_add_dependency_rerun_routes_to_skipped(self, tmp_path):
         """Apply add_dependency once → applied. Apply same plan again →
         skipped (outcome=already_applied), manifest unchanged."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn._apply import apply_recommendations
         from nthlayer_workers.learn.recommendations import (
@@ -378,7 +379,7 @@ class TestApplyIdempotency:
         plan = SpecRecommendation(
             incident="inc-idempotency",
             generated_by="test",
-            generated_at=datetime(2026, 5, 30, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 30, tzinfo=UTC),
             confidence=0.5,
             recommendations=[
                 Recommendation(
@@ -475,7 +476,7 @@ class TestApplyIdempotency:
         """Same invariant for scalar paths (tighten_slo): re-applying a
         rec whose proposed_value already matches the manifest is a no-op
         skip, not a re-application."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn._apply import apply_recommendations
         from nthlayer_workers.learn.recommendations import (
@@ -492,7 +493,7 @@ class TestApplyIdempotency:
         plan = SpecRecommendation(
             incident="inc-idempotency-scalar",
             generated_by="test",
-            generated_at=datetime(2026, 5, 30, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 30, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(

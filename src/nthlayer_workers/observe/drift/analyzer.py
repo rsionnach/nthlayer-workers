@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import numpy as np
@@ -140,7 +140,7 @@ class DriftAnalyzer:
             tier=tier,
             slo_name=slo,
             window=analysis_window,
-            analyzed_at=datetime.now(timezone.utc),
+            analyzed_at=datetime.now(UTC),
             data_start=data[0][0],
             data_end=data[-1][0],
             metrics=metrics,
@@ -164,7 +164,7 @@ class DriftAnalyzer:
 
         query = f'slo:error_budget_remaining:ratio{{service="{service}", slo="{slo}"}}'
 
-        end = datetime.now(timezone.utc)
+        end = datetime.now(UTC)
         start = end - self._parse_duration(window)
 
         params: dict[str, str] = {
@@ -200,7 +200,7 @@ class DriftAnalyzer:
         for ts, val in values:
             v = float(val)
             if math.isfinite(v):
-                parsed.append((datetime.fromtimestamp(float(ts), tz=timezone.utc), v))
+                parsed.append((datetime.fromtimestamp(float(ts), tz=UTC), v))
         return parsed
 
     def _calculate_trend(

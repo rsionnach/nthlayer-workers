@@ -1,6 +1,6 @@
 """Tests for paging brief — template over verdicts."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from nthlayer_workers.respond.sre.brief import PagingBrief, build_paging_brief, render_brief
@@ -31,7 +31,7 @@ def _make_verdict(
     v.judgment.tags = tags or []
     v.judgment.dimensions = {}
     v.metadata.custom = custom or {}
-    v.timestamp = datetime(2026, 4, 13, 14, 22, 0, tzinfo=timezone.utc)
+    v.timestamp = datetime(2026, 4, 13, 14, 22, 0, tzinfo=UTC)
     v.id = f"vrd-{subject_type}-001"
     v.lineage.context = []
     return v

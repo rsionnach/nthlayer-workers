@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from nthlayer_workers.measure.types import AgentOutput
 
@@ -41,7 +41,7 @@ class WebhookAdapter:
             output_content=data["output_content"],
             output_type=data["output_type"],
             metadata=data.get("metadata", {}),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
     async def _handle_connection(
@@ -52,7 +52,7 @@ class WebhookAdapter:
             await asyncio.wait_for(
                 self._handle_request(reader, writer), timeout=_CONNECTION_TIMEOUT
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             writer.close()
             try:
                 await writer.wait_closed()

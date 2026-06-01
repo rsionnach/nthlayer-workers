@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -79,7 +79,7 @@ class NtfyNotificationBackend:
                 delivered=False,
                 channel="ntfy",
                 recipient=recipient.name,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 message_id=None,
                 error="No ntfy_topic configured for this user",
             )
@@ -130,7 +130,7 @@ class NtfyNotificationBackend:
                 delivered=True,
                 channel="ntfy",
                 recipient=recipient.name,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 message_id=data.get("id"),
                 error=None,
             )
@@ -144,7 +144,7 @@ class NtfyNotificationBackend:
                 delivered=False,
                 channel="ntfy",
                 recipient=recipient.name,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 message_id=None,
                 error=str(exc),
             )

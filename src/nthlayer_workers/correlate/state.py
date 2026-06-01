@@ -1,7 +1,7 @@
 """Agent state machine for SitRep."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from nthlayer_workers.correlate.types import AgentState, CorrelationGroup
 
@@ -20,7 +20,7 @@ class StateMachine:
         model_healthy: bool = True,
     ) -> AgentState:
         """Evaluate state transition based on correlation output."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Model failure → DEGRADED (from any state except INCIDENT)
         if not model_healthy and self.state != AgentState.INCIDENT:
@@ -65,7 +65,7 @@ class StateMachine:
         """Incident resolved → WATCHING."""
         self.state = AgentState.WATCHING
         self._alert_start = None
-        self._calm_since = datetime.now(timezone.utc)
+        self._calm_since = datetime.now(UTC)
 
     def get_interval(self) -> int:
         """Snapshot interval in seconds for current state."""

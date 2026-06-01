@@ -1,6 +1,6 @@
 """Tests for escalation runner — async loop driving the state machine."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -80,7 +80,7 @@ class TestEscalationRunner:
             delivered=True,
             channel="slack_dm",
             recipient="Alice",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             message_id="ts1",
             error=None,
         )
@@ -107,7 +107,7 @@ class TestEscalationRunner:
             delivered=True,
             channel="slack_dm",
             recipient="Alice",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             message_id="ts1",
             error=None,
         )
@@ -118,7 +118,7 @@ class TestEscalationRunner:
 
         state = EscalationState(
             incident_id="INC-001",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             steps=_make_steps(),
         )
         step = _make_steps()[0]  # slack_dm, no target
@@ -137,7 +137,7 @@ class TestEscalationRunner:
             delivered=True,
             channel="slack_dm",
             recipient="secondary",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             message_id="ts2",
             error=None,
         )
@@ -148,7 +148,7 @@ class TestEscalationRunner:
 
         state = EscalationState(
             incident_id="INC-001",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             steps=_make_steps(),
         )
 
@@ -178,7 +178,7 @@ class TestEscalationRunner:
             delivered=True,
             channel="slack_dm",
             recipient="Alice",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             message_id="ts1",
             error=None,
         )
@@ -218,7 +218,7 @@ class TestEscalationRunner:
 
         state = EscalationState(
             incident_id="INC-001",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             steps=[EscalationStep(after=timedelta(0), notify="ntfy")],
         )
 
@@ -238,7 +238,7 @@ class TestEscalationRunner:
             delivered=True,
             channel="slack_channel",
             recipient="#oncall",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             message_id="ts3",
             error=None,
         )
@@ -250,7 +250,7 @@ class TestEscalationRunner:
 
         state = EscalationState(
             incident_id="INC-001",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             steps=[],
         )
         step = EscalationStep(after=timedelta(0), notify="slack_channel")
@@ -298,7 +298,7 @@ class TestBackendFailureIsolation:
         good_ntfy = AsyncMock()
         good_ntfy.send.return_value = NotificationResult(
             delivered=True, channel="ntfy", recipient="Alice",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             message_id="ntfy-1", error=None,
         )
 
@@ -363,12 +363,12 @@ class TestMissedAckEscalation:
         slack = AsyncMock()
         slack.send.return_value = NotificationResult(
             delivered=True, channel="slack_dm", recipient="Alice",
-            timestamp=datetime.now(timezone.utc), message_id="ts-1", error=None,
+            timestamp=datetime.now(UTC), message_id="ts-1", error=None,
         )
         ntfy = AsyncMock()
         ntfy.send.return_value = NotificationResult(
             delivered=True, channel="ntfy", recipient="Alice",
-            timestamp=datetime.now(timezone.utc), message_id="ntfy-1", error=None,
+            timestamp=datetime.now(UTC), message_id="ntfy-1", error=None,
         )
         runner = EscalationRunner(
             backends={"slack_dm": slack, "ntfy": ntfy},
@@ -383,7 +383,7 @@ class TestMissedAckEscalation:
         ]
         state = EscalationState(
             incident_id="INC-MISS-ACK",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             steps=steps,
         )
 
@@ -409,7 +409,7 @@ class TestMissedAckEscalation:
         slack = AsyncMock()
         slack.send.return_value = NotificationResult(
             delivered=True, channel="slack_dm", recipient="Alice",
-            timestamp=datetime.now(timezone.utc), message_id="ts-1", error=None,
+            timestamp=datetime.now(UTC), message_id="ts-1", error=None,
         )
         runner = EscalationRunner(
             backends={"slack_dm": slack},
@@ -445,7 +445,7 @@ class TestMissedAckEscalation:
         slack = AsyncMock()
         slack.send.return_value = NotificationResult(
             delivered=True, channel="slack_dm", recipient="Alice",
-            timestamp=datetime.now(timezone.utc), message_id="ts-1", error=None,
+            timestamp=datetime.now(UTC), message_id="ts-1", error=None,
         )
         runner = EscalationRunner(
             backends={"slack_dm": slack},
@@ -458,7 +458,7 @@ class TestMissedAckEscalation:
         ]
         state = EscalationState(
             incident_id="INC-EXHAUST",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             steps=steps,
         )
 

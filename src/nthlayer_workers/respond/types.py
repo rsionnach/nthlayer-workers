@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class IncidentState(str, Enum):
+class IncidentState(StrEnum):
     TRIGGERED = "triggered"
     TRIAGING = "triaging"
     INVESTIGATING = "investigating"
@@ -24,7 +24,7 @@ TERMINAL_STATES = frozenset({
 })
 
 
-class AgentRole(str, Enum):
+class AgentRole(StrEnum):
     TRIAGE = "triage"
     INVESTIGATION = "investigation"
     COMMUNICATION = "communication"

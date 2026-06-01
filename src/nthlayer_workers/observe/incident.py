@@ -7,7 +7,7 @@ The incident_id is assigned at trigger time and propagated to all downstream rec
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from nthlayer_common.records.models import Incident
 from nthlayer_common.records.sqlite_store import SQLiteDecisionRecordStore
@@ -28,7 +28,7 @@ def create_incident_from_breach(
     incident_id = f"inc-{uuid.uuid4().hex[:12]}"
     incident = Incident(
         id=incident_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         trigger_hash=trigger_hash,
         stream=stream,
     )

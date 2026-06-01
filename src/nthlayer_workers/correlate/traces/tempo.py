@@ -11,7 +11,7 @@ import asyncio
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -631,7 +631,7 @@ class TempoTraceBackend:
     @staticmethod
     def _parse_tempo_timestamp(nanos: int) -> datetime:
         """Convert nanosecond unix timestamp to datetime."""
-        return datetime.fromtimestamp(nanos / 1_000_000_000, tz=timezone.utc)
+        return datetime.fromtimestamp(nanos / 1_000_000_000, tz=UTC)
 
     @staticmethod
     def _traceql_service_filter(services: list[str]) -> str:

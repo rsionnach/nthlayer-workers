@@ -1,6 +1,6 @@
 """Tests for notification backend protocol and dataclasses."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from nthlayer_workers.respond.notification_backends.protocol import (
     NotificationBackend,
@@ -50,7 +50,7 @@ class TestNotificationResult:
     """Test NotificationResult dataclass."""
 
     def test_successful_result(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = NotificationResult(
             delivered=True,
             channel="slack_dm",
@@ -65,7 +65,7 @@ class TestNotificationResult:
         assert result.error is None
 
     def test_failed_result(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = NotificationResult(
             delivered=False,
             channel="ntfy",
@@ -96,7 +96,7 @@ class TestNotificationBackendProtocol:
                     delivered=True,
                     channel="stub",
                     recipient=recipient.name,
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                     message_id=None,
                     error=None,
                 )

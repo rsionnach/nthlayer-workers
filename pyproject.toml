@@ -60,10 +60,10 @@ line-length = 100
 
 [tool.ruff.lint]
 # Mirrors ruff's literal default select (E4/E7/E9 + F) plus I (isort,
-# adopted under opensrm-ncy0). Future widenings tracked under
-# opensrm-6nn1 (UP) / opensrm-y7dd (SIM) / opensrm-po23 (B); E501 / W
-# are separate hygiene calls (line-too-long has 393 hits today).
-select = ["E4", "E7", "E9", "F", "I"]
+# opensrm-ncy0) and UP (pyupgrade, opensrm-6nn1). Future widenings
+# tracked under opensrm-y7dd (SIM) / opensrm-po23 (B); E501 / W are
+# separate hygiene calls (line-too-long has 393 hits today).
+select = ["E4", "E7", "E9", "F", "I", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 # Correlate test files defer some imports until after pytest.importorskip

@@ -36,7 +36,7 @@ class WalkthroughState:
     last_error: str | None = None  # last modify parse error message; cleared on next action
 
     @classmethod
-    def for_plan(cls, plan: SpecRecommendation) -> "WalkthroughState":
+    def for_plan(cls, plan: SpecRecommendation) -> WalkthroughState:
         return cls(plan=deepcopy(plan))
 
     @property

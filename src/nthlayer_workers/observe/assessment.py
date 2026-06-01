@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from nthlayer_common.cloudevents import ASSESSMENT_KINDS
 
@@ -24,7 +24,7 @@ def _generate_id() -> str:
         _id_sequence += 1
         seq = _id_sequence
     short_uuid = uuid.uuid4().hex[:8]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     date_part = now.strftime("%Y-%m-%d")
     return f"asm-{date_part}-{short_uuid}-{seq:05d}"
 
@@ -60,7 +60,7 @@ def create(
         )
     return Assessment(
         id=_generate_id(),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         kind=kind,
         service=service,
         producer=producer,

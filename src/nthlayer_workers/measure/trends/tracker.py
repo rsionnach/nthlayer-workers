@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from nthlayer_workers.measure.store.protocol import ScoreStore
@@ -26,7 +26,7 @@ class StoreTrendTracker:
         self._store = store
 
     async def compute_window(self, agent_name: str, window_days: int) -> TrendWindow:
-        since = datetime.now(timezone.utc) - timedelta(days=window_days)
+        since = datetime.now(UTC) - timedelta(days=window_days)
         scores = await self._store.get_scores(agent_name, since=since, limit=10000)
 
         if not scores:

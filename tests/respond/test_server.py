@@ -7,6 +7,7 @@ import hmac
 import json
 import time
 import urllib.parse
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -413,8 +414,8 @@ async def test_recover_pending_approvals_starts_timeout():
 
     ctx = _awaiting_context()
     # Set updated_at to 1 second ago so there's plenty of remaining time
-    from datetime import datetime, timezone
-    ctx.updated_at = datetime.now(tz=timezone.utc).isoformat()
+    from datetime import datetime
+    ctx.updated_at = datetime.now(tz=UTC).isoformat()
 
     store.list_active.return_value = ["INC-TEST-001"]
     store.load.return_value = ctx
@@ -440,8 +441,8 @@ async def test_recover_pending_approvals_expired_immediately_rejects():
     store = MagicMock()
     ctx = _awaiting_context()
     # Set updated_at to 20 minutes ago (well past 15 min timeout)
-    from datetime import datetime, timedelta, timezone
-    ctx.updated_at = (datetime.now(tz=timezone.utc) - timedelta(minutes=20)).isoformat()
+    from datetime import datetime, timedelta
+    ctx.updated_at = (datetime.now(tz=UTC) - timedelta(minutes=20)).isoformat()
 
     store.list_active.return_value = ["INC-TEST-001"]
     store.load.return_value = ctx

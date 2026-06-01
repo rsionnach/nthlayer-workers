@@ -1,6 +1,6 @@
 """Tests for on-call schedule resolver — pure function, no state."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -192,7 +192,7 @@ class TestResolveOncallOverrides:
                 },
             ]
         )
-        now = datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 14, 0, 0, tzinfo=UTC)
 
         result = resolve_oncall(config, now)
 
@@ -210,7 +210,7 @@ class TestResolveOncallOverrides:
                 },
             ]
         )
-        now = datetime(2026, 4, 21, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 21, 0, 0, tzinfo=UTC)
 
         result = resolve_oncall(config, now)
 
@@ -305,7 +305,7 @@ class TestResolveOncallEdgeCases:
     def test_utc_timezone(self):
         """Works with UTC timezone."""
         config = _make_config(tz="UTC")
-        now = datetime(2026, 4, 13, 10, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 13, 10, 0, tzinfo=UTC)
 
         result = resolve_oncall(config, now)
 
@@ -407,7 +407,7 @@ class TestResolveOncallCrossTimezone:
         """Same instant produces identical primary regardless of how `now` is expressed."""
         config = _make_config(tz="Europe/Dublin", handoff="monday 09:00")
         # 2026-08-03 is a Monday. 11:00 UTC = 12:00 Dublin (BST).
-        now_utc = datetime(2026, 8, 3, 11, 0, tzinfo=timezone.utc)
+        now_utc = datetime(2026, 8, 3, 11, 0, tzinfo=UTC)
         now_dublin = now_utc.astimezone(ZoneInfo("Europe/Dublin"))
 
         result_utc = resolve_oncall(config, now_utc)
@@ -423,7 +423,7 @@ class TestResolveOncallCrossTimezone:
     def test_nyc_config_with_utc_now_deterministic(self):
         """America/New_York config also consistent across `now` representations."""
         config = _make_config(tz="America/New_York", handoff="monday 09:00")
-        now_utc = datetime(2026, 8, 3, 14, 0, tzinfo=timezone.utc)  # EDT 10:00
+        now_utc = datetime(2026, 8, 3, 14, 0, tzinfo=UTC)  # EDT 10:00
         now_nyc = now_utc.astimezone(ZoneInfo("America/New_York"))
 
         result_utc = resolve_oncall(config, now_utc)
@@ -436,7 +436,7 @@ class TestResolveOncallCrossTimezone:
     def test_handoff_returned_in_config_timezone(self):
         """rotation_handoff is returned in the configured timezone, not UTC."""
         config = _make_config(tz="Europe/Dublin", handoff="monday 09:00")
-        now_utc = datetime(2026, 8, 3, 11, 0, tzinfo=timezone.utc)
+        now_utc = datetime(2026, 8, 3, 11, 0, tzinfo=UTC)
         result = resolve_oncall(config, now_utc)
         # ZoneInfo("Europe/Dublin") attaches; offset is +0100 (BST) in August.
         assert result.rotation_handoff.tzinfo is not None
@@ -453,7 +453,7 @@ class TestResolveOncallCrossTimezone:
         """
         config = _make_config(tz="Europe/Dublin", handoff="monday 09:00")
         # 2026-03-30 (post-DST-spring-forward) Monday 12:00 UTC.
-        now_utc = datetime(2026, 3, 30, 12, 0, tzinfo=timezone.utc)
+        now_utc = datetime(2026, 3, 30, 12, 0, tzinfo=UTC)
         result = resolve_oncall(config, now_utc)
         assert result.source == "rotation"
         assert result.primary.name in {"Alice", "Bob", "Charlie"}

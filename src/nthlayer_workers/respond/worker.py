@@ -13,7 +13,7 @@ completes for each incident, and by `_ingest_triggers` before the drive phase.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from nthlayer_common.api_client import CoreAPIClient
@@ -75,8 +75,8 @@ def _is_terminal_and_aged(context: IncidentContext, retention_seconds: float) ->
             # Naive datetime — treat as UTC for the subtraction. Without this
             # the next line raises TypeError ("can't subtract offset-naive
             # and offset-aware datetimes"), which would block every save.
-            updated = updated.replace(tzinfo=timezone.utc)
-        age = (datetime.now(timezone.utc) - updated).total_seconds()
+            updated = updated.replace(tzinfo=UTC)
+        age = (datetime.now(UTC) - updated).total_seconds()
     except (ValueError, AttributeError, TypeError) as exc:
         # Malformed timestamp → treat as not-aged so we don't drop accidentally.
         # Debug-level so it's invisible until needed for diagnosis.
@@ -375,7 +375,7 @@ class RespondModule:
         Logs the threshold value separately so the metadata.fallback_reason
         string stays stable if the threshold becomes operationally configurable.
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(
+        cutoff = datetime.now(UTC) - timedelta(
             seconds=self.config.fallback_threshold_seconds
         )
         cutoff_iso = cutoff.isoformat()

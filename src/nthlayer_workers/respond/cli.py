@@ -7,7 +7,7 @@ import asyncio
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -250,7 +250,7 @@ def _build_incident_context(
     """Build IncidentContext from scenario trigger definition."""
     trigger = scenario["trigger"]
     trigger_source = trigger["source"]
-    now = datetime.now(tz=timezone.utc).isoformat()
+    now = datetime.now(tz=UTC).isoformat()
 
     # Accept legacy "sitrep" value from scenario YAML fixtures as alias
     if trigger_source in ("nthlayer-correlate", "sitrep"):
@@ -695,7 +695,7 @@ def cmd_respond(args) -> None:
     }
 
     # Build incident context from correlation verdict
-    now = datetime.now(tz=timezone.utc).isoformat()
+    now = datetime.now(tz=UTC).isoformat()
     incident_id = f"INC-{trigger_service.upper()}-{now[:19].replace('-', '').replace(':', '').replace('T', '-')}"
 
     # Determine severity from correlation verdict confidence

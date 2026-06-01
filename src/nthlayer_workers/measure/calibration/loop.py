@@ -7,7 +7,7 @@ scores match ground truth. Pure arithmetic over stored data (ZFC).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from nthlayer_workers.measure.store.protocol import ScoreStore
@@ -35,7 +35,7 @@ class OverrideCalibration:
         self._store = store
 
     async def calibrate(self, window_days: int = 30) -> CalibrationReport:
-        since = datetime.now(timezone.utc) - timedelta(days=window_days)
+        since = datetime.now(UTC) - timedelta(days=window_days)
         overrides = await self._store.get_overrides(since=since, limit=10000)
 
         if not overrides:

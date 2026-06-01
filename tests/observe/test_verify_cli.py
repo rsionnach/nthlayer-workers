@@ -1,6 +1,6 @@
 """Tests for the verify subcommand — chain and incident verification via CLI."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from nthlayer_common.records.hashing import canonical_json, compute_hash
 from nthlayer_common.records.models import (
@@ -20,10 +20,10 @@ from nthlayer_common.records.sqlite_store import SQLiteDecisionRecordStore
 
 from nthlayer_workers.observe.cli import main
 
-NOW = datetime(2026, 4, 11, 12, 0, 0, tzinfo=timezone.utc)
-T1 = datetime(2026, 4, 11, 12, 1, 0, tzinfo=timezone.utc)
-T2 = datetime(2026, 4, 11, 12, 2, 0, tzinfo=timezone.utc)
-T3 = datetime(2026, 4, 11, 12, 3, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 4, 11, 12, 0, 0, tzinfo=UTC)
+T1 = datetime(2026, 4, 11, 12, 1, 0, tzinfo=UTC)
+T2 = datetime(2026, 4, 11, 12, 2, 0, tzinfo=UTC)
+T3 = datetime(2026, 4, 11, 12, 3, 0, tzinfo=UTC)
 
 
 def _hashed(record):

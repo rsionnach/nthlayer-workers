@@ -11,7 +11,7 @@ No model call. Delegation is a governance configuration change.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 
 import structlog
@@ -59,7 +59,7 @@ def create_delegation(
     If safe actions are insufficient, the delegation escalates back.
     Auto-expires after ``max_duration``.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     logger.info(
         "delegation_created",

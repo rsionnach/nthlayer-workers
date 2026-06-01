@@ -7,7 +7,7 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +56,7 @@ def _cmd_accuracy(args: argparse.Namespace) -> None:
     try:
         from_time = None
         if args.window:
-            from_time = datetime.now(timezone.utc) - _parse_window(args.window)
+            from_time = datetime.now(UTC) - _parse_window(args.window)
 
         report = store.accuracy(AccuracyFilter(
             producer_system=args.producer,

@@ -1,6 +1,6 @@
 """Tests for nthlayer_observe.assessment module."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -32,7 +32,7 @@ class TestCreate:
     def test_sets_timestamp_utc(self):
         a = create("drift_signal", "checkout-svc", {"trend": "degrading"})
         assert a.created_at.tzinfo is not None
-        assert a.created_at.tzinfo == timezone.utc
+        assert a.created_at.tzinfo == UTC
 
     def test_sets_default_producer(self):
         a = create("slo_status", "svc", {})
@@ -91,7 +91,7 @@ class TestSerialization:
         assert a.created_at.year == 2026
 
     def test_from_dict_accepts_datetime_object(self):
-        ts = datetime.now(timezone.utc)
+        ts = datetime.now(UTC)
         raw = {
             "id": "asm-test",
             "created_at": ts,

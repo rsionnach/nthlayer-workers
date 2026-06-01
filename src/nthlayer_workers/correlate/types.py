@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class EventType(str, Enum):
+class EventType(StrEnum):
     ALERT = "alert"
     METRIC_BREACH = "metric_breach"
     CHANGE = "change"
@@ -70,7 +70,7 @@ class CorrelationGroup:
     event_count: int
 
 
-class AgentState(str, Enum):
+class AgentState(StrEnum):
     WATCHING = "watching"
     ALERT = "alert"
     INCIDENT = "incident"

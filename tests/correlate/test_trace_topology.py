@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from nthlayer_workers.correlate.traces.protocol import (
     ServiceCallEdge,
@@ -15,7 +15,7 @@ from nthlayer_workers.correlate.traces.topology import detect_topology_divergenc
 def _make_profile(service: str, callees: list[tuple[str, str]] | None = None,
                   callers: list[tuple[str, str]] | None = None) -> ServiceTraceProfile:
     """Build a minimal ServiceTraceProfile with caller/callee edges."""
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     callee_edges = [
         ServiceCallEdge(source_service=src, target_service=tgt,
                         request_count=100, error_count=0,

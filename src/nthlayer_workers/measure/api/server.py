@@ -10,7 +10,7 @@ import logging
 import re
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -180,7 +180,7 @@ def create_app(
                 evaluator.evaluate(agent_output, dimensions, model=model_override),
                 timeout=sync_timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return JSONResponse(
                 status_code=408,
                 content={
@@ -491,7 +491,7 @@ def _parse_window(window_str: str) -> datetime:
     """Parse window string like '30d', '7d', '24h' to a from_time datetime."""
     match = re.match(r"^(\d+)([dhwm])$", window_str)
     if not match:
-        return datetime.now(timezone.utc) - timedelta(days=30)
+        return datetime.now(UTC) - timedelta(days=30)
 
     value = int(match.group(1))
     unit = match.group(2)
@@ -501,4 +501,4 @@ def _parse_window(window_str: str) -> datetime:
         "w": timedelta(weeks=value),
         "m": timedelta(days=value * 30),
     }[unit]
-    return datetime.now(timezone.utc) - delta
+    return datetime.now(UTC) - delta

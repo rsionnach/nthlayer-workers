@@ -1,7 +1,7 @@
 """Tests for EventStore protocol and SQLite FTS5 implementation."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from nthlayer_workers.correlate.store.sqlite import SQLiteEventStore
 from nthlayer_workers.correlate.types import EventType, SitRepEvent
@@ -183,7 +183,7 @@ class TestTopology:
 
 class TestRecentChanges:
     def test_get_recent_changes(self, sqlite_store):
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         change = SitRepEvent(
             id="evt-recent-change",
             timestamp=now,
@@ -211,7 +211,7 @@ class TestRecentChanges:
         assert changes[0].type == EventType.CHANGE
 
     def test_get_recent_changes_empty(self, sqlite_store):
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         alert = SitRepEvent(
             id="evt-no-change",
             timestamp=now,

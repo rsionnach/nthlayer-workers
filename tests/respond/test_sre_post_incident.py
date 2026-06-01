@@ -1,6 +1,6 @@
 """Tests for post-incident review — auto-generated from verdict chain."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from nthlayer_workers.respond.sre.post_incident import (
@@ -38,7 +38,7 @@ def _make_verdict(
     v.outcome.status = status
     v.outcome.override = None
     v.metadata.custom = custom or {}
-    v.timestamp = timestamp or datetime(2026, 4, 13, 14, 22, 0, tzinfo=timezone.utc)
+    v.timestamp = timestamp or datetime(2026, 4, 13, 14, 22, 0, tzinfo=UTC)
     v.id = f"vrd-{subject_type}-001"
     return v
 
@@ -50,18 +50,18 @@ class TestBuildTimeline:
         v1 = _make_verdict(
             subject_type="evaluation",
             producer_system="nthlayer-measure",
-            timestamp=datetime(2026, 4, 13, 14, 10, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 4, 13, 14, 10, tzinfo=UTC),
             summary="Reversal rate breach detected",
         )
         v2 = _make_verdict(
             subject_type="correlation",
             producer_system="nthlayer-correlate",
-            timestamp=datetime(2026, 4, 13, 14, 22, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 4, 13, 14, 22, tzinfo=UTC),
             summary="Deploy v2.3.1 correlated",
         )
         v3 = _make_verdict(
             subject_type="triage",
-            timestamp=datetime(2026, 4, 13, 14, 23, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 4, 13, 14, 23, tzinfo=UTC),
             summary="P2, blast radius: fraud-detect + payment-api",
         )
 
@@ -149,7 +149,7 @@ class TestRenderPostIncident:
             incident_id="INC-001",
             timeline=[
                 TimelineEntry(
-                    timestamp=datetime(2026, 4, 13, 14, 10, tzinfo=timezone.utc),
+                    timestamp=datetime(2026, 4, 13, 14, 10, tzinfo=UTC),
                     source="nthlayer-measure",
                     agent="evaluation",
                     summary="Breach detected",

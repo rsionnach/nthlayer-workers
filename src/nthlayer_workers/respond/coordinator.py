@@ -8,7 +8,7 @@ on escalation / human approval.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -326,7 +326,7 @@ class Coordinator:
                     await asyncio.wait_for(coro, timeout=timeout)
                 else:
                     await coro
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 step_label = (
                     step_roles[0].value
                     if len(step_roles) == 1
@@ -358,7 +358,7 @@ class Coordinator:
                     and context.remediation.requires_human_approval
                 ):
                     context.state = IncidentState.AWAITING_APPROVAL
-                    context.updated_at = datetime.now(timezone.utc).isoformat()
+                    context.updated_at = datetime.now(UTC).isoformat()
                     self._context_store.save(context)
                     return context
 

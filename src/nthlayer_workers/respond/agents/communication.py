@@ -2,7 +2,7 @@
 """CommunicationAgent — two-phase incident communication drafting."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from nthlayer_common.prompts import extract_confidence, load_prompt
@@ -75,7 +75,7 @@ class CommunicationAgent(AgentBase):
     ) -> CommunicationResult:
         data = self._parse_json(response)
 
-        timestamp = datetime.now(tz=timezone.utc).isoformat()
+        timestamp = datetime.now(tz=UTC).isoformat()
 
         updates: list[CommunicationUpdate] = []
         for raw in data.get("updates") or data.get("messages") or []:

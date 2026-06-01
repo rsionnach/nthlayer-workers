@@ -13,7 +13,7 @@ are what make correlation novel vs. simple alert aggregation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from nthlayer_workers.correlate.types import SitRepEvent
 
@@ -39,8 +39,8 @@ class SessionWindow:
 
     domain: CorrelationDomain
     events: list[SitRepEvent] = field(default_factory=list)
-    opened_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    last_event_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    opened_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_event_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     has_trigger: bool = False
 
     def _close_flags(
@@ -119,7 +119,7 @@ class SessionWindowManager:
             # Cap opened_at at now — a stale backlogged event should not
             # push opened_at into the past (which would trigger instant
             # max_duration closure on the next cycle).
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             self._windows[domain] = SessionWindow(
                 domain=domain,
                 events=[],
@@ -141,7 +141,7 @@ class SessionWindowManager:
     def close_ready(self, now: datetime | None = None) -> list[SessionWindow]:
         """Close and return all windows that meet their close conditions."""
         if now is None:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
         closed: list[SessionWindow] = []
         for domain in list(self._windows):
@@ -182,8 +182,8 @@ def _parse_event_ts(event: SitRepEvent) -> datetime:
     """Parse event timestamp to datetime. Always timezone-aware (UTC)."""
     ts = event.timestamp
     if isinstance(ts, datetime):
-        return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+        return ts if ts.tzinfo else ts.replace(tzinfo=UTC)
     dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt

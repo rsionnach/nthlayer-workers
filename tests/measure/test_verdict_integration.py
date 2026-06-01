@@ -8,7 +8,7 @@ import contextlib
 import io
 import json
 import textwrap
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -262,7 +262,7 @@ class TestVerdictEmission:
         await self._run_single(router, score)
 
         # Score still saved
-        since = datetime.now(timezone.utc) - timedelta(hours=1)
+        since = datetime.now(UTC) - timedelta(hours=1)
         results = await score_store.get_scores("agent-a", since)
         assert len(results) == 1
 
@@ -332,7 +332,7 @@ class TestOverrideResolution:
         # No verdict_id set — simulates pre-integration data
         await score_store.save_override("e1", {"correctness": 0.3}, "reviewer")
 
-        since = datetime.now(timezone.utc) - timedelta(hours=1)
+        since = datetime.now(UTC) - timedelta(hours=1)
         overrides = await score_store.get_overrides(since)
         assert len(overrides) == 1
 
@@ -343,7 +343,7 @@ class TestOverrideResolution:
         try:
             await s.save_score(_make_score())
             await s.save_override("e1", {"correctness": 0.3}, "reviewer")
-            since = datetime.now(timezone.utc) - timedelta(hours=1)
+            since = datetime.now(UTC) - timedelta(hours=1)
             overrides = await s.get_overrides(since)
             assert len(overrides) == 1
         finally:

@@ -12,7 +12,7 @@ detection is a single comparison.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -58,7 +58,7 @@ def create_suppression(
         msg = f"Baseline must be positive, got {baseline}"
         raise ValueError(msg)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     override_threshold = baseline * override_multiplier
 
     logger.info(

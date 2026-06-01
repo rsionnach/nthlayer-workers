@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 
@@ -47,7 +47,7 @@ class StdoutNotificationBackend:
             delivered=True,
             channel="stdout",
             recipient=recipient.name,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             message_id=None,
             error=None,
         )

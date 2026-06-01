@@ -309,12 +309,11 @@ class TestReasonAboutCorrelations:
 
     @pytest.mark.asyncio
     async def test_timeout_returns_degraded(self):
-        import asyncio
 
         group = _make_group()
 
         async def mock_call_model(system, user, model, max_tokens, timeout):
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         with patch("nthlayer_workers.correlate.reasoning._call_model", side_effect=mock_call_model):
             result = await reason_about_correlations(
@@ -532,8 +531,8 @@ class TestCorrelateCommandReasoning:
 # Task 6b: Trace evidence section in reasoning prompt
 # ---------------------------------------------------------------------------
 
+from datetime import UTC
 from datetime import datetime as dt
-from datetime import timezone
 
 from nthlayer_workers.correlate.reasoning import _build_trace_evidence_section
 from nthlayer_workers.correlate.traces.protocol import (
@@ -547,7 +546,7 @@ from nthlayer_workers.correlate.traces.protocol import (
 
 
 def _make_trace_evidence_for_reasoning() -> TraceEvidence:
-    now = dt.now(tz=timezone.utc)
+    now = dt.now(tz=UTC)
     return TraceEvidence(
         services=[ServiceTraceProfile(
             service="fraud-detect",
@@ -613,7 +612,7 @@ class TestBuildTraceEvidenceSection:
         assert "unknown-svc" in section
 
     def test_within_baseline_latency(self):
-        now = dt.now(tz=timezone.utc)
+        now = dt.now(tz=UTC)
         evidence = TraceEvidence(
             services=[ServiceTraceProfile(
                 service="stable-svc",

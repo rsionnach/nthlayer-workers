@@ -9,7 +9,7 @@ import signal
 import sys
 import tempfile
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -30,7 +30,7 @@ from nthlayer_workers.correlate.types import AgentState, EventType, SitRepEvent
 
 logger = structlog.get_logger()
 
-REFERENCE_TIME = datetime(2026, 1, 1, tzinfo=timezone.utc)
+REFERENCE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
 
 # Confidence decay window for temporal proximity heuristic (30 minutes)
 _PROXIMITY_WINDOW_SECONDS = 1800.0
@@ -332,7 +332,7 @@ async def _serve_loop(config: SitRepConfig) -> None:
             try:
                 await asyncio.wait_for(shutdown.wait(), timeout=interval)
                 break  # shutdown requested
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass  # normal cycle
 
             # Drain buffered events into store (single-threaded, safe)
@@ -481,7 +481,7 @@ def correlate_command(
         if trace_backend is not None:
             try:
                 baseline_td = _parse_duration(trace_baseline_window)
-                end = datetime.now(tz=timezone.utc)
+                end = datetime.now(tz=UTC)
                 start = end - timedelta(minutes=30)
                 trace_evidence = await trace_backend.get_trace_evidence(
                     services=sorted(affected),
@@ -660,7 +660,7 @@ def correlate_command(
     }
     corr_assessment = _Assessment(
         id=corr_assessment_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         kind="correlation_snapshot",
         service=trigger_service,
         producer="nthlayer-correlate",

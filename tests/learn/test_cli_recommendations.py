@@ -1,6 +1,8 @@
 """Unit tests for the recommendations CLI subcommand (jmy.6)."""
 from __future__ import annotations
 
+from datetime import UTC
+
 import pytest
 
 
@@ -33,7 +35,7 @@ class TestOutputFlag:
     """--output writes plan.yaml from --from input."""
 
     def test_from_then_output_round_trip(self, tmp_path, capsys):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
@@ -45,7 +47,7 @@ class TestOutputFlag:
         plan = SpecRecommendation(
             incident="inc-test",
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 26, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -76,7 +78,7 @@ class TestApplyToFlag:
     """--apply-to applies the plan to specs in the target directory."""
 
     def test_from_then_apply_to(self, tmp_path):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
@@ -95,7 +97,7 @@ class TestApplyToFlag:
         plan = SpecRecommendation(
             incident="inc-test",
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 26, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -129,7 +131,7 @@ class TestPrPath:
     def test_pr_path_happy(self, tmp_path, monkeypatch, capsys):
         """End-to-end --pr with all git/gh subprocess calls stubbed."""
         import subprocess
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
@@ -148,7 +150,7 @@ class TestPrPath:
         plan = SpecRecommendation(
             incident="inc-test",
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 26, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -224,7 +226,7 @@ class TestIncidentIdValidation:
     """jmy.6 R5-P3: pre-flight reject incident IDs with unsafe characters."""
 
     def _build_plan_with_incident(self, tmp_path, incident_id: str):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.recommendations import (
             Recommendation,
@@ -234,7 +236,7 @@ class TestIncidentIdValidation:
         plan = SpecRecommendation(
             incident=incident_id,
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 26, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -342,7 +344,7 @@ class TestExitCodes:
     def test_preflight_failure_exits_2(self, tmp_path, monkeypatch, capsys):
         """gh not installed → exits 2, not 1."""
         import subprocess
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
@@ -359,7 +361,7 @@ class TestExitCodes:
         plan = SpecRecommendation(
             incident="inc-test",
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 26, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -398,7 +400,7 @@ class TestExitCodes:
     def test_pr_path_propagates_partial_skip_exit_code(self, tmp_path, monkeypatch):
         """When --pr succeeds but --apply-to had a partial-skip, exit code is 1 not 0."""
         import subprocess
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
@@ -419,7 +421,7 @@ class TestExitCodes:
         plan = SpecRecommendation(
             incident="inc-partial",
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 26, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -496,7 +498,7 @@ class TestJsonOutput:
     @staticmethod
     def _build_single_rec_plan(tmp_path, *, incident: str = "inc-jmy25"):
         """Helper: write a one-recommendation plan.yaml and return its path."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.recommendations import (
             Recommendation,
@@ -506,7 +508,7 @@ class TestJsonOutput:
         plan = SpecRecommendation(
             incident=incident,
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 28, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -632,7 +634,7 @@ class TestJsonOutput:
         which the --json emitter must round-trip verbatim.
         """
         import json
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
@@ -647,7 +649,7 @@ class TestJsonOutput:
         plan = SpecRecommendation(
             incident="inc-skip-detail",
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 28, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -900,7 +902,7 @@ class TestJsonOutput:
         Set up a partial-skip scenario (one applied, one MANIFEST_NOT_FOUND)
         and assert exit code is 1 in BOTH --apply-to alone and --apply-to --json.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
@@ -918,7 +920,7 @@ class TestJsonOutput:
             plan = SpecRecommendation(
                 incident="inc-partial",
                 generated_by="nthlayer-learn",
-                generated_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+                generated_at=datetime(2026, 5, 28, tzinfo=UTC),
                 confidence=0.7,
                 recommendations=[
                     Recommendation(
@@ -998,7 +1000,7 @@ class TestIncludeExcludeFlags:
 
     @staticmethod
     def _build_single_rec_plan(tmp_path, *, incident: str = "inc-jmy24"):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.recommendations import (
             Recommendation,
@@ -1008,7 +1010,7 @@ class TestIncludeExcludeFlags:
         plan = SpecRecommendation(
             incident=incident,
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 29, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -1034,7 +1036,7 @@ class TestIncludeExcludeFlags:
         computed via compute_rec_id so callers can reference them by
         their deterministic ids.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.recommendations import (
             Recommendation,
@@ -1050,7 +1052,7 @@ class TestIncludeExcludeFlags:
         plan = SpecRecommendation(
             incident=incident,
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 29, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -1451,7 +1453,7 @@ class TestIncludeExcludeFlags:
         """jmy.24 P3 R5: plan with zero recommendations + any --include
         → every requested id is unknown → SystemExit(2).
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import SpecRecommendation
@@ -1459,7 +1461,7 @@ class TestIncludeExcludeFlags:
         specs_dir = self._seed_specs_dir(tmp_path)
         empty_plan = SpecRecommendation(
             incident="inc-empty", generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 29, tzinfo=UTC),
             confidence=0.0, recommendations=[],
         )
         plan_in = tmp_path / "empty.yaml"
@@ -1500,7 +1502,7 @@ class TestInteractiveFlag:
 
     @staticmethod
     def _build_single_rec_plan(tmp_path, *, incident: str = "inc-jmy22"):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.recommendations import (
             Recommendation,
@@ -1510,7 +1512,7 @@ class TestInteractiveFlag:
         plan = SpecRecommendation(
             incident=incident,
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 29, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -1531,7 +1533,7 @@ class TestInteractiveFlag:
     @staticmethod
     def _build_multi_rec_plan(tmp_path, *, incident: str = "inc-jmy22-multi"):
         """Two recommendations with distinct rec ids ('rec-A' / 'rec-B')."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.recommendations import (
             Recommendation,
@@ -1541,7 +1543,7 @@ class TestInteractiveFlag:
         plan = SpecRecommendation(
             incident=incident,
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 29, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -1621,7 +1623,7 @@ class TestInteractiveFlag:
         self, tmp_path, monkeypatch,
     ):
         """Stub run_walkthrough → empty plan; no recs applied to manifest."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import SpecRecommendation
@@ -1635,7 +1637,7 @@ class TestInteractiveFlag:
             return SpecRecommendation(
                 incident=plan.incident,
                 generated_by=plan.generated_by,
-                generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+                generated_at=datetime(2026, 5, 29, tzinfo=UTC),
                 confidence=0.0,
                 recommendations=[],
             )
@@ -1657,7 +1659,7 @@ class TestInteractiveFlag:
         self, tmp_path, monkeypatch,
     ):
         """Stub run_walkthrough → 1-rec plan; --output reflects that plan."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
@@ -1673,7 +1675,7 @@ class TestInteractiveFlag:
             return SpecRecommendation(
                 incident=plan.incident,
                 generated_by=plan.generated_by,
-                generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+                generated_at=datetime(2026, 5, 29, tzinfo=UTC),
                 confidence=0.7,
                 recommendations=[
                     Recommendation(
@@ -1706,7 +1708,7 @@ class TestInteractiveFlag:
         self, tmp_path, monkeypatch,
     ):
         """--include rec-A runs before walkthrough; rec-B is filtered out."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import SpecRecommendation
@@ -1721,7 +1723,7 @@ class TestInteractiveFlag:
             return SpecRecommendation(
                 incident=plan.incident,
                 generated_by=plan.generated_by,
-                generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+                generated_at=datetime(2026, 5, 29, tzinfo=UTC),
                 confidence=0.0,
                 recommendations=[],
             )
@@ -1746,7 +1748,7 @@ class TestInteractiveFlag:
         """jmy.22 P3 R5: --interactive + --output + --apply-to → both the
         snapshot file AND the manifest reflect the post-walkthrough plan.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.cli import main
         from nthlayer_workers.learn.recommendations import (
@@ -1763,7 +1765,7 @@ class TestInteractiveFlag:
         )
         plan = SpecRecommendation(
             incident="inc-jmy22-combo", generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 29, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -1820,7 +1822,7 @@ class TestRunWalkthroughAbort:
 
     def test_run_walkthrough_none_returns_empty_plan(self, monkeypatch, caplog):
         import logging
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn._interactive_app import run_walkthrough
         from nthlayer_workers.learn.recommendations import (
@@ -1830,7 +1832,7 @@ class TestRunWalkthroughAbort:
 
         plan = SpecRecommendation(
             incident="inc-abort", generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 29, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 29, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(

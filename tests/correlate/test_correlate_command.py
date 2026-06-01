@@ -225,7 +225,7 @@ def test_correlate_command_missing_verdict(tmp_path):
 # Task 5: Trace backend integration tests
 # ---------------------------------------------------------------------------
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 from nthlayer_workers.correlate.traces.protocol import (
@@ -236,7 +236,7 @@ from nthlayer_workers.correlate.traces.protocol import (
 
 def _make_trace_evidence() -> TraceEvidence:
     """Build a minimal TraceEvidence fixture."""
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     return TraceEvidence(
         services=[ServiceTraceProfile(
             service="fraud-detect",
@@ -367,14 +367,13 @@ def test_trace_backend_connect_error_degrades(specs_dir, tmp_path):
 
 def test_trace_backend_timeout_degrades(specs_dir, tmp_path):
     """Trace backend timeout does not break correlate."""
-    import asyncio as aio
 
     from nthlayer_workers.correlate.cli import correlate_command
 
     store_path, trigger_id, mock_alerts, mock_breaches = _setup_trigger_and_mocks(specs_dir, tmp_path)
 
     mock_backend = AsyncMock()
-    mock_backend.get_trace_evidence.side_effect = aio.TimeoutError()
+    mock_backend.get_trace_evidence.side_effect = TimeoutError()
 
     with patch("nthlayer_workers.correlate.prometheus.fetch_alerts", side_effect=mock_alerts), \
          patch("nthlayer_workers.correlate.prometheus.fetch_metric_breaches", side_effect=mock_breaches):

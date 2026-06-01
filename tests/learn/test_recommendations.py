@@ -1,7 +1,7 @@
 """Tests for the Learn → Spec recommendation engine (opensrm-jmy.2)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 import yaml
@@ -22,7 +22,7 @@ class TestSpecRecommendationModel:
     def test_default_requires_human_review_true(self):
         s = SpecRecommendation(
             incident="INC-1", generated_by="nthlayer-learn",
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(UTC),
             confidence=0.5, recommendations=[],
         )
         assert s.requires_human_review is True
@@ -31,7 +31,7 @@ class TestSpecRecommendationModel:
         with pytest.raises(ValueError, match="requires_human_review"):
             SpecRecommendation(
                 incident="INC-1", generated_by="nthlayer-learn",
-                generated_at=datetime.now(timezone.utc),
+                generated_at=datetime.now(UTC),
                 confidence=0.5, recommendations=[],
                 requires_human_review=False,
             )
@@ -40,13 +40,13 @@ class TestSpecRecommendationModel:
         with pytest.raises(ValueError, match="confidence"):
             SpecRecommendation(
                 incident="INC-1", generated_by="nthlayer-learn",
-                generated_at=datetime.now(timezone.utc),
+                generated_at=datetime.now(UTC),
                 confidence=1.5, recommendations=[],
             )
         with pytest.raises(ValueError, match="confidence"):
             SpecRecommendation(
                 incident="INC-1", generated_by="nthlayer-learn",
-                generated_at=datetime.now(timezone.utc),
+                generated_at=datetime.now(UTC),
                 confidence=-0.1, recommendations=[],
             )
 
@@ -54,7 +54,7 @@ class TestSpecRecommendationModel:
         s = SpecRecommendation(
             incident="INC-X",
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 8, 12, 0, tzinfo=UTC),
             confidence=0.8,
             recommendations=[
                 Recommendation(
@@ -84,7 +84,7 @@ class TestSpecRecommendationModel:
         """
         s = SpecRecommendation(
             incident="INC-Y", generated_by="nthlayer-learn",
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(UTC),
             confidence=0.5,
             recommendations=[
                 Recommendation(
@@ -112,7 +112,7 @@ class TestSpecRecommendationModel:
         )
         s = SpecRecommendation(
             incident="INC-FI", generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 8, 12, 0, tzinfo=UTC),
             confidence=0.8,
             recommendations=[
                 Recommendation(
@@ -135,7 +135,7 @@ class TestSpecRecommendationModel:
         """jmy.23: absent FinancialImpact → metadata.financial_impact key absent."""
         s = SpecRecommendation(
             incident="INC-NOFI", generated_by="nthlayer-learn",
-            generated_at=datetime.now(timezone.utc),
+            generated_at=datetime.now(UTC),
             confidence=0.5,
             recommendations=[
                 Recommendation(
@@ -161,7 +161,7 @@ class TestSpecRecommendationModel:
         )
         s = SpecRecommendation(
             incident="INC-ZERO", generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 8, 12, 0, tzinfo=UTC),
             confidence=0.5,
             recommendations=[
                 Recommendation(
@@ -188,7 +188,7 @@ class TestSpecRecommendationModel:
         )
         s = SpecRecommendation(
             incident="INC-RT-FI", generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 8, 12, 0, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -732,14 +732,14 @@ class TestPlanArtefactRename:
     """jmy.6: apiVersion + kind rename for the plan-file artefact."""
 
     def test_to_yaml_emits_new_api_version(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.recommendations import Recommendation, SpecRecommendation
 
         sr = SpecRecommendation(
             incident="inc-test",
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 26, tzinfo=UTC),
             confidence=0.7,
             recommendations=[
                 Recommendation(
@@ -794,7 +794,7 @@ class TestParsePlanFile:
     """jmy.6: --from <plan.yaml> validation."""
 
     def test_parse_plan_file_happy_path(self, tmp_path):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from nthlayer_workers.learn.recommendations import (
             SpecRecommendation,
@@ -804,7 +804,7 @@ class TestParsePlanFile:
         original = SpecRecommendation(
             incident="inc-test",
             generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 26, tzinfo=UTC),
             confidence=0.7,
             recommendations=[],
         )
@@ -868,7 +868,6 @@ class TestParsePlanFile:
 
     def test_parse_plan_file_coerces_naive_datetime_to_utc(self, tmp_path):
         """jmy.6 P1 R5: naive generated_at coerced to UTC to prevent comparison bugs."""
-        from datetime import timezone
 
         from nthlayer_workers.learn.recommendations import parse_plan_file
 
@@ -881,7 +880,7 @@ class TestParsePlanFile:
         )
 
         loaded = parse_plan_file(plan_path)
-        assert loaded.generated_at.tzinfo is timezone.utc
+        assert loaded.generated_at.tzinfo is UTC
 
     # ---- jmy.23: financial_impact round-trip through parse_plan_file ----
 
@@ -895,7 +894,7 @@ class TestParsePlanFile:
         )
         original = SpecRecommendation(
             incident="inc-rt", generated_by="nthlayer-learn",
-            generated_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 5, 28, tzinfo=UTC),
             confidence=0.7, recommendations=[], financial_impact=fi,
         )
         plan_path = tmp_path / "plan.yaml"

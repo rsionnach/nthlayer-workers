@@ -1,6 +1,6 @@
 """Tests for SQLiteScoreStore — round-trip save/get for scores, overrides, autonomy."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -34,7 +34,7 @@ async def test_save_and_get_score(store):
     score = _make_score()
     await store.save_score(score)
 
-    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    since = datetime.now(UTC) - timedelta(hours=1)
     results = await store.get_scores("agent-a", since)
 
     assert len(results) == 1
@@ -52,7 +52,7 @@ async def test_get_scores_filters_by_agent(store):
     await store.save_score(_make_score(eval_id="e1", agent="alice"))
     await store.save_score(_make_score(eval_id="e2", agent="bob"))
 
-    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    since = datetime.now(UTC) - timedelta(hours=1)
     results = await store.get_scores("alice", since)
     assert len(results) == 1
     assert results[0].agent_name == "alice"
@@ -65,7 +65,7 @@ async def test_save_and_get_override(store):
 
     await store.save_override("e1", {"correctness": 0.5}, "human-reviewer")
 
-    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    since = datetime.now(UTC) - timedelta(hours=1)
     overrides = await store.get_overrides(since)
 
     assert len(overrides) == 1
@@ -106,7 +106,7 @@ async def test_get_overrides_filtered_by_agent(store):
     await store.save_override("e1", {"correctness": 0.5}, "reviewer")
     await store.save_override("e2", {"correctness": 0.3}, "reviewer")
 
-    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    since = datetime.now(UTC) - timedelta(hours=1)
 
     alice_overrides = await store.get_overrides(since, agent_name="alice")
     assert len(alice_overrides) == 1

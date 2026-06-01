@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from nthlayer_workers.measure.adapters._util import BoundedSeenSet
 from nthlayer_workers.measure.types import AgentOutput

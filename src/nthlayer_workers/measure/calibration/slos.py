@@ -6,7 +6,7 @@ All metrics are arithmetic over stored scores and overrides (ZFC: transport).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from nthlayer_workers.measure.manifest import JudgmentSLO
 from nthlayer_workers.measure.store.protocol import ScoreStore
@@ -43,7 +43,7 @@ class JudgmentSLOChecker:
         agent_name: str,
         window_days: int = 30,
     ) -> JudgmentSLOReport:
-        since = datetime.now(timezone.utc) - timedelta(days=window_days)
+        since = datetime.now(UTC) - timedelta(days=window_days)
 
         scores = await self._store.get_scores(agent_name, since=since, limit=100000)
         overrides = await self._store.get_overrides(

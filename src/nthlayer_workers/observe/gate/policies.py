@@ -7,9 +7,10 @@ Supports a simple DSL for time, SLO, and service-based conditions.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from nthlayer_workers.observe.gate.conditions import (
     is_business_hours,

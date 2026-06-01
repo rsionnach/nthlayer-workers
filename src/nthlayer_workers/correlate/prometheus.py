@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import structlog
@@ -32,7 +32,7 @@ async def fetch_alerts(
                 continue
             events.append(SitRepEvent(
                 id=f"prom-alert-{uuid.uuid4().hex[:8]}",
-                timestamp=alert.get("activeAt", datetime.now(timezone.utc).isoformat()),
+                timestamp=alert.get("activeAt", datetime.now(UTC).isoformat()),
                 source="prometheus",
                 type=EventType.ALERT,
                 service=service,
@@ -57,7 +57,7 @@ async def fetch_metric_breaches(
 ) -> list[SitRepEvent]:
     """Query Prometheus for SLO metric breaches on given services."""
     events: list[SitRepEvent] = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     for service in services:
         # Check error budget

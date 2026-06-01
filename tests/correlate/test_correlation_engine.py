@@ -1,7 +1,7 @@
 """Tests for the full correlation engine."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import yaml
 
@@ -58,7 +58,7 @@ def _estimate_severity(evt_type: str, payload: dict) -> float:
 
 def _scenario_to_events(scenario: dict) -> tuple[list[SitRepEvent], dict | None]:
     """Convert scenario to events + topology."""
-    reference = datetime.now(timezone.utc) - timedelta(minutes=20)
+    reference = datetime.now(UTC) - timedelta(minutes=20)
     events = []
     for i, evt_data in enumerate(scenario["events"]):
         ts = _parse_relative_time(evt_data["at"], reference)
@@ -227,7 +227,7 @@ class TestCorrelationEngineBasic:
 
     def test_group_id_format(self, tmp_path):
         """Each group should have a cg- prefixed ID."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         alert_ts = now.isoformat()
         event = SitRepEvent(
             id="evt-basic-001",
@@ -252,7 +252,7 @@ class TestCorrelationEngineBasic:
 
     def test_priority_scoring_p0(self, tmp_path):
         """High severity + critical tier = P0."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = SitRepEvent(
             id="evt-p0-001",
             timestamp=now.isoformat(),
@@ -282,7 +282,7 @@ class TestCorrelationEngineBasic:
 
     def test_summary_template_format(self, tmp_path):
         """Summary should be template-generated, not model output."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = SitRepEvent(
             id="evt-summary-001",
             timestamp=now.isoformat(),

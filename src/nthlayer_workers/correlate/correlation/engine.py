@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from nthlayer_workers.correlate.correlation.changes import find_change_candidates
 from nthlayer_workers.correlate.correlation.dedup import deduplicate
@@ -36,7 +36,7 @@ class CorrelationEngine:
         7. Assemble CorrelationGroups with priority scoring
         """
         # Step 1: Query store for events in window
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         start = (now - timedelta(minutes=window_minutes)).isoformat()
         end = now.isoformat()
 
