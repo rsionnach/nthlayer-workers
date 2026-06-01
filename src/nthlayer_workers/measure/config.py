@@ -113,8 +113,11 @@ def load_config(path: Path) -> MeasureConfig:
     evaluator = _section("evaluator", EvaluatorConfig)
     store = _section("store", StoreConfig)
     detection = _section("detection", DetectionConfig)
-    # Any `governance:` section in the YAML is silently ignored — the
-    # legacy error-budget governance config was retired under opensrm-t5yr.
+    # Note: load_config does not validate unknown top-level keys (any
+    # unrecognised key is ignored). A `governance:` section in a
+    # legacy YAML is therefore tolerated — the error-budget config
+    # was retired under opensrm-t5yr but pre-existing YAMLs still
+    # load cleanly.
     dimensions = raw.get("dimensions", ["correctness", "completeness", "safety"])
     if not isinstance(dimensions, list):
         raise ValueError(f"'dimensions' must be a list, got {type(dimensions).__name__}")
