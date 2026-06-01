@@ -40,6 +40,7 @@ src/nthlayer_workers/
     manifest.py
     _parsing.py
     adapters/
+      prometheus.py # _judgment_slo_query(service, slo_name, window) → str; backed by module-level _JUDGMENT_SLO_QUERIES lookup dict of lambdas keyed by SLO name (reversal_rate/high_confidence_failure/calibration/feedback_latency); unknown key → stdlib-logger warning + return "" (uses logging.getLogger, NOT structlog — kwargs would TypeError; load-bearing fact per opensrm-y7dd R5 Pass 3); calibration + feedback_latency are window-agnostic (gauge metrics) so their lambdas use `_window` underscore param
     api/
     calibration/
     detection/
