@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from nthlayer_workers.measure.config import MeasureConfig, load_config
-from nthlayer_workers.measure.types import AutonomyLevel
 
 if TYPE_CHECKING:
     from nthlayer_workers.measure.pipeline.evaluator import ModelEvaluator
@@ -99,51 +98,16 @@ def _build_adapter(config: MeasureConfig):
         )
 
 
-def _build_pipeline(config: MeasureConfig):
-    from nthlayer_workers.measure.detection.detector import SLOThresholds, ThresholdDetector
-    from nthlayer_workers.measure.governance.engine import ErrorBudgetGovernance
-    from nthlayer_workers.measure.pipeline.router import PipelineRouter
-    from nthlayer_workers.measure.store.sqlite import SQLiteScoreStore
-
-    # Build verdict store if configured
-    verdict_store = None
-    if config.verdict is not None:
-        from nthlayer_common.verdicts import SQLiteVerdictStore
-        verdict_store = SQLiteVerdictStore(config.verdict.store_path)
-
-    # Share the same verdict store between score store (for override resolution)
-    # and router (for verdict creation)
-    store = SQLiteScoreStore(config.store.path, verdict_store=verdict_store)
-    tracker = _build_tracker(store)
-    evaluator = _build_evaluator(config)
-    governance = ErrorBudgetGovernance(
-        store=store,
-        tracker=tracker,
-        window_days=config.governance.error_budget_window_days,
-        threshold=config.governance.error_budget_threshold,
-        model=config.evaluator.model,
-    )
-    thresholds = SLOThresholds(
-        max_reversal_rate=config.detection.max_reversal_rate,
-        min_dimension_scores=config.detection.min_dimension_scores,
-        min_confidence=config.detection.min_confidence,
-    )
-    detector = ThresholdDetector(thresholds)
-    adapter = _build_adapter(config)
-
-    return PipelineRouter(
-        adapter=adapter,
-        evaluator=evaluator,
-        store=store,
-        tracker=tracker,
-        dimensions=config.dimensions,
-        governance=governance,
-        detector=detector,
-        verdict_store=verdict_store,
-    )
-
-
 # --- Subcommand handlers ---
+#
+# Note: the legacy `_build_pipeline` helper, `cmd_serve`, `cmd_api_serve`,
+# `cmd_governance_show`, and `cmd_governance_restore` were retired under
+# opensrm-t5yr. `nthlayer-measure serve` is superseded by
+# `nthlayer-workers serve` (P3-C.1 MeasureModule); the FastAPI HTTP server
+# is superseded by core's API; the legacy LLM-driven autonomy ladder is
+# superseded by the deterministic severity-based governance in
+# measure/worker.py (P3-C.2). Live subcommands — evaluate, evaluate-once,
+# status, calibrate, overrides, tiering — remain.
 
 
 def cmd_evaluate_once(args: argparse.Namespace) -> None:
@@ -300,59 +264,6 @@ def _trigger_chain(args, breach_results):
             print(f"Correlate stderr: {result.stderr}", file=sys.stderr)
     except FileNotFoundError:
         print("Error: nthlayer-correlate not found on PATH. Install it to enable the trigger chain.", file=sys.stderr)
-
-
-def cmd_serve(args: argparse.Namespace) -> None:
-    """Start the evaluation pipeline (default behavior)."""
-    config = _load_config(args)
-    router = _build_pipeline(config)
-    asyncio.run(router.run())
-
-
-def cmd_api_serve(args: argparse.Namespace) -> None:
-    """Start the HTTP API server."""
-    import uvicorn
-
-    from nthlayer_workers.measure.api.server import create_app
-    from nthlayer_workers.measure.governance.engine import ErrorBudgetGovernance
-
-    config = _load_config(args)
-    store = _build_store(config)
-    evaluator = _build_evaluator(config)
-    tracker = _build_tracker(store)
-
-    # Verdict store (optional)
-    verdict_store = None
-    if config.verdict is not None:
-        from nthlayer_common.verdicts import SQLiteVerdictStore
-        verdict_store = SQLiteVerdictStore(config.verdict.store_path)
-        store._verdict_store = verdict_store
-
-    # Governance (optional)
-    governance = None
-    if config.evaluator.model:
-        governance = ErrorBudgetGovernance(
-            store=store,
-            tracker=tracker,
-            model=config.evaluator.model,
-            window_days=config.governance.error_budget_window_days,
-            threshold=config.governance.error_budget_threshold,
-        )
-
-    app = create_app(
-        evaluator=evaluator,
-        store=store,
-        tracker=tracker,
-        dimensions=config.dimensions,
-        governance=governance,
-        verdict_store=verdict_store,
-        sync_timeout=args.sync_timeout,
-        max_workers=args.workers,
-    )
-
-    print(f"Starting nthlayer-measure API server on {args.host}:{args.port}")
-    print(f"OpenAPI docs: http://{args.host}:{args.port}/docs")
-    uvicorn.run(app, host=args.host, port=args.port)
 
 
 def cmd_evaluate(args: argparse.Namespace) -> None:
@@ -540,51 +451,6 @@ def cmd_overrides_list(args: argparse.Namespace) -> None:
     print(json.dumps(overrides, indent=2, default=str))
 
 
-def cmd_governance_show(args: argparse.Namespace) -> None:
-    """Show agent autonomy + governance log."""
-    config = _load_config(args)
-    store = _build_store(config)
-
-    async def _run():
-        autonomy = await store.get_autonomy(args.agent_name)
-        return autonomy
-
-    autonomy = asyncio.run(_run())
-    result = {
-        "agent_name": args.agent_name,
-        "autonomy": autonomy or "full",
-    }
-    print(json.dumps(result, indent=2))
-
-
-def cmd_governance_restore(args: argparse.Namespace) -> None:
-    """Restore autonomy (requires --approver)."""
-    config = _load_config(args)
-    store = _build_store(config)
-    tracker = _build_tracker(store)
-
-    from nthlayer_workers.measure.governance.engine import ErrorBudgetGovernance
-
-    governance = ErrorBudgetGovernance(
-        store=store,
-        tracker=tracker,
-        window_days=config.governance.error_budget_window_days,
-        threshold=config.governance.error_budget_threshold,
-    )
-
-    level = AutonomyLevel(args.level)
-
-    async def _run():
-        await governance.restore_autonomy(args.agent_name, level, args.approver)
-
-    asyncio.run(_run())
-    print(json.dumps({
-        "agent_name": args.agent_name,
-        "restored_to": args.level,
-        "approver": args.approver,
-    }, indent=2))
-
-
 # --- Main ---
 
 
@@ -601,9 +467,6 @@ def main() -> None:
         help="Path to measure.yaml config file",
     )
     subparsers = parser.add_subparsers(dest="command")
-
-    # serve
-    subparsers.add_parser("serve", help="Start the evaluation pipeline")
 
     # evaluate
     eval_parser = subparsers.add_parser("evaluate", help="One-shot evaluation")
@@ -640,19 +503,6 @@ def main() -> None:
         help="Corrected dimension as name=score (repeatable)",
     )
 
-    # governance
-    gov_parser = subparsers.add_parser("governance", help="Governance management")
-    gov_sub = gov_parser.add_subparsers(dest="gov_command")
-    show_parser = gov_sub.add_parser("show", help="Show agent governance")
-    show_parser.add_argument("agent_name")
-    restore_parser = gov_sub.add_parser("restore", help="Restore autonomy")
-    restore_parser.add_argument("agent_name")
-    restore_parser.add_argument(
-        "level",
-        choices=[level.value for level in AutonomyLevel],
-    )
-    restore_parser.add_argument("--approver", required=True)
-
     # tiering
     tier_parser = subparsers.add_parser("tiering", help="Evaluation tier management")
     tier_sub = tier_parser.add_subparsers(dest="tiering_command")
@@ -662,13 +512,6 @@ def main() -> None:
     tier_restore.add_argument("agent_name")
     tier_restore.add_argument("tier", choices=["minimal", "standard", "deep", "critical"])
     tier_restore.add_argument("--approver", required=True)
-
-    # api-serve (HTTP API server)
-    api_parser = subparsers.add_parser("api-serve", help="Start the HTTP API server")
-    api_parser.add_argument("--host", default="0.0.0.0", help="Bind address")
-    api_parser.add_argument("--port", type=int, default=8080, help="Port")
-    api_parser.add_argument("--workers", type=int, default=5, help="Evaluation queue workers")
-    api_parser.add_argument("--sync-timeout", type=float, default=30.0, help="Sync evaluation timeout (seconds)")
 
     # evaluate-once (Prometheus polling)
     eo_parser = subparsers.add_parser("evaluate-once", help="One-shot Prometheus SLO evaluation")
@@ -687,30 +530,22 @@ def main() -> None:
     args = parser.parse_args()
 
     handlers = {
-        "serve": cmd_serve,
-        "api-serve": cmd_api_serve,
         "evaluate": cmd_evaluate,
         "evaluate-once": cmd_evaluate_once,
         "status": cmd_status,
         "calibrate": cmd_calibrate,
-        "governance": _dispatch_governance,
         "overrides": _dispatch_overrides,
         "tiering": _dispatch_tiering,
-        None: cmd_serve,  # default
     }
 
-    handler = handlers.get(args.command, cmd_serve)
+    if args.command is None:
+        parser.print_help()
+        sys.exit(0)
+    handler = handlers.get(args.command)
+    if handler is None:
+        parser.print_help()
+        sys.exit(2)
     handler(args)
-
-
-def _dispatch_governance(args: argparse.Namespace) -> None:
-    if args.gov_command == "show":
-        cmd_governance_show(args)
-    elif args.gov_command == "restore":
-        cmd_governance_restore(args)
-    else:
-        print("Usage: nthlayer-measure governance {show,restore}", file=sys.stderr)
-        sys.exit(1)
 
 
 def _dispatch_overrides(args: argparse.Namespace) -> None:

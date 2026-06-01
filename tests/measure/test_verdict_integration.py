@@ -17,7 +17,7 @@ from nthlayer_common.verdicts import AccuracyFilter, SQLiteVerdictStore, Verdict
 from nthlayer_common.verdicts import create as verdict_create
 
 from nthlayer_workers.measure.calibration.verdict_calibration import VerdictCalibration
-from nthlayer_workers.measure.cli import _build_pipeline, cmd_calibrate
+from nthlayer_workers.measure.cli import cmd_calibrate
 from nthlayer_workers.measure.config import MeasureConfig, VerdictConfig, load_config
 from nthlayer_workers.measure.pipeline.router import DEFAULT_APPROVE_THRESHOLD, PipelineRouter
 from nthlayer_workers.measure.store.sqlite import SQLiteScoreStore
@@ -718,27 +718,8 @@ class TestOverrideCreateCLI:
         assert "dimension" in buf.getvalue().lower()
 
 
-class TestCLIVerdictWiring:
-    """Tests that CLI wires verdict store when config has verdict section."""
-
-    def test_build_pipeline_includes_verdict_store(self, tmp_path):
-        from nthlayer_workers.measure.config import MeasureConfig, VerdictConfig
-
-        config = MeasureConfig(
-            verdict=VerdictConfig(
-                store_path=str(tmp_path / "verdicts.db"),
-            ),
-        )
-        config.store.path = str(tmp_path / "arbiter.db")
-
-        router = _build_pipeline(config)
-        assert router._verdict_store is not None
-
-    def test_build_pipeline_no_verdict_config(self, tmp_path):
-        from nthlayer_workers.measure.config import MeasureConfig
-
-        config = MeasureConfig()
-        config.store.path = str(tmp_path / "arbiter.db")
-
-        router = _build_pipeline(config)
-        assert router._verdict_store is None
+# TestCLIVerdictWiring deleted under opensrm-t5yr alongside
+# `_build_pipeline` and `cmd_serve` (the legacy `nthlayer-measure serve`
+# pipeline superseded by `nthlayer-workers serve` MeasureModule, P3-C.1).
+# Verdict-store wiring for the live MeasureModule is covered by
+# tests/measure/test_measure_worker.py.

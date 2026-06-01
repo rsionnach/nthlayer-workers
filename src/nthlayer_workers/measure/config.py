@@ -39,14 +39,6 @@ class StoreConfig:
 
 
 @dataclass
-class GovernanceConfig:
-    """Configuration for the governance engine."""
-
-    error_budget_window_days: int = 7
-    error_budget_threshold: float = 0.5
-
-
-@dataclass
 class DetectionConfig:
     """Configuration for degradation detection thresholds."""
 
@@ -96,7 +88,6 @@ class MeasureConfig:
 
     evaluator: EvaluatorConfig = field(default_factory=EvaluatorConfig)
     store: StoreConfig = field(default_factory=StoreConfig)
-    governance: GovernanceConfig = field(default_factory=GovernanceConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     dimensions: list[str] = field(default_factory=lambda: ["correctness", "completeness", "safety"])
     agents: list[AgentConfig] = field(default_factory=list)
@@ -121,8 +112,9 @@ def load_config(path: Path) -> MeasureConfig:
 
     evaluator = _section("evaluator", EvaluatorConfig)
     store = _section("store", StoreConfig)
-    governance = _section("governance", GovernanceConfig)
     detection = _section("detection", DetectionConfig)
+    # Any `governance:` section in the YAML is silently ignored — the
+    # legacy error-budget governance config was retired under opensrm-t5yr.
     dimensions = raw.get("dimensions", ["correctness", "completeness", "safety"])
     if not isinstance(dimensions, list):
         raise ValueError(f"'dimensions' must be a list, got {type(dimensions).__name__}")
@@ -181,7 +173,6 @@ def load_config(path: Path) -> MeasureConfig:
     return MeasureConfig(
         evaluator=evaluator,
         store=store,
-        governance=governance,
         detection=detection,
         dimensions=dimensions,
         agents=agents,

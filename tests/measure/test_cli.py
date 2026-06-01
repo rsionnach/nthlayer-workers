@@ -8,7 +8,6 @@ import pytest
 from nthlayer_workers.measure.cli import (
     cmd_calibrate,
     cmd_evaluate,
-    cmd_governance_show,
     cmd_overrides_list,
     cmd_status,
     main,
@@ -52,22 +51,12 @@ def test_main_shows_help(capsys):
             main()
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
-    assert "serve" in captured.out
+    # Live subcommands after opensrm-t5yr (serve/api-serve/governance removed).
     assert "evaluate" in captured.out
     assert "status" in captured.out
     assert "calibrate" in captured.out
     assert "overrides" in captured.out
-    assert "governance" in captured.out
-
-
-def test_serve_subcommand_listed(capsys):
-    with pytest.raises(SystemExit):
-        import sys
-
-        with patch.object(sys, "argv", ["arbiter", "serve", "--help"]):
-            main()
-    captured = capsys.readouterr()
-    assert "evaluation pipeline" in captured.out.lower() or "serve" in captured.out.lower()
+    assert "tiering" in captured.out
 
 
 def test_evaluate_reads_file(tmp_path, config_file, capsys):
@@ -179,18 +168,5 @@ def test_overrides_list(config_file, capsys):
     result = json.loads(captured.out)
     assert len(result) == 1
     assert result[0]["eval_id"] == "e1"
-
-
-def test_governance_show(config_file, capsys):
-    mock_store = AsyncMock()
-    mock_store.get_autonomy = AsyncMock(return_value="supervised")
-
-    with patch("nthlayer_workers.measure.cli._build_store", return_value=mock_store):
-        args = _make_args(config=config_file, agent_name="test-agent")
-        cmd_governance_show(args)
-
-    captured = capsys.readouterr()
-    result = json.loads(captured.out)
-    assert result["autonomy"] == "supervised"
 
 
