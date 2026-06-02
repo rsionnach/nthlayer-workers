@@ -77,6 +77,30 @@ def test_non_mapping_root_raises(tmp_path):
         load_config(p)
 
 
+@pytest.mark.parametrize("body,expected_type", [
+    ("hello\n", "str"),
+    ("42\n", "int"),
+    ("true\n", "bool"),
+])
+def test_scalar_root_raises(tmp_path, body, expected_type):
+    p = tmp_path / "measure.yaml"
+    p.write_text(body)
+    with pytest.raises(ValueError, match=f"must be a mapping, got {expected_type}"):
+        load_config(p)
+
+
+def test_mixed_type_unknown_keys_do_not_crash_sort(tmp_path):
+    p = tmp_path / "measure.yaml"
+    # Integer keys are valid YAML; mixed with a valid string key, sorted()
+    # would TypeError on str-vs-int comparison without key=str.
+    p.write_text("evaluator:\n  model: test\n1: foo\n2: bar\n")
+    with pytest.raises(ValueError) as excinfo:
+        load_config(p)
+    msg = str(excinfo.value)
+    assert "Unknown config keys" in msg
+    assert "1" in msg and "2" in msg
+
+
 def test_empty_yaml_returns_defaults(tmp_path):
     p = tmp_path / "measure.yaml"
     p.write_text("")

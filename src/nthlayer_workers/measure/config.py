@@ -117,7 +117,7 @@ def load_config(path: Path) -> MeasureConfig:
         raise ValueError(f"Config root must be a mapping, got {type(raw).__name__}")
     if unknown := raw.keys() - VALID_TOP_KEYS:
         raise ValueError(
-            f"Unknown config keys: {sorted(unknown)}. "
+            f"Unknown config keys: {sorted(unknown, key=str)}. "
             f"Valid: {sorted(VALID_TOP_KEYS)}"
         )
 
