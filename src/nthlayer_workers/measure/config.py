@@ -96,11 +96,30 @@ class MeasureConfig:
     tiering: TieringConfig | None = None
 
 
+VALID_TOP_KEYS = frozenset({
+    "evaluator",
+    "store",
+    "detection",
+    "dimensions",
+    "agents",
+    "verdict",
+    "trigger",
+    "tiering",
+})
+
+
 def load_config(path: Path) -> MeasureConfig:
     """Load MeasureConfig from a YAML file."""
     raw = yaml.safe_load(path.read_text())
     if raw is None:
         return MeasureConfig()
+    if not isinstance(raw, dict):
+        raise ValueError(f"Config root must be a mapping, got {type(raw).__name__}")
+    if unknown := raw.keys() - VALID_TOP_KEYS:
+        raise ValueError(
+            f"Unknown config keys: {sorted(unknown)}. "
+            f"Valid: {sorted(VALID_TOP_KEYS)}"
+        )
 
     def _section(key: str, cls: type):
         section = raw.get(key)
@@ -113,11 +132,6 @@ def load_config(path: Path) -> MeasureConfig:
     evaluator = _section("evaluator", EvaluatorConfig)
     store = _section("store", StoreConfig)
     detection = _section("detection", DetectionConfig)
-    # Note: load_config does not validate unknown top-level keys (any
-    # unrecognised key is ignored). A `governance:` section in a
-    # legacy YAML is therefore tolerated — the error-budget config
-    # was retired under opensrm-t5yr but pre-existing YAMLs still
-    # load cleanly.
     dimensions = raw.get("dimensions", ["correctness", "completeness", "safety"])
     if not isinstance(dimensions, list):
         raise ValueError(f"'dimensions' must be a list, got {type(dimensions).__name__}")
