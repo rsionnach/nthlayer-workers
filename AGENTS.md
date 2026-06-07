@@ -54,6 +54,8 @@ nthlayer-respond --help
 nthlayer-learn --help
 ```
 
+Ecosystem testing conventions: [../nthlayer/docs/testing.md](../nthlayer/docs/testing.md).
+
 ## CI
 
 - `.github/workflows/test.yml` triggers on push/PR to `main`.
