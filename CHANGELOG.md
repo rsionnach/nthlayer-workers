@@ -6,6 +6,57 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [1.7.0](https://github.com/rsionnach/nthlayer-workers/compare/v1.6.0...v1.7.0) (2026-06-03)
+
+
+### Features
+
+* **_apply:** apply_recommendations orchestration · opensrm-jmy.6 ([8ece5a3](https://github.com/rsionnach/nthlayer-workers/commit/8ece5a39997a03659d4cceb6d7279b363c5ed05a))
+* **_apply:** manifest resolution helper · opensrm-jmy.6 ([9623030](https://github.com/rsionnach/nthlayer-workers/commit/9623030473f4030f6752043c2903678de4d47a9e))
+* **_preview:** scalar preview generation · opensrm-jmy.6 ([801a9c5](https://github.com/rsionnach/nthlayer-workers/commit/801a9c5b004694056fdaacbc02eceae626cc9350))
+* **_preview:** structural preview + drift marker tests · opensrm-jmy.6 ([4fae732](https://github.com/rsionnach/nthlayer-workers/commit/4fae732d80e205057841a0cee0f5aa8a64eccd37))
+* **_yaml:** add apply_at_path with comment preservation · opensrm-jmy.6 ([80ee8b6](https://github.com/rsionnach/nthlayer-workers/commit/80ee8b6e9a9945d95557e616398908b686881c5f))
+* **_yaml:** add normalize_scalar for type-tolerant comparison · opensrm-jmy.6 ([3eb0db5](https://github.com/rsionnach/nthlayer-workers/commit/3eb0db5add4ad6a377e95ecfaace486bfcedf39c))
+* **_yaml:** add ruamel.yaml round-trip + resolve_path · opensrm-jmy.6 ([fb8cd6b](https://github.com/rsionnach/nthlayer-workers/commit/fb8cd6b9e9afbd22c2748e54c4cc3ff1795dae4e))
+* **_yaml:** classify_outcome state machine · opensrm-jmy.6 ([8a8206c](https://github.com/rsionnach/nthlayer-workers/commit/8a8206c3789a533a60bee0f1443cf9cf81d43d16))
+* **cli:** wire --pr path with branch + commit + push + gh · opensrm-jmy.6 ([1b43c0c](https://github.com/rsionnach/nthlayer-workers/commit/1b43c0c3387b5ea786897cf1a86ef5993354f9a1))
+* **learn:** --include / --exclude flags on recommendations CLI · opensrm-jmy.24 ([baa40dc](https://github.com/rsionnach/nthlayer-workers/commit/baa40dc43142f2e86ac92613c45892f5cb4ab351))
+* **learn:** --interactive TUI walkthrough · opensrm-jmy.22 ([024bfe2](https://github.com/rsionnach/nthlayer-workers/commit/024bfe24e6f38f1064ecf593cfae355b9939c20c))
+* **learn:** --json output mode for recommendations CLI · opensrm-jmy.25 ([7332662](https://github.com/rsionnach/nthlayer-workers/commit/7332662ea9bb0ae580be8ed414aa255bf445f4aa))
+* **learn:** add _gh.py pre-flight checks for jmy.6 (Task E1) ([ede132f](https://github.com/rsionnach/nthlayer-workers/commit/ede132f8326303bf1a1ea8e2f2e06a4d848fe0aa))
+* **learn:** add create_pr_via_gh to _gh.py (jmy.6 E2) ([2b49def](https://github.com/rsionnach/nthlayer-workers/commit/2b49defbdc38a1acdde1357946aec7cfb65920bf))
+* **learn:** add format_summary to _apply.py (jmy.6 D4) ([da915b8](https://github.com/rsionnach/nthlayer-workers/commit/da915b8a2724731b8f053ec3f3b021060d288343))
+* **learn:** add recommendations subcommand + flag validation (jmy.6 F1) ([a80fc02](https://github.com/rsionnach/nthlayer-workers/commit/a80fc02f41bdba504522b6a7e37c721c3351821d))
+* **learn:** add_dependency recommendation type · opensrm-jmy.21 ([4e36dd4](https://github.com/rsionnach/nthlayer-workers/commit/4e36dd4ca277178c707fa950dd12a7e3ad2c854d))
+* **learn:** financial_impact on SpecRecommendation metadata · opensrm-jmy.23 ([c60ac17](https://github.com/rsionnach/nthlayer-workers/commit/c60ac17f41d537ed72ed2ed7f1ea51fd3692506e))
+* **learn:** populate trigger_service on retrospective verdicts ([423ab36](https://github.com/rsionnach/nthlayer-workers/commit/423ab36ee40f4549e9a73ec823186def526ecfb3))
+* **learn:** populate trigger_service on worker-path retrospectives ([5d764d6](https://github.com/rsionnach/nthlayer-workers/commit/5d764d6486150ed5ea129af57e325c1b1ad1cc3c))
+* **learn:** resolve_trigger_service precedence helper ([4fc8ff3](https://github.com/rsionnach/nthlayer-workers/commit/4fc8ff318e3c89e7baca5de7cba81771a526c5e0))
+* **learn:** wire _cmd_recommendations dispatch — F2 (jmy.6) ([f157362](https://github.com/rsionnach/nthlayer-workers/commit/f157362df47638e5ebac5d72571a95780fad390b))
+* **recommendations:** add deterministic id field · opensrm-jmy.6 ([e0435cf](https://github.com/rsionnach/nthlayer-workers/commit/e0435cf5f984bb10f850f7f3f6b11e418db05982))
+* **recommendations:** add OutcomeKind enum · opensrm-jmy.6 ([f725752](https://github.com/rsionnach/nthlayer-workers/commit/f725752a0e815553940dc83692b1d24d1b04b2ef))
+* **recommendations:** add parse_plan_file for --from input · opensrm-jmy.6 ([ce03c53](https://github.com/rsionnach/nthlayer-workers/commit/ce03c53981f8f88817750af20d5b033194322a9a))
+* **recommendations:** rename plan artefact to RecommendationPlan · opensrm-jmy.6 ([e8dd8f9](https://github.com/rsionnach/nthlayer-workers/commit/e8dd8f961d159ecd42bf96bc021e3d01bd740984))
+
+
+### Bug Fixes
+
+* **ci:** add tag-push + workflow_dispatch triggers to release.yml ([d65e97a](https://github.com/rsionnach/nthlayer-workers/commit/d65e97abd16028b3e593d1a4f652ed3bf220806b))
+* **ci:** skip __main__ modules in smoke walker; move to release-smoke ([fc499e0](https://github.com/rsionnach/nthlayer-workers/commit/fc499e0172fd6110eb2a54794144ca9c96460a4c))
+* guard worker __main__ entry points with if __name__ check ([b1f03ce](https://github.com/rsionnach/nthlayer-workers/commit/b1f03ce028bbe26fd185f252aeee6dcb91cd0b3d))
+* **learn:** route ALREADY_APPLIED to skipped + idempotent exit_code · opensrm-1mja ([5248d6e](https://github.com/rsionnach/nthlayer-workers/commit/5248d6e91621f85c84d1992b228a01ad8889dbdd))
+* **smoke:** skip legacy measure.api.server (no fastapi dep) ([bcfdbd2](https://github.com/rsionnach/nthlayer-workers/commit/bcfdbd2b2acdfe9781b9ec15e8bd433746f3edff))
+
+
+### Code Refactoring
+
+* read version from importlib.metadata, not source literal ([7df518f](https://github.com/rsionnach/nthlayer-workers/commit/7df518f83ac8e6f7b2f9929682a35413f3bf59f8))
+
+
+### Documentation
+
+* **CLAUDE.md:** document release-please + smoke gate + Dependabot ([c6bc45f](https://github.com/rsionnach/nthlayer-workers/commit/c6bc45ff3ac64a8513bf8620f0b6407e26a53fae))
+
 ## [1.6.0](https://github.com/rsionnach/nthlayer-workers/compare/v1.5.0...v1.6.0) (2026-05-10)
 
 
