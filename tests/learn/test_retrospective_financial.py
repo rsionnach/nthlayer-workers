@@ -26,12 +26,12 @@ def specs_dir(tmp_path: Path) -> Path:
           name: fraud-detect
           labels:
             tier: critical
-            type: ai-gate
         spec:
           owner:
             group: group:default/payments
           service:
             name: fraud-detect
+            type: ai-gate
           outcomes:
             decision_value:
               correct: 138.50
@@ -94,12 +94,12 @@ def test_no_outcomes_returns_none(tmp_path: Path):
           name: silent-svc
           labels:
             tier: standard
-            type: api
         spec:
           owner:
             group: group:default/team-a
           service:
             name: silent-svc
+            type: api
     """).strip()
     (tmp_path / "silent-svc.yaml").write_text(spec)
     result = _compute_financial_impact(
@@ -203,10 +203,10 @@ class TestDeclaredDependenciesByService:
         svc_a = textwrap.dedent("""
             apiVersion: opensrm.nthlayer.io/v2
             kind: ServiceManifest
-            metadata: {name: svc-a, labels: {tier: critical, type: api}}
+            metadata: {name: svc-a, labels: {tier: critical}}
             spec:
               owner: {group: group:default/team-a}
-              service: {name: svc-a}
+              service: {name: svc-a, type: api}
               dependencies:
                 - service: component:default/dep-one
                   type: api
@@ -216,10 +216,10 @@ class TestDeclaredDependenciesByService:
         svc_b = textwrap.dedent("""
             apiVersion: opensrm.nthlayer.io/v2
             kind: ServiceManifest
-            metadata: {name: svc-b, labels: {tier: standard, type: api}}
+            metadata: {name: svc-b, labels: {tier: standard}}
             spec:
               owner: {group: group:default/team-b}
-              service: {name: svc-b}
+              service: {name: svc-b, type: api}
         """).strip()
         (tmp_path / "svc-a.yaml").write_text(svc_a)
         (tmp_path / "svc-b.yaml").write_text(svc_b)
@@ -257,10 +257,10 @@ class TestDeclaredDependenciesByService:
         spec = textwrap.dedent("""
             apiVersion: opensrm.nthlayer.io/v2
             kind: ServiceManifest
-            metadata: {name: silent-svc, labels: {tier: standard, type: api}}
+            metadata: {name: silent-svc, labels: {tier: standard}}
             spec:
               owner: {group: group:default/team-a}
-              service: {name: silent-svc}
+              service: {name: silent-svc, type: api}
         """).strip()
         (tmp_path / "silent-svc.yaml").write_text(spec)
 
@@ -278,10 +278,10 @@ def test_multi_service_metric_path_attributes_per_service(tmp_path: Path):
     spec_a = textwrap.dedent("""
         apiVersion: opensrm.nthlayer.io/v2
         kind: ServiceManifest
-        metadata: {name: svc-a, labels: {tier: critical, type: ai-gate}}
+        metadata: {name: svc-a, labels: {tier: critical}}
         spec:
           owner: {group: group:default/team-a}
-          service: {name: svc-a}
+          service: {name: svc-a, type: ai-gate}
           outcomes:
             decision_value:
               correct: 10
@@ -291,10 +291,10 @@ def test_multi_service_metric_path_attributes_per_service(tmp_path: Path):
     spec_b = textwrap.dedent("""
         apiVersion: opensrm.nthlayer.io/v2
         kind: ServiceManifest
-        metadata: {name: svc-b, labels: {tier: critical, type: ai-gate}}
+        metadata: {name: svc-b, labels: {tier: critical}}
         spec:
           owner: {group: group:default/team-b}
-          service: {name: svc-b}
+          service: {name: svc-b, type: ai-gate}
           outcomes:
             decision_value:
               correct: 10
