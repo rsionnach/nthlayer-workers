@@ -816,3 +816,68 @@ def test_query_for_reports_the_breach_rule_with_the_query():
     assert _query_for("s", unbuilt)[1] == "ratio"
     assert _query_for("s", latency)[1] == "latency_seconds"
     assert _query_for("s", avail)[1] == "error_budget"
+
+
+@pytest.mark.asyncio
+async def test_hysteresis_survives_a_realistic_number_of_slos(verdict_store):
+    """History was fetched with a flat limit=20 across ALL services and SLOs.
+
+    One cycle over 20+ SLOs writes 20+ verdicts, so the next cycle's window
+    held at most the newest window per SLO — consecutive capped at 1 and the
+    threshold was unreachable again, this time by pagination rather than
+    arithmetic. Newly reachable precisely because load_specs went from
+    yielding zero SLOs on a v2 manifest to yielding all of them.
+    """
+    slos = [
+        SLODefinition(
+            service=svc, slo_name=f"guard-{i}", slo_type="judgment",
+            judgment_type="reversal_rate", target=95.0, window="7d",
+            query="q", query_kind="judgment_rate",
+        )
+        for svc in ("svc-a", "svc-b")
+        for i in range(12)  # 24 SLOs — more than the old flat limit
+    ]
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.return_value = 0.08  # 92% SLI against a 95 target
+        for _ in range(2):
+            _seed_verdicts(
+                verdict_store,
+                await evaluate_slos("http://prom", slos, verdict_store,
+                                    hysteresis_threshold=3),
+            )
+        final = await evaluate_slos("http://prom", slos, verdict_store,
+                                    hysteresis_threshold=3)
+
+    assert {r.consecutive for r in final} == {3}
+    assert all(r.breach for r in final)
+
+
+@pytest.mark.asyncio
+async def test_latency_target_is_read_in_its_declared_unit(tmp_path, verdict_store):
+    """load_specs -> evaluate_slos for latency, the round trip nothing covered.
+
+    The branch hard-coded `target / 1000.0`, assuming milliseconds. The
+    target reaches it from the parser, which preserves whatever `unit` the
+    manifest declared — so a seconds-denominated SLO was compared against a
+    threshold a thousand times too small and breached every window.
+    """
+    (tmp_path / "svc.yaml").write_text(
+        "apiVersion: srm/v1\nkind: ServiceReliabilityManifest\n"
+        "metadata: {name: svc, team: t, tier: critical}\n"
+        "spec:\n  type: api\n  slos:\n"
+        "    latency: {target: 2, unit: s, percentile: p99, window: 30d}\n"
+    )
+    slo = next(s for s in load_specs(tmp_path).slos if s.slo_name == "latency")
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.return_value = 1.5  # 1.5s, inside a 2s target
+        results = await evaluate_slos("http://prom", [slo], verdict_store)
+
+    assert results[0].raw_breach is False, (
+        "a 2s target read as 2ms makes every response a breach"
+    )

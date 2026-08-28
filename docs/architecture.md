@@ -314,7 +314,18 @@ one definition shared by the CLI writer and
 `current_value > target`, a 0-1 rate against a 0-100 target, so it never
 counted a judgment window and the threshold was unreachable. Verdicts
 written before opensrm-fxln carry no `raw_breach` and stop the count:
-one restarted hysteresis window per SLO at upgrade. `calibration` +
+one restarted hysteresis window per SLO at upgrade. The history window
+is sized `(hysteresis_threshold + 1) * len(slos) * 2` rather than a flat
+20 — one cycle writes one verdict per SLO, so a constant limit held less
+than a full cycle once a run covered 20 SLOs and capped `consecutive` at
+1 again. It is deliberately unscoped by `VerdictFilter.subject_service`:
+measure writes the service into `subject.ref` and leaves
+`subject.service` None, so that filter matches nothing, and populating
+it now would silently shorten history for every SLO already running.
+Duration targets convert via `_target_seconds` using the manifest's
+declared `unit`, which the parser preserves; a missing or unknown unit
+logs a warning and assumes `ms` rather than dropping the SLO.
+`calibration` +
 `feedback_latency` are
 window-agnostic (gauge metrics) so their lambdas use a `_window`
 underscore param. The module logs through `logging.getLogger`, NOT

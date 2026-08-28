@@ -44,6 +44,12 @@ class SLODefinition:
     # answer — the failure shape this whole bead is about.
     query_kind: str
     judgment_type: str | None = None
+    # The manifest's declared unit for a duration target. The parser
+    # preserves it verbatim, so `latency: {target: 2, unit: s}` and
+    # `{target: 2000, unit: ms}` both arrive as target=2000.0/2.0 with the
+    # unit that makes sense of them. Hard-coding milliseconds here compared
+    # a seconds SLO against a threshold 1000x too small (opensrm-fxln).
+    unit: str | None = None
 
 
 @dataclass
@@ -60,7 +66,7 @@ class EvaluationResult:
     # The un-hysteresised verdict for THIS window. Persisted so the next
     # cycle can count consecutive windows without re-deriving the rule from
     # current_value and target — which needs the query_kind it does not have.
-    raw_breach: bool = False
+    raw_breach: bool
 
 
 @dataclass(frozen=True)
@@ -128,6 +134,7 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
                 window=slo.window or "7d",
                 query=query,
                 query_kind=query_kind,
+                unit=slo.unit,
             ))
 
     return LoadedSpecs(slos=slos, parse_failures=parse_failures)
@@ -216,6 +223,39 @@ def evaluation_custom_metadata(result: EvaluationResult) -> dict:
         "raw_breach": result.raw_breach,
         "consecutive": result.consecutive,
     }
+
+
+# Seconds per unit of a duration target. Prometheus latency queries return
+# seconds, so the target is converted TO seconds rather than the reverse.
+_DURATION_UNIT_SECONDS = {"ms": 0.001, "s": 1.0, "us": 0.000_001, "m": 60.0}
+
+# What a duration target means when the manifest declared no unit. The
+# schema's own latency example uses `ms`, and so does every manifest in the
+# ecosystem, so that is the assumption — but it IS an assumption, so it is
+# logged rather than applied silently. Refusing to evaluate instead would
+# drop the SLO, which is the failure this bead exists to remove.
+_DEFAULT_DURATION_UNIT = "ms"
+
+
+def _target_seconds(target: float, unit: str | None) -> float:
+    """Convert a duration target to seconds using its declared unit."""
+    if unit is None:
+        logger.warning(
+            "Latency target %s has no unit; assuming %s",
+            target,
+            _DEFAULT_DURATION_UNIT,
+        )
+        unit = _DEFAULT_DURATION_UNIT
+    scale = _DURATION_UNIT_SECONDS.get(unit)
+    if scale is None:
+        logger.warning(
+            "Unknown duration unit %r for target %s; assuming %s",
+            unit,
+            target,
+            _DEFAULT_DURATION_UNIT,
+        )
+        scale = _DURATION_UNIT_SECONDS[_DEFAULT_DURATION_UNIT]
+    return target * scale
 
 
 async def query_prometheus(
@@ -321,6 +361,27 @@ async def evaluate_slos(
 
     results: list[EvaluationResult] = []
 
+    # How far back to read. A flat limit=20 starved the counter: one cycle
+    # over N SLOs writes N verdicts, so once a run covered 20 SLOs the
+    # window held less than a single full cycle, `consecutive` could never
+    # pass 1, and the threshold was unreachable — the same dead end the
+    # raw_breach fix closed, arrived at by pagination instead of arithmetic.
+    # It became reachable when load_specs went from yielding zero SLOs on a
+    # v2 manifest to yielding all of them.
+    #
+    # NOT scoped with VerdictFilter.subject_service: measure writes the
+    # service into subject.ref and leaves subject.service None, so that
+    # filter matches nothing. Setting it now would scope the query to
+    # verdicts written after this change and silently shorten history for
+    # every SLO already running. count_consecutive_breaches filters on
+    # ref + slo_name itself; this only has to fetch a window wide enough to
+    # contain the answer.
+    #
+    # Wide enough = threshold cycles of every SLO in the run, plus headroom
+    # for other writers of subject_type="evaluation" under this same
+    # producer_system (tiering/promotion is one).
+    history_limit = (hysteresis_threshold + 1) * max(len(slos), 1) * 2
+
     async with httpx.AsyncClient() as client:
         for slo in slos:
             current_value = await query_prometheus(client, prometheus_url, slo.query)
@@ -352,8 +413,9 @@ async def evaluate_slos(
                 # The target is not consulted; it is baked into the rule.
                 raw_breach = current_value < 0.0
             elif slo.query_kind == "latency_seconds":
-                # Query is seconds, target is milliseconds.
-                raw_breach = current_value > slo.target / 1000.0
+                # Query is seconds; the target is in whatever unit the
+                # manifest declared.
+                raw_breach = current_value > _target_seconds(slo.target, slo.unit)
             else:
                 # "ratio": a 0-1 good-ratio SLI against a 0-100 target, so it
                 # scales but does not invert — the same arithmetic as
@@ -365,7 +427,7 @@ async def evaluate_slos(
             recent = verdict_store.query(VerdictFilter(
                 producer_system="nthlayer-measure",
                 subject_type="evaluation",
-                limit=20,
+                limit=history_limit,
             ))
             # Sort newest first
             recent.sort(key=lambda v: v.timestamp, reverse=True)
