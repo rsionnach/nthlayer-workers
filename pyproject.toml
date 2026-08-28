@@ -9,7 +9,14 @@ description = "NthLayer workers — Tier 2 background computation (observe, meas
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "nthlayer-common>=1.5.0,<2.0.0",
+    # >=2.1.0: foreign_yaml_reason / iter_manifest_files land there
+    # (opensrm-3470). The previous <2.0.0 ceiling was already WRONG before
+    # this change — opensrm-ih0v made spec.service.type required in 2.0.0 and
+    # this package's fixtures depend on it, so an install resolving 1.7.x
+    # would fail. CI hides that by resolving nthlayer-common from a sibling
+    # checkout rather than PyPI; anyone installing nthlayer-workers from PyPI
+    # would have hit it.
+    "nthlayer-common>=2.1.0,<3.0.0",
     "httpx>=0.27",
     "pyyaml>=6.0",
     "structlog>=24.1.0",

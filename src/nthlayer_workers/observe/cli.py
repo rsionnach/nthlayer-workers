@@ -79,7 +79,17 @@ def _cmd_collect(args: argparse.Namespace) -> int:
     from nthlayer_workers.observe.slo.spec_loader import load_specs
     from nthlayer_workers.observe.sqlite_store import SQLiteAssessmentStore
 
-    service_slos = load_specs(args.specs_dir)
+    loaded = load_specs(args.specs_dir)
+    service_slos = loaded.service_slos
+    if loaded.parse_failures:
+        # Surfaced, not just logged: the SLOs below are evaluated over what
+        # parsed, and without this an operator cannot tell a partial view
+        # from a complete one (opensrm-3470).
+        print(
+            f"Warning: {loaded.parse_failures} manifest(s) in "
+            f"{args.specs_dir} failed to parse and were not evaluated",
+            file=sys.stderr,
+        )
     if not service_slos:
         print("No SLO definitions found in specs directory", file=sys.stderr)
         return 0
@@ -193,7 +203,17 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     from nthlayer_workers.observe.verification.extractor import Resource, extract_metric_contract
     from nthlayer_workers.observe.verification.verifier import MetricVerifier
 
-    service_slos = load_specs(args.specs_dir)
+    loaded = load_specs(args.specs_dir)
+    service_slos = loaded.service_slos
+    if loaded.parse_failures:
+        # Surfaced, not just logged: the SLOs below are evaluated over what
+        # parsed, and without this an operator cannot tell a partial view
+        # from a complete one (opensrm-3470).
+        print(
+            f"Warning: {loaded.parse_failures} manifest(s) in "
+            f"{args.specs_dir} failed to parse and were not evaluated",
+            file=sys.stderr,
+        )
     if not service_slos:
         print("No SLO definitions found in specs directory", file=sys.stderr)
         return 0
