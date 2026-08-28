@@ -277,7 +277,8 @@ def _declares_itself_a_manifest(spec_file: Path) -> bool:
     except (OSError, ValueError, yaml.YAMLError):
         # ValueError covers UnicodeDecodeError on non-UTF-8 bytes.
         return True
-    if data is None:
+    if not data:
+        # None (zero-byte, whitespace, comments) or an empty container.
         return True
     if not isinstance(data, dict):
         return False
@@ -330,7 +331,11 @@ def _load_manifests_from_specs(specs_dir: str | None) -> LoadedManifests:
     behaviour of ``_compute_financial_impact``.
 
     Parse failures from ``load_manifest`` are logged and counted, then
-    skipped (opensrm-oh27). The financial-impact and dependency-extraction
+    skipped (opensrm-oh27). ``UnicodeDecodeError`` is caught alongside
+    ``ManifestLoadError`` because ``load_manifest`` opens with the default
+    encoding and only wraps ``YAMLError`` — non-UTF-8 bytes would otherwise
+    abort the whole retrospective, a hard stop where the design says log and
+    continue. The financial-impact and dependency-extraction
     paths both tolerate a partial view, but the caller is told how partial
     it is via ``LoadedManifests.parse_failures``.
     """
@@ -345,7 +350,7 @@ def _load_manifests_from_specs(specs_dir: str | None) -> LoadedManifests:
     for spec_file in _spec_files(specs_path):
         try:
             manifest = load_manifest(str(spec_file))
-        except ManifestLoadError as exc:
+        except (ManifestLoadError, UnicodeDecodeError) as exc:
             if not _declares_itself_a_manifest(spec_file):
                 # Foreign YAML sharing the directory, not a broken manifest.
                 log.debug("manifest_file_ignored", spec_file=str(spec_file))

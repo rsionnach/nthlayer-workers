@@ -353,14 +353,25 @@ class TestEmptyAndAmbiguousFiles:
         assert _declares_itself_a_manifest(tmp_path / "vanished.yaml") is True
 
     def test_non_utf8_file_is_counted(self, tmp_path: Path):
-        from nthlayer_workers.learn.retrospective import (
-            _declares_itself_a_manifest,
-        )
+        """`load_manifest` opens with the default encoding and only wraps
+        YAMLError, so non-UTF-8 bytes escape as UnicodeDecodeError. Left
+        uncaught it aborts the whole retrospective — a hard stop where the
+        design says log and continue.
+        """
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "blob.yaml").write_bytes(b"\xff\xfe\x00binary garbage")
 
-        binary = tmp_path / "blob.yaml"
-        binary.write_bytes(b"\xff\xfe\x00binary garbage")
+        loaded_specs = _load_manifests_from_specs(str(specs))
 
-        assert _declares_itself_a_manifest(binary) is True
+        assert loaded_specs.parse_failures == 1
+        assert set(loaded_specs.manifests) == {"svc-good"}
+
+    def test_empty_mapping_is_counted(self, tmp_path: Path):
+        """`{}` reads as nothing just as a zero-byte file does."""
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "stub.yaml").write_text("{}\n")
+
+        assert _load_manifests_from_specs(str(specs)).parse_failures == 1
 
 
 class TestSameServiceInBothSuffixes:
