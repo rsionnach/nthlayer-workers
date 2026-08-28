@@ -126,7 +126,7 @@ def build_retrospective(
         duration_minutes,
         breach_counts_by_service,
         specs_dir,
-        loaded_manifests=loaded_specs.manifests,
+        manifests_by_service=loaded_specs.manifests,
     )
 
     # Generate recommendations
@@ -296,12 +296,12 @@ def _load_manifests_from_specs(specs_dir: str | None) -> LoadedManifests:
 
 
 def _extract_declared_dependencies(
-    loaded_manifests: dict[str, Any],
+    manifests_by_service: dict[str, Any],
 ) -> dict[str, list[str]]:
     """Wrapper around the shared helper (opensrm-dpws). The CLI path
     works with Manifest dataclass instances loaded via load_manifest().
     """
-    return extract_declared_dependencies(from_manifests=loaded_manifests)
+    return extract_declared_dependencies(from_manifests=manifests_by_service)
 
 
 def _compute_financial_impact(
@@ -310,7 +310,7 @@ def _compute_financial_impact(
     breach_counts_by_service: dict[str, int],
     specs_dir: str | None,
     *,
-    loaded_manifests: dict[str, Any] | None = None,
+    manifests_by_service: dict[str, Any] | None = None,
 ) -> dict | None:
     """Compute spec § 1 financial impact across blast-radius services.
 
@@ -321,7 +321,7 @@ def _compute_financial_impact(
     services that share a currency; mixed-currency manifests are
     skipped with a warning.
 
-    ``loaded_manifests`` is the shared cache produced by
+    ``manifests_by_service`` is the shared cache produced by
     ``_load_manifests_from_specs(...).manifests`` (opensrm-jmy.21). When
     omitted the function loads manifests itself — preserves the pre-jmy.21
     calling convention used by ``tests/learn/test_retrospective_financial.py``.
@@ -343,9 +343,9 @@ def _compute_financial_impact(
         )
         return None
 
-    if loaded_manifests is None:
-        loaded_manifests = _load_manifests_from_specs(specs_dir).manifests
-    if not loaded_manifests:
+    if manifests_by_service is None:
+        manifests_by_service = _load_manifests_from_specs(specs_dir).manifests
+    if not manifests_by_service:
         return None
 
     affected_services = {
@@ -358,7 +358,7 @@ def _compute_financial_impact(
     currency: str | None = None
     aggregate_source: str | None = None
 
-    for service_name, manifest in loaded_manifests.items():
+    for service_name, manifest in manifests_by_service.items():
         if service_name not in affected_services:
             continue
         if manifest.outcomes is None:

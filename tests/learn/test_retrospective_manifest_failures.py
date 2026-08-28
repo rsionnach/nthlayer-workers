@@ -8,8 +8,12 @@ dropped service indistinguishable from one that genuinely had no impact.
 
 The loop's very next branch already logs when it skips a duplicate, so the
 convention was established and only the parse-failure branch ignored it.
-These tests pin both halves of the fix: the warning log carrying file path
-and error, and the failure count reaching the caller on the result object.
+These tests pin the count at every surface it has to survive:
+``_load_manifests_from_specs`` (the warning log carrying file path and error,
+plus ``LoadedManifests.parse_failures``), ``build_retrospective``
+(``metadata.custom["manifest_parse_failures"]``), and the ``nthlayer-learn
+retrospective`` CLI, which is where a person actually reads the number the
+skip was quietly shrinking.
 """
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ from pathlib import Path
 import pytest
 import structlog
 from nthlayer_common.verdicts.core import create
+from nthlayer_common.verdicts.models import Verdict
 from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
 from nthlayer_common.verdicts.store import MemoryStore
 
@@ -61,7 +66,7 @@ def _write_specs(specs_dir: Path, *, broken: int = 0) -> Path:
     return specs_dir
 
 
-def _incident():
+def _incident() -> Verdict:
     """An incident verdict with no lineage — the minimum ``build_retrospective``
     accepts. ``subject.type='custom'`` because nthlayer-common's
     VALID_SUBJECT_TYPES has no 'incident' bucket and build_retrospective does
@@ -81,9 +86,10 @@ def _incident():
 
 
 @pytest.fixture
-def incident_db(tmp_path: Path):
-    """A real on-disk verdict store holding one incident — the CLI path opens
-    the DB by path, so a MemoryStore will not do (CLAUDE.md rule 14).
+def incident_db(tmp_path: Path) -> tuple[Path, str]:
+    """``(db_path, incident_verdict_id)`` for a real on-disk store holding one
+    incident. The CLI path opens the DB by path, so a MemoryStore will not do
+    (CLAUDE.md rule 14).
     """
     db = tmp_path / "verdicts.db"
     store = SQLiteVerdictStore(str(db))
