@@ -115,20 +115,13 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
     from nthlayer_common.verdicts import SQLiteVerdictStore
     from nthlayer_common.verdicts import create as verdict_create
 
+    from nthlayer_workers.cli_output import warn_parse_failures
     from nthlayer_workers.measure.adapters.prometheus import evaluate_slos, load_specs
 
     specs_dir = Path(args.specs_dir)
     loaded = load_specs(specs_dir)
     slos = loaded.slos
-    if loaded.parse_failures:
-        # Surfaced, not just logged: the SLOs below are evaluated over what
-        # parsed, and an operator reading measure output is the one who needs
-        # to know the view is partial (opensrm-fxln).
-        print(
-            f"Warning: {loaded.parse_failures} manifest(s) in {specs_dir} "
-            f"failed to parse and were not evaluated",
-            file=sys.stderr,
-        )
+    warn_parse_failures(loaded.parse_failures, specs_dir)
     if not slos:
         print(f"No SLO definitions found in {specs_dir}", file=sys.stderr)
         sys.exit(1)

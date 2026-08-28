@@ -13,6 +13,7 @@ from nthlayer_common.manifest import (
     iter_manifest_files,
     load_manifest,
 )
+from nthlayer_common.manifest.models import SLODefinition as ManifestSLO
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
     return LoadedSpecs(slos=slos, parse_failures=parse_failures)
 
 
-def _query_for(service: str, slo) -> str | None:
+def _query_for(service: str, slo: ManifestSLO) -> str | None:
     """PromQL for an SLO whose manifest declared no indicator query.
 
     Judgment SLOs get the interim raw-metric queries below. Classical SLOs
@@ -140,12 +141,13 @@ def _query_for(service: str, slo) -> str | None:
     if name == "availability":
         return f'slo:error_budget:ratio{{service="{service}"}}'
     if name == "latency":
-        percentile = getattr(slo, "percentile", None) or "p99"
+        percentile = slo.percentile or "p99"
         return f'slo:http_request_duration_seconds:{percentile}{{service="{service}"}}'
     return f'slo:{name}:ratio{{service="{service}"}}'
 
 
-# PromQL builders keyed by judgment SLO name. Lambdas take (service,
+# PromQL builders keyed by judgment TYPE (spec.judgment_type), not by the
+# SLO's name — in v2 the two are independent. Lambdas take (service,
 # window); `_window` on calibration/feedback_latency indicates those
 # queries are window-agnostic (the raw metric is already a gauge).
 _JUDGMENT_SLO_QUERIES = {
@@ -162,23 +164,6 @@ _JUDGMENT_SLO_QUERIES = {
     "calibration": lambda service, _window: f'gen_ai_calibration_error{{service="{service}"}}',
     "feedback_latency": lambda service, _window: f'gen_ai_feedback_latency_seconds{{service="{service}"}}',
 }
-
-
-def _judgment_slo_query(service: str, slo_name: str, window: str) -> str:
-    """Build PromQL query for judgment SLOs using interim raw metrics."""
-    builder = _JUDGMENT_SLO_QUERIES.get(slo_name)
-    if builder is None:
-        # Stdlib logger (line 12) — use %-style formatting, not kwargs.
-        # Pre-existing bug surfaced by y7dd R5: a manifest shipping an
-        # unknown judgment SLO would have crashed in the original
-        # if/elif's fallthrough warning too.
-        logger.warning(
-            "Unknown judgment SLO name '%s' for service '%s', no PromQL query available",
-            slo_name,
-            service,
-        )
-        return ""
-    return builder(service, window)
 
 
 async def query_prometheus(
@@ -288,28 +273,21 @@ async def evaluate_slos(
 
             # Determine if current value breaches the target
             if slo.slo_type == "judgment" and slo.judgment_type != "feedback_latency":
-                # Judgment SLOs. Prometheus returns a 0.0-1.0 ratio; targets
-                # use the canonical 0-100 percentage convention
-                # (nthlayer-common CLAUDE.md hard rule 1, opensrm-5fff.1), and
-                # the SLI is the INVERSE of the measured rate: reversal_rate
-                # target 98.5 means "at least 98.5% of decisions not reversed".
+                # Prometheus returns a 0.0-1.0 RATE; the target is a 0-100
+                # SLI (hard rule 1), and the SLI is the rate's inverse:
+                # reversal_rate 98.5 means "at least 98.5% not reversed".
                 #
-                # Comparing the raw ratio against the 0-100 target made these
-                # SLOs unbreachable — 0.05 > 98.5 is never true (opensrm-fxln).
+                # Dispatched on slo_TYPE, never on the SLO's name or on a
+                # list of judgment types — in v2 the name is author-chosen,
+                # and only 4 of the 8 JUDGMENT_SLO_TYPES appear anywhere in
+                # this file. Either narrower test drops a real judgment SLO
+                # into the classical branch, where a 0-1 rate against a
+                # 0-100 target breaches every window.
                 #
-                # Dispatched on slo_TYPE, not on the SLO's name and not on a
-                # list of known judgment_types. In v2 metadata.name is
-                # author-chosen and independent of spec.judgment_type, and
-                # only 4 of the 8 JUDGMENT_SLO_TYPES are enumerated anywhere
-                # here — either narrower test would send a real judgment SLO
-                # to the classical branch below, where a 0-1 ratio against a
-                # 0-100 target breaches every single window.
-                #
-                # NOT the same as measure/worker.py:242, which does not
-                # invert: it feeds get_sli_value(indicator_query), whose
-                # value is ALREADY an SLI. The inversion belongs to the
-                # synthesised overrides/decisions ratio, not to judgment
-                # SLOs in general.
+                # measure/worker.py:242 scales WITHOUT inverting, correctly:
+                # it reads get_sli_value(indicator_query), already an SLI.
+                # The inversion belongs to _query_for's synthesised
+                # overrides/decisions ratio, not to judgment SLOs at large.
                 sli_pct = (1.0 - current_value) * 100
                 raw_breach = sli_pct < slo.target
             elif slo.slo_type == "judgment":  # feedback_latency: a duration, not a rate

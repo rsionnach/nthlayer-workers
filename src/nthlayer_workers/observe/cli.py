@@ -11,25 +11,10 @@ from pathlib import Path
 
 from nthlayer_common.errors import main_with_error_handling
 
-from nthlayer_workers.observe.slo.spec_loader import LoadedSpecs
+from nthlayer_workers.cli_output import warn_parse_failures
 
 _log = logging.getLogger(__name__)
 
-
-
-def _warn_parse_failures(loaded: LoadedSpecs, specs_dir: str) -> None:
-    """Tell the operator when the SLOs below cover only part of the directory.
-
-    Surfaced rather than only logged: whoever is reading SLO output is the
-    one who needs to know the view is partial, and a warning in a log they
-    are not tailing does not reach them (opensrm-3470).
-    """
-    if loaded.parse_failures:
-        print(
-            f"Warning: {loaded.parse_failures} manifest(s) in {specs_dir} "
-            f"failed to parse and were not evaluated",
-            file=sys.stderr,
-        )
 
 
 def _add_decision_store_args(parser: argparse.ArgumentParser) -> None:
@@ -99,7 +84,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
 
     loaded = load_specs(args.specs_dir)
     service_slos = loaded.service_slos
-    _warn_parse_failures(loaded, args.specs_dir)
+    warn_parse_failures(loaded.parse_failures, args.specs_dir)
     if not service_slos:
         print("No SLO definitions found in specs directory", file=sys.stderr)
         return 0
@@ -215,7 +200,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
     loaded = load_specs(args.specs_dir)
     service_slos = loaded.service_slos
-    _warn_parse_failures(loaded, args.specs_dir)
+    warn_parse_failures(loaded.parse_failures, args.specs_dir)
     if not service_slos:
         print("No SLO definitions found in specs directory", file=sys.stderr)
         return 0

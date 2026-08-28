@@ -289,15 +289,21 @@ unknown top-level key (lists offenders + valid set, sort uses
 `governance:` (retired under opensrm-t5yr) is treated as any other
 unknown key — no deprecation grace [opensrm-m655].
 
-`adapters/prometheus.py` — `_judgment_slo_query(service, slo_name,
-window) -> str`. Module-level `_JUDGMENT_SLO_QUERIES` lookup dict of
-lambdas keyed by SLO name (`reversal_rate` /
-`high_confidence_failure` / `calibration` / `feedback_latency`).
-Unknown key → stdlib-logger warning + return `""` (uses
-`logging.getLogger`, NOT structlog — kwargs would TypeError;
-load-bearing fact per opensrm-y7dd R5 Pass 3). `calibration` +
-`feedback_latency` are window-agnostic (gauge metrics) so their
-lambdas use `_window` underscore param.
+`adapters/prometheus.py` — `_query_for(service, slo) -> str | None`,
+the single query builder. Module-level `_JUDGMENT_SLO_QUERIES` lookup
+dict of lambdas keyed by **`spec.judgment_type`**, not by SLO name: in
+v2 `metadata.name` is author-chosen and independent of the type
+(`reversal_rate` / `high_confidence_failure` / `calibration` /
+`feedback_latency`). Only 4 of the 8 `JUDGMENT_SLO_TYPES` have a
+builder; the other 4 fall through to the `slo:{name}:ratio` recording-
+rule convention. They must NOT yield `""` — Prometheus 400s on an empty
+query and `query_prometheus` reads that as no-data, silently skipping
+the SLO (opensrm-fxln; the `_judgment_slo_query` wrapper that returned
+`""` was deleted there). `calibration` + `feedback_latency` are
+window-agnostic (gauge metrics) so their lambdas use a `_window`
+underscore param. The module logs through `logging.getLogger`, NOT
+structlog — %-style args only; kwargs would TypeError (load-bearing
+fact per opensrm-y7dd R5 Pass 3).
 
 `governance/` — `GovernanceEngine(Protocol)` only. Legacy
 LLM-driven `ErrorBudgetGovernance` retired under opensrm-t5yr; the

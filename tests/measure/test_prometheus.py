@@ -5,10 +5,12 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from nthlayer_common.manifest.models import SLODefinition as ManifestSLO
 
 from nthlayer_workers.measure.adapters.prometheus import (
+    _JUDGMENT_SLO_QUERIES,
     SLODefinition,
-    _judgment_slo_query,
+    _query_for,
     count_consecutive_breaches,
     evaluate_slos,
     load_specs,
@@ -73,9 +75,7 @@ def test_load_specs_classifies_judgment_slos(specs_dir):
 
 
 def test_load_specs_keeps_the_canonical_target_convention(specs_dir):
-    """Renamed from test_load_specs_normalizes_availability_target.
-
-    The adapter used to divide availability targets by 100, producing 0.999
+    """The adapter used to divide availability targets by 100, producing 0.999
     from a 99.9 spec — a second, local copy of a convention
     nthlayer-common owns (CLAUDE.md hard rule 1: targets are 0-100).
     Nothing consumed the normalised value: evaluate_slos ignores
@@ -100,40 +100,61 @@ def test_load_specs_empty_dir(tmp_path):
     assert slos == []
 
 
-# --- _judgment_slo_query (opensrm-y7dd: lookup-dict refactor) ---
+# --- the judgment PromQL builders (opensrm-y7dd: lookup-dict refactor) ---
+# Exercised directly: the _judgment_slo_query wrapper was deleted in
+# opensrm-fxln once _query_for read the dict itself, and a second accessor
+# that disagreed with the live one about unknown types was worse than none.
 
 
-def test_judgment_slo_query_reversal_rate():
-    q = _judgment_slo_query("fraud-detect", "reversal_rate", "5m")
+def test_judgment_query_builder_reversal_rate():
+    q = _JUDGMENT_SLO_QUERIES["reversal_rate"]("fraud-detect", "5m")
     assert "gen_ai_overrides_total" in q
     assert 'service="fraud-detect"' in q
     assert "[5m]" in q
 
 
-def test_judgment_slo_query_high_confidence_failure():
-    q = _judgment_slo_query("svc-a", "high_confidence_failure", "10m")
+def test_judgment_query_builder_high_confidence_failure():
+    q = _JUDGMENT_SLO_QUERIES["high_confidence_failure"]("svc-a", "10m")
     assert "gen_ai_overrides_hcf_total" in q
     assert 'confidence_bucket="high"' in q
 
 
-def test_judgment_slo_query_calibration_window_agnostic():
+def test_judgment_query_builder_calibration_window_agnostic():
     # Calibration is a gauge: window argument is intentionally ignored.
-    q5 = _judgment_slo_query("svc", "calibration", "5m")
-    q1h = _judgment_slo_query("svc", "calibration", "1h")
+    q5 = _JUDGMENT_SLO_QUERIES["calibration"]("svc", "5m")
+    q1h = _JUDGMENT_SLO_QUERIES["calibration"]("svc", "1h")
     assert q5 == q1h
     assert q5 == 'gen_ai_calibration_error{service="svc"}'
 
 
-def test_judgment_slo_query_unknown_returns_empty():
-    # Unknown SLO name must take the warn+empty path, not raise nor
-    # invoke a lambda. Guards the lookup-dict against future regressions
-    # that drop the unknown-key fallback.
-    assert _judgment_slo_query("svc", "made_up_slo", "5m") == ""
+def test_unbuilt_judgment_type_falls_back_to_recording_rule():
+    # Four of the eight JUDGMENT_SLO_TYPES have no builder above. They must
+    # reach the recording-rule convention, NOT the empty string the deleted
+    # wrapper returned: Prometheus 400s on an empty query, and
+    # query_prometheus reads that failure as no-data and skips the SLO —
+    # unbreachable, silently (opensrm-fxln).
+    slo = ManifestSLO(
+        name="drift-watch",
+        target=98.0,
+        slo_type="judgment",
+        window="5m",
+        judgment_type="segment_disparity",
+    )
+    assert _query_for("svc", slo) == 'slo:drift-watch:ratio{service="svc"}'
 
 
-def test_judgment_slo_query_empty_slo_name_returns_empty():
-    # Empty string is not a known key — same fallback path as unknown.
-    assert _judgment_slo_query("svc", "", "5m") == ""
+def test_judgment_type_not_slo_name_selects_the_builder():
+    # In v2 metadata.name is author-chosen and independent of
+    # spec.judgment_type. An SLO named anything must still get the builder
+    # its TYPE names.
+    slo = ManifestSLO(
+        name="model-quality",
+        target=98.5,
+        slo_type="judgment",
+        window="5m",
+        judgment_type="reversal_rate",
+    )
+    assert "gen_ai_overrides_total" in _query_for("fraud-detect", slo)
 
 
 # --- query_firing_alerts tests ---
