@@ -350,9 +350,9 @@ class TestEmptyAndAmbiguousFiles:
         ``FileNotFoundError`` out of ``load_manifest`` instead, which this
         does not cover and does not claim to.
         """
-        from nthlayer_workers.learn.retrospective import _foreign_yaml_reason
+        from nthlayer_common.manifest import foreign_yaml_reason
 
-        assert _foreign_yaml_reason(tmp_path / "vanished.yaml") is None
+        assert foreign_yaml_reason(tmp_path / "vanished.yaml") is None
 
     def test_non_utf8_file_is_counted(self, tmp_path: Path):
         """`load_manifest` opens with the default encoding and only wraps
@@ -551,3 +551,35 @@ class TestDropsAreRecorded:
         assert ignored[0]["log_level"] == "debug"
         assert ignored[0]["spec_file"].endswith("kustomization.yaml")
         assert ignored[0]["reason"]
+
+
+class TestGateIsNotDuplicated:
+    """opensrm-3470 promoted the gate to nthlayer-common. This module must
+    USE it, not keep a copy.
+
+    Two copies of a heuristic gate is the drift surface the promotion exists
+    to close: they are logic-identical today, and the way that stops being
+    true is a fix landing in one of them. Asserting identity rather than
+    equal behaviour is deliberate — behaviour tests would keep passing right
+    up until they diverged.
+    """
+
+    def test_retrospective_uses_the_shared_gate(self):
+        from nthlayer_common.manifest import foreign_yaml_reason as shared
+
+        from nthlayer_workers.learn import retrospective
+
+        assert retrospective.foreign_yaml_reason is shared, (
+            "retrospective must import the shared gate, not define its own"
+        )
+        assert not hasattr(retrospective, "_foreign_yaml_reason"), (
+            "the local copy of the gate should be deleted, not kept alongside"
+        )
+
+    def test_retrospective_uses_the_shared_file_lister(self):
+        from nthlayer_common.manifest import iter_manifest_files as shared
+
+        from nthlayer_workers.learn import retrospective
+
+        assert retrospective.iter_manifest_files is shared
+        assert not hasattr(retrospective, "_spec_files")
