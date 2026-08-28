@@ -240,8 +240,18 @@ async def evaluate_slos(
 
             # Determine if current value breaches the target
             if slo.slo_name in ("reversal_rate", "high_confidence_failure", "calibration"):
-                # These are "lower is better" — breach if current > target
-                raw_breach = current_value > slo.target
+                # Judgment SLOs. Prometheus returns a 0.0-1.0 ratio; targets
+                # use the canonical 0-100 percentage convention
+                # (nthlayer-common CLAUDE.md hard rule 1, opensrm-5fff.1), and
+                # the SLI is the INVERSE of the measured rate: reversal_rate
+                # target 98.5 means "at least 98.5% of decisions not reversed".
+                #
+                # Comparing the raw ratio against the 0-100 target made these
+                # SLOs unbreachable — 0.05 > 98.5 is never true (opensrm-fxln).
+                # measure/worker.py:240 already scaled correctly; this is the
+                # adapter catching up to its own sibling.
+                sli_pct = (1.0 - current_value) * 100
+                raw_breach = sli_pct < slo.target
             elif slo.slo_name == "feedback_latency":
                 # Breach if latency exceeds target (in seconds)
                 raw_breach = current_value > slo.target

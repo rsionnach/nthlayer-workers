@@ -285,11 +285,11 @@ def test_consecutive_breaches_zero_when_no_breach():
 async def test_evaluate_slos_healthy_no_breach(verdict_store):
     slo = SLODefinition(
         service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
-        target=0.05, window="7d", query="test_query",
+        target=95.0, window="7d", query="test_query",
     )
 
     with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
-        mock_query.return_value = 0.02  # Under target
+        mock_query.return_value = 0.02  # 2% reversed -> 98% SLI, above 95
         results = await evaluate_slos("http://prom", [slo], verdict_store)
 
     assert len(results) == 1
@@ -300,13 +300,16 @@ async def test_evaluate_slos_healthy_no_breach(verdict_store):
 @pytest.mark.asyncio
 async def test_evaluate_slos_judgment_hysteresis_not_reached(verdict_store):
     """Judgment SLO breaches but hasn't hit consecutive threshold yet."""
+    # target in the canonical 0-100 convention: at least 95% not reversed
+    # (opensrm-fxln — these fixtures previously used a 0.05 RATIO, which
+    # agreed with the dead comparison and is why it looked correct).
     slo = SLODefinition(
         service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
-        target=0.05, window="7d", query="test_query",
+        target=95.0, window="7d", query="test_query",
     )
 
     with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
-        mock_query.return_value = 0.08  # Over target
+        mock_query.return_value = 0.08  # 8% reversed -> 92% SLI, under 95
         results = await evaluate_slos("http://prom", [slo], verdict_store, hysteresis_threshold=3)
 
     assert len(results) == 1
@@ -329,13 +332,16 @@ async def test_evaluate_slos_judgment_hysteresis_reached(verdict_store):
         )
         verdict_store.put(v)
 
+    # target in the canonical 0-100 convention: at least 95% not reversed
+    # (opensrm-fxln — these fixtures previously used a 0.05 RATIO, which
+    # agreed with the dead comparison and is why it looked correct).
     slo = SLODefinition(
         service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
-        target=0.05, window="7d", query="test_query",
+        target=95.0, window="7d", query="test_query",
     )
 
     with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
-        mock_query.return_value = 0.08  # Over target — this makes it 3 consecutive
+        mock_query.return_value = 0.08  # 8% reversed -> 92% SLI, under 95 — this makes it 3 consecutive
         results = await evaluate_slos("http://prom", [slo], verdict_store, hysteresis_threshold=3)
 
     assert len(results) == 1
@@ -376,11 +382,11 @@ async def test_evaluate_slos_recovery_resets_consecutive(verdict_store):
 
     slo = SLODefinition(
         service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
-        target=0.05, window="7d", query="test_query",
+        target=95.0, window="7d", query="test_query",
     )
 
     with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
-        mock_query.return_value = 0.03  # Under target — recovery
+        mock_query.return_value = 0.03  # 3% reversed -> 97% SLI, recovered
         results = await evaluate_slos("http://prom", [slo], verdict_store)
 
     assert len(results) == 1
@@ -393,7 +399,7 @@ async def test_evaluate_slos_skips_missing_data(verdict_store):
     """SLOs with no Prometheus data are skipped."""
     slo = SLODefinition(
         service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
-        target=0.05, window="7d", query="test_query",
+        target=95.0, window="7d", query="test_query",
     )
 
     with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
@@ -401,3 +407,56 @@ async def test_evaluate_slos_skips_missing_data(verdict_store):
         results = await evaluate_slos("http://prom", [slo], verdict_store)
 
     assert len(results) == 0
+
+
+# --- opensrm-fxln: judgment SLO targets use the 0-100 convention ---
+
+
+@pytest.mark.asyncio
+async def test_judgment_slo_breaches_when_reversal_exceeds_target(verdict_store):
+    """fraud-detect declares `reversal_rate: target: 98.5` — "at least 98.5% of
+    decisions must not be reversed" (nthlayer-common CLAUDE.md hard rule 1,
+    opensrm-5fff.1). The query returns a reversal RATIO.
+
+    The adapter compared the raw ratio against the 0-100 target:
+
+        0.05 > 98.5  ->  False, always
+
+    so the SLO could never breach. measure/worker.py:240 already does this
+    correctly — `current_pct = current_value * 100`, healthy when
+    `current_pct >= target` — so the adapter was the outlier, disagreeing
+    with its own sibling and with the spec.
+
+    Here 4% reversed means a 96% non-reversal SLI against a 98.5 target:
+    a breach.
+    """
+    slo = SLODefinition(
+        service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
+        target=98.5, window="7d", query="test_query",
+    )
+
+    with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
+        mock_query.return_value = 0.04  # 4% reversed -> 96% SLI, under 98.5
+        results = await evaluate_slos("http://prom", [slo], verdict_store)
+
+    assert results[0].consecutive == 1, "a 96% SLI against a 98.5 target is a breach"
+
+
+@pytest.mark.asyncio
+async def test_judgment_slo_healthy_when_reversal_within_target(verdict_store):
+    """The other side: 1% reversed is a 99% SLI, comfortably above 98.5.
+
+    Without this, a fix that simply inverted the comparison would pass the
+    breach test above while breaching on everything.
+    """
+    slo = SLODefinition(
+        service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
+        target=98.5, window="7d", query="test_query",
+    )
+
+    with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
+        mock_query.return_value = 0.01  # 1% reversed -> 99% SLI
+        results = await evaluate_slos("http://prom", [slo], verdict_store)
+
+    assert results[0].breach is False
+    assert results[0].consecutive == 0
