@@ -13,13 +13,17 @@ and error, and the failure count reaching the caller on the result object.
 """
 from __future__ import annotations
 
+import argparse
 import textwrap
 from pathlib import Path
 
+import pytest
 import structlog
 from nthlayer_common.verdicts.core import create
+from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
 from nthlayer_common.verdicts.store import MemoryStore
 
+from nthlayer_workers.learn.cli import _cmd_retrospective
 from nthlayer_workers.learn.retrospective import (
     _load_manifests_from_specs,
     build_retrospective,
@@ -46,15 +50,47 @@ BROKEN_MANIFEST = textwrap.dedent("""
 """).strip()
 
 
-def _write_specs(tmp_path: Path, *, broken: int = 0, good: bool = True) -> Path:
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    if good:
-        (tmp_path / "svc-good.yaml").write_text(GOOD_MANIFEST)
+def _write_specs(specs_dir: Path, *, broken: int = 0) -> Path:
+    """Write one parseable manifest plus ``broken`` unparseable ones."""
+    specs_dir.mkdir(parents=True, exist_ok=True)
+    (specs_dir / "svc-good.yaml").write_text(GOOD_MANIFEST)
     for i in range(broken):
-        (tmp_path / f"svc-broken-{i}.yaml").write_text(
+        (specs_dir / f"svc-broken-{i}.yaml").write_text(
             BROKEN_MANIFEST.replace("svc-broken", f"svc-broken-{i}")
         )
-    return tmp_path
+    return specs_dir
+
+
+def _incident():
+    """An incident verdict with no lineage — the minimum ``build_retrospective``
+    accepts. ``subject.type='custom'`` because nthlayer-common's
+    VALID_SUBJECT_TYPES has no 'incident' bucket and build_retrospective does
+    not inspect the incident's own subject.type.
+    """
+    return create(
+        subject={
+            "type": "custom",
+            "ref": "INC-1",
+            "service": "svc-good",
+            "summary": "test incident",
+        },
+        judgment={"action": "flag", "confidence": 0.9, "reasoning": "test"},
+        producer={"system": "test"},
+        metadata={"custom": {"incident_id": "INC-1"}},
+    )
+
+
+@pytest.fixture
+def incident_db(tmp_path: Path):
+    """A real on-disk verdict store holding one incident — the CLI path opens
+    the DB by path, so a MemoryStore will not do (CLAUDE.md rule 14).
+    """
+    db = tmp_path / "verdicts.db"
+    store = SQLiteVerdictStore(str(db))
+    incident = _incident()
+    store.put(incident)
+    store.close()
+    return db, incident.id
 
 
 class TestParseFailureLogged:
@@ -114,24 +150,10 @@ class TestRetrospectiveSurfacesParseFailures:
     indistinguishable from a clean run.
     """
 
-    @staticmethod
-    def _incident():
-        return create(
-            subject={
-                "type": "custom",
-                "ref": "INC-1",
-                "service": "svc-good",
-                "summary": "test incident",
-            },
-            judgment={"action": "flag", "confidence": 0.9, "reasoning": "test"},
-            producer={"system": "test"},
-            metadata={"custom": {"incident_id": "INC-1"}},
-        )
-
     def test_parse_failure_count_present_in_retro_custom(self, tmp_path: Path):
         _write_specs(tmp_path, broken=1)
         store = MemoryStore()
-        incident = self._incident()
+        incident = _incident()
         store.put(incident)
 
         retro = build_retrospective(incident.id, store, specs_dir=str(tmp_path))
@@ -140,7 +162,7 @@ class TestRetrospectiveSurfacesParseFailures:
 
     def test_parse_failure_count_zero_when_no_specs_dir(self):
         store = MemoryStore()
-        incident = self._incident()
+        incident = _incident()
         store.put(incident)
 
         retro = build_retrospective(incident.id, store)
@@ -149,18 +171,13 @@ class TestRetrospectiveSurfacesParseFailures:
 
 
 class TestCliSurfacesParseFailures:
-    """R5 pass 1: the count reaching ``retro.metadata.custom`` is only half
-    the fix while the human-facing surface still prints the financial figure
-    with no caveat. ``nthlayer-learn retrospective`` is the caller a person
-    actually reads.
+    """The count reaching ``retro.metadata.custom`` is only half the fix while
+    the human-facing surface still prints the financial figure with no caveat.
+    ``nthlayer-learn retrospective`` is the caller a person actually reads.
     """
 
     @staticmethod
-    def _run_cli(db_path: Path, incident_id: str, specs_dir: str | None):
-        import argparse
-
-        from nthlayer_workers.learn.cli import _cmd_retrospective
-
+    def _run_cli(db_path: Path, incident_id: str, specs_dir: str | None) -> None:
         _cmd_retrospective(
             argparse.Namespace(
                 db=str(db_path),
@@ -170,31 +187,18 @@ class TestCliSurfacesParseFailures:
             )
         )
 
-    def test_cli_reports_parse_failures(self, tmp_path: Path, capsys):
-        from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
-
+    def test_cli_reports_parse_failures(self, tmp_path: Path, incident_db, capsys):
         specs = _write_specs(tmp_path / "specs", broken=1)
-        db = tmp_path / "verdicts.db"
-        store = SQLiteVerdictStore(str(db))
-        incident = TestRetrospectiveSurfacesParseFailures._incident()
-        store.put(incident)
-        store.close()
+        db, incident_id = incident_db
 
-        self._run_cli(db, incident.id, str(specs))
+        self._run_cli(db, incident_id, str(specs))
 
-        out = capsys.readouterr().out
-        assert "Manifest parse failures: 1" in out
+        assert "Manifest parse failures: 1" in capsys.readouterr().out
 
-    def test_cli_silent_when_no_parse_failures(self, tmp_path: Path, capsys):
-        from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
-
+    def test_cli_silent_when_no_parse_failures(self, tmp_path: Path, incident_db, capsys):
         specs = _write_specs(tmp_path / "specs")
-        db = tmp_path / "verdicts.db"
-        store = SQLiteVerdictStore(str(db))
-        incident = TestRetrospectiveSurfacesParseFailures._incident()
-        store.put(incident)
-        store.close()
+        db, incident_id = incident_db
 
-        self._run_cli(db, incident.id, str(specs))
+        self._run_cli(db, incident_id, str(specs))
 
         assert "Manifest parse failures" not in capsys.readouterr().out

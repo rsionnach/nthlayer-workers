@@ -117,8 +117,8 @@ def build_retrospective(
     # ground-truth view of operator-declared deps that downstream
     # add_dependency recommendation logic compares against the
     # incident's observed call graph.
-    loaded = _load_manifests_from_specs(specs_dir)
-    declared_dependencies_by_service = _extract_declared_dependencies(loaded.manifests)
+    loaded_specs = _load_manifests_from_specs(specs_dir)
+    declared_dependencies_by_service = _extract_declared_dependencies(loaded_specs.manifests)
 
     # Financial impact (if specs available)
     financial_impact = _compute_financial_impact(
@@ -126,7 +126,7 @@ def build_retrospective(
         duration_minutes,
         breach_counts_by_service,
         specs_dir,
-        loaded_manifests=loaded.manifests,
+        loaded_manifests=loaded_specs.manifests,
     )
 
     # Generate recommendations
@@ -159,7 +159,7 @@ def build_retrospective(
         # opensrm-oh27: always present, 0 on a clean load. An absent key
         # would read the same as "no failures", which is the ambiguity
         # the silent skip created in the first place.
-        "manifest_parse_failures": loaded.parse_failures,
+        "manifest_parse_failures": loaded_specs.parse_failures,
     }
     if trigger_service is not None:
         retro_custom["trigger_service"] = trigger_service

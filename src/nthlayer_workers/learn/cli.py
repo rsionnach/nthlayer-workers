@@ -146,7 +146,7 @@ def _cmd_retrospective(args: argparse.Namespace) -> None:
         if parse_failures:
             print(
                 f"  Manifest parse failures: {parse_failures} "
-                f"(figures computed over a subset; see manifest_parse_failed logs)"
+                "(figures computed over a subset; see manifest_parse_failed logs)"
             )
     except KeyError as e:
         print(f"Error: {e}", file=__import__("sys").stderr)
