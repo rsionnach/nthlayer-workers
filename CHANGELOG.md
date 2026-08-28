@@ -6,6 +6,42 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [2.0.0](https://github.com/rsionnach/nthlayer-workers/compare/v1.7.1...v2.0.0) (2026-08-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **observe:** observe.slo.spec_loader.load_specs now returns LoadedSpecs(service_slos, parse_failures) instead of list[ServiceSLO]. Callers iterating the return value directly must use `.service_slos`. The count exists so a caller can tell a partial view from a complete one: before this, a service whose manifest failed to parse contributed zero SLOs and was indistinguishable from one declaring none. Requires nthlayer-common>=2.1.2.
+
+### Features
+
+* **observe:** return LoadedSpecs from load_specs; require common&gt;=2.1.2 ([dedded3](https://github.com/rsionnach/nthlayer-workers/commit/dedded3fac1fa9475a9ca2b217f5189e3abdf06b))
+
+
+### Bug Fixes
+
+* **learn:** log and count manifest parse failures in retrospective (opensrm-oh27) ([375f667](https://github.com/rsionnach/nthlayer-workers/commit/375f667ac1469e27261d5572f7edfcb631f46323))
+* **learn:** log and count manifest parse failures in retrospective (opensrm-oh27) ([4cee6d7](https://github.com/rsionnach/nthlayer-workers/commit/4cee6d77922f7aed8d9e8f0597c2d0aababae299))
+* **measure:** judgment SLO breach check could never fire (opensrm-fxln) ([0da9b39](https://github.com/rsionnach/nthlayer-workers/commit/0da9b39e31ff38346d2a5e1ff0ee2886706d99ea))
+* **measure:** load_specs must understand v2 manifests (opensrm-fxln) ([95c63c7](https://github.com/rsionnach/nthlayer-workers/commit/95c63c783b9b07265fc515f2f0ea3e6dcbc241ce))
+* **measure:** query and breach rule are a matched pair (opensrm-fxln) ([bbe2c0c](https://github.com/rsionnach/nthlayer-workers/commit/bbe2c0caa826508b9c635915f6a8941651766883))
+* **measure:** v2 manifests yielded zero SLOs and judgment SLOs could not breach (opensrm-fxln) ([718c5e6](https://github.com/rsionnach/nthlayer-workers/commit/718c5e6ac16e91fd3a7d3a6e759d713fb0a1814b))
+* **observe:** log and count spec parse failures (opensrm-3470) ([5e5769f](https://github.com/rsionnach/nthlayer-workers/commit/5e5769fa77894849077fb48af00bf893a1d19e27))
+* **observe:** log and count spec parse failures (opensrm-3470) ([4162edf](https://github.com/rsionnach/nthlayer-workers/commit/4162edf4dc39a9c091baf32645ad871340f41285))
+
+
+### Code Refactoring
+
+* **learn:** use the shared scan gate instead of a local copy (opensrm-3470) ([5c68d8f](https://github.com/rsionnach/nthlayer-workers/commit/5c68d8fba86f0722a3de61be98be67b096f8f47c))
+* **learn:** use the shared scan gate instead of a local copy (opensrm-3470) ([e788c88](https://github.com/rsionnach/nthlayer-workers/commit/e788c88d2f7829eac517e4b0d6e5893a59dfffa1))
+* **observe:** extract the parse-failure warning; rename a stale test (opensrm-3470) ([51cc2b2](https://github.com/rsionnach/nthlayer-workers/commit/51cc2b28d21105b58f7b5131d30e9e0572657ee9))
+* **observe:** extract the parse-failure warning; rename a stale test (opensrm-3470) ([f320236](https://github.com/rsionnach/nthlayer-workers/commit/f320236a00881898666e78f64217d15c62b43cbe))
+
+
+### Documentation
+
+* add contributing guide (opensrm-tu04.4) ([866f155](https://github.com/rsionnach/nthlayer-workers/commit/866f155946e22ff198e60d5e0ae78fe74985227e))
+
 ## [1.7.1](https://github.com/rsionnach/nthlayer-workers/compare/v1.7.0...v1.7.1) (2026-06-24)
 
 
