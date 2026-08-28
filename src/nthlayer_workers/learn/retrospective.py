@@ -265,7 +265,8 @@ def _foreign_yaml_reason(spec_file: Path) -> str | None:
     format predicates, so this cannot drift from what the parser accepts; then
     a near miss on those headers, since a typo'd kind or a drifted API group is
     an ordinary way a real manifest breaks; then the body, since a bad merge or
-    a mis-indent can strip the header while leaving ``spec.service`` intact.
+    a mis-indent can strip the header while leaving ``spec.service`` (as a
+    mapping), ``spec.slos`` or ``spec.outcomes`` intact.
     Anything unreadable or empty counts too — a syntax error or a truncated
     write inside a specs directory is a deployment error either way.
 
