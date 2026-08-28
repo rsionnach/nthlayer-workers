@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import httpx
-import yaml
+from nthlayer_common.manifest import (
+    ManifestLoadError,
+    foreign_yaml_reason,
+    iter_manifest_files,
+    load_manifest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,64 +42,87 @@ class EvaluationResult:
     consecutive: int
 
 
-def load_specs(specs_dir: Path) -> list[SLODefinition]:
-    """Load all OpenSRM specs from a directory and extract SLO definitions."""
+@dataclass(frozen=True)
+class LoadedSpecs:
+    """Outcome of scanning a specs directory (opensrm-fxln).
+
+    ``parse_failures`` counts FILES that failed to load while aiming to be a
+    manifest. It travels with the SLOs because everything downstream
+    evaluates ``slos`` alone: without it, a service whose manifest failed to
+    parse contributes nothing and is indistinguishable from one declaring no
+    SLOs — so the SLOs that would have breached are simply never evaluated.
+    """
+
+    slos: list[SLODefinition] = field(default_factory=list)
+    parse_failures: int = 0
+
+
+def load_specs(specs_dir: Path) -> LoadedSpecs:
+    """Load OpenSRM specs from a directory and extract SLO definitions.
+
+    Uses ``load_manifest`` rather than reading YAML by hand. The previous
+    implementation read ``spec.slos``, which exists only in srm/v1 — a v2
+    manifest carries ``spec.slo`` and ``spec.judgment_slo``, so it yielded
+    ZERO SLOs with no error and no warning (opensrm-fxln). The ecosystem
+    migrated to v2 under opensrm-ih0v, so anything migrated was silently
+    unmeasured.
+
+    Going through the parser also removes two reimplementations that had
+    drifted: a four-name judgment-type list that disagreed with
+    JUDGMENT_SLO_TYPES, and a target normalisation that duplicated the
+    0-100 convention nthlayer-common owns.
+    """
     slos: list[SLODefinition] = []
+    parse_failures = 0
     if not specs_dir.is_dir():
-        return slos
+        return LoadedSpecs()
 
-    for spec_file in sorted(specs_dir.glob("*.yaml")):
+    for spec_file in iter_manifest_files(specs_dir):
         try:
-            raw = yaml.safe_load(spec_file.read_text())
-        except Exception:
-            logger.warning("Failed to parse spec: %s", spec_file)
-            continue
-        if not isinstance(raw, dict):
-            continue
-
-        metadata = raw.get("metadata", {})
-        service = metadata.get("name", spec_file.stem)
-        spec = raw.get("spec", {})
-        slo_defs = spec.get("slos", {})
-
-        for slo_name, slo_data in slo_defs.items():
-            if not isinstance(slo_data, dict):
+            manifest = load_manifest(spec_file, suppress_deprecation_warning=True)
+        except (ManifestLoadError, FileNotFoundError, ValueError, OSError) as exc:
+            reason = foreign_yaml_reason(spec_file)
+            if reason is not None:
+                logger.debug("Ignoring non-manifest file %s: %s", spec_file, reason)
                 continue
-            target = slo_data.get("target")
-            if target is None:
+            parse_failures += 1
+            logger.warning("Failed to load manifest %s: %s", spec_file, exc)
+            continue
+
+        for slo in manifest.slos:
+            query = slo.indicator_query or _query_for(manifest.name, slo)
+            if query is None:
+                logger.debug(
+                    "No query for %s/%s; skipping", manifest.name, slo.name
+                )
                 continue
-
-            # Normalize target (e.g., 99.9 → 0.999 for availability)
-            if slo_name == "availability" and target > 1:
-                target = target / 100.0
-
-            window = slo_data.get("window", "7d")
-
-            # Determine SLO type and PromQL query
-            if slo_name in ("reversal_rate", "high_confidence_failure", "calibration", "feedback_latency"):
-                slo_type = "judgment"
-                query = _judgment_slo_query(service, slo_name, window)
-            elif slo_name == "availability":
-                slo_type = "traditional"
-                query = f'slo:error_budget:ratio{{service="{service}"}}'
-            elif slo_name == "latency":
-                slo_type = "traditional"
-                percentile = slo_data.get("percentile", "p99")
-                query = f'slo:http_request_duration_seconds:{percentile}{{service="{service}"}}'
-            else:
-                slo_type = "traditional"
-                query = f'slo:{slo_name}:ratio{{service="{service}"}}'
-
             slos.append(SLODefinition(
-                service=service,
-                slo_name=slo_name,
-                slo_type=slo_type,
-                target=target,
-                window=window,
+                service=manifest.name,
+                slo_name=slo.name,
+                slo_type="judgment" if slo.judgment_type else "traditional",
+                target=slo.target,
+                window=slo.window or "7d",
                 query=query,
             ))
 
-    return slos
+    return LoadedSpecs(slos=slos, parse_failures=parse_failures)
+
+
+def _query_for(service: str, slo) -> str | None:
+    """PromQL for an SLO whose manifest declared no indicator query.
+
+    Judgment SLOs get the interim raw-metric queries below. Classical SLOs
+    fall back to the recording-rule naming convention.
+    """
+    name = slo.name
+    if slo.judgment_type:
+        return _judgment_slo_query(service, name, slo.window or "7d")
+    if name == "availability":
+        return f'slo:error_budget:ratio{{service="{service}"}}'
+    if name == "latency":
+        percentile = getattr(slo, "percentile", None) or "p99"
+        return f'slo:http_request_duration_seconds:{percentile}{{service="{service}"}}'
+    return f'slo:{name}:ratio{{service="{service}"}}'
 
 
 # PromQL builders keyed by judgment SLO name. Lambdas take (service,

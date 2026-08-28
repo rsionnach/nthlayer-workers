@@ -23,6 +23,7 @@ apiVersion: srm/v1
 kind: ServiceReliabilityManifest
 metadata:
   name: fraud-detect
+  team: payments-ml
   tier: critical
 spec:
   type: ai-gate
@@ -31,7 +32,7 @@ spec:
       target: 99.9
       window: 30d
     reversal_rate:
-      target: 0.05
+      target: 98.5
       window: 7d
     latency:
       target: 100
@@ -57,28 +58,37 @@ def verdict_store():
 # --- load_specs tests ---
 
 def test_load_specs_parses_slos(specs_dir):
-    slos = load_specs(specs_dir)
+    slos = load_specs(specs_dir).slos
     assert len(slos) == 3
     names = {s.slo_name for s in slos}
     assert names == {"availability", "reversal_rate", "latency"}
 
 
 def test_load_specs_classifies_judgment_slos(specs_dir):
-    slos = load_specs(specs_dir)
+    slos = load_specs(specs_dir).slos
     by_name = {s.slo_name: s for s in slos}
     assert by_name["reversal_rate"].slo_type == "judgment"
     assert by_name["availability"].slo_type == "traditional"
     assert by_name["latency"].slo_type == "traditional"
 
 
-def test_load_specs_normalizes_availability_target(specs_dir):
-    slos = load_specs(specs_dir)
+def test_load_specs_keeps_the_canonical_target_convention(specs_dir):
+    """Renamed from test_load_specs_normalizes_availability_target.
+
+    The adapter used to divide availability targets by 100, producing 0.999
+    from a 99.9 spec — a second, local copy of a convention
+    nthlayer-common owns (CLAUDE.md hard rule 1: targets are 0-100).
+    Nothing consumed the normalised value: evaluate_slos ignores
+    availability's target entirely, comparing an error-budget ratio against
+    zero. Deleted with the hand-rolled reader (opensrm-fxln).
+    """
+    slos = load_specs(specs_dir).slos
     avail = next(s for s in slos if s.slo_name == "availability")
-    assert avail.target == pytest.approx(0.999)
+    assert avail.target == pytest.approx(99.9)
 
 
 def test_load_specs_builds_promql(specs_dir):
-    slos = load_specs(specs_dir)
+    slos = load_specs(specs_dir).slos
     rev = next(s for s in slos if s.slo_name == "reversal_rate")
     assert "gen_ai_overrides_total" in rev.query
     assert "gen_ai_decisions_total" in rev.query
@@ -86,7 +96,7 @@ def test_load_specs_builds_promql(specs_dir):
 
 
 def test_load_specs_empty_dir(tmp_path):
-    slos = load_specs(tmp_path)
+    slos = load_specs(tmp_path).slos
     assert slos == []
 
 
@@ -460,3 +470,99 @@ async def test_judgment_slo_healthy_when_reversal_within_target(verdict_store):
 
     assert results[0].breach is False
     assert results[0].consecutive == 0
+
+
+# --- opensrm-fxln: load_specs must understand v2, .yml, and count failures ---
+
+
+def _v1(name: str) -> str:
+    return (
+        "apiVersion: srm/v1\nkind: ServiceReliabilityManifest\n"
+        f"metadata: {{name: {name}, team: t, tier: critical}}\n"
+        "spec:\n  type: api\n  slos:\n    availability:\n"
+        "      target: 99.9\n      window: 30d\n"
+        '      indicator: {query: \'up{job="x"}\'}\n'
+    )
+
+
+def _v2(name: str) -> str:
+    return (
+        "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
+        f"metadata: {{name: {name}, labels: {{tier: critical}}}}\n"
+        "spec:\n  owner: {group: 'group:default/t'}\n"
+        f"  service: {{name: {name}, type: api}}\n"
+        "  slo:\n    - apiVersion: openslo/v1\n      kind: SLO\n"
+        "      metadata: {name: availability}\n"
+        f"      spec:\n        service: {name}\n"
+        "        objectives: [{target: 0.999}]\n"
+    )
+
+
+class TestLoadSpecsUnderstandsBothFormats:
+    """opensrm-fxln — the adapter hand-rolled v1 parsing and silently
+    ignored v2.
+
+    It read `spec.slos`, which exists only in srm/v1. A v2 manifest carries
+    `spec.slo` and `spec.judgment_slo`, so slo_defs came back empty and the
+    service contributed ZERO SLOs — no error, no warning, exit 0. The whole
+    ecosystem migrated to v2 under opensrm-ih0v, so anything migrated was
+    silently unmeasured.
+    """
+
+    def test_v2_manifest_yields_slos(self, tmp_path):
+        (tmp_path / "svc.yaml").write_text(_v2("checkout"))
+
+        loaded = load_specs(tmp_path)
+
+        assert [s.service for s in loaded.slos] == ["checkout"]
+
+    def test_v1_and_v2_in_one_directory_both_load(self, tmp_path):
+        (tmp_path / "old.yaml").write_text(_v1("legacy"))
+        (tmp_path / "new.yaml").write_text(_v2("checkout"))
+
+        loaded = load_specs(tmp_path)
+
+        assert {s.service for s in loaded.slos} == {"legacy", "checkout"}
+
+    def test_yml_suffix_is_seen(self, tmp_path):
+        """`.glob("*.yaml")` missed `.yml` — the same silent subset reached
+        by file extension rather than parse error (opensrm-oh27)."""
+        (tmp_path / "svc.yml").write_text(_v1("legacy"))
+
+        assert [s.service for s in load_specs(tmp_path).slos] == ["legacy"]
+
+    def test_broken_manifest_is_counted_not_swallowed(self, tmp_path):
+        (tmp_path / "good.yaml").write_text(_v1("legacy"))
+        (tmp_path / "bad.yaml").write_text(
+            "apiVersion: srm/v1\nkind: ServiceReliabilityManifest\n"
+            "metadata: {name: b, team: t, tier: nonexistent-tier}\n"
+            "spec: {type: api, slos: {}}\n"
+        )
+
+        loaded = load_specs(tmp_path)
+
+        assert [s.service for s in loaded.slos] == ["legacy"]
+        assert loaded.parse_failures == 1
+
+    def test_foreign_yaml_is_not_counted(self, tmp_path):
+        (tmp_path / "prometheus.yaml").write_text("groups:\n  - name: g\n    rules: []\n")
+        (tmp_path / "svc.yaml").write_text(_v1("legacy"))
+
+        loaded = load_specs(tmp_path)
+
+        assert loaded.parse_failures == 0
+
+    def test_manifest_without_a_name_is_not_named_after_its_file(self, tmp_path):
+        """`metadata.get("name", spec_file.stem)` attributed a nameless
+        manifest's SLOs to a service named after the file — measuring them
+        against the wrong service rather than not at all."""
+        (tmp_path / "checkout.yaml").write_text(
+            "apiVersion: srm/v1\nkind: ServiceReliabilityManifest\n"
+            "metadata: {team: t, tier: critical}\n"
+            "spec: {type: api, slos: {availability: {target: 99.9}}}\n"
+        )
+
+        loaded = load_specs(tmp_path)
+
+        assert [s.service for s in loaded.slos] == []
+        assert loaded.parse_failures == 1
