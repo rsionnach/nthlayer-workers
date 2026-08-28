@@ -118,7 +118,7 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
 
 
 def _query_for(service: str, slo: ManifestSLO) -> str:
-    """PromQL for an SLO whose manifest declared no indicator query.
+    """PromQL for an SLO, always synthesised, never taken from the manifest.
 
     Judgment SLOs get the interim raw-metric queries below. Classical SLOs
     fall back to the recording-rule naming convention. Always returns a

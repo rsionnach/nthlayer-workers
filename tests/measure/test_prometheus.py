@@ -650,11 +650,10 @@ class TestQueryAndBreachLogicAreAMatchedPair:
         )
 
     def test_a_judgment_type_with_no_builder_gets_the_recording_rule_query(self, tmp_path):
-        """_JUDGMENT_SLO_QUERIES covers 4 of the 8 JUDGMENT_SLO_TYPES.
-
-        The other 4 must reach the `slo:{name}:ratio` convention. They used
-        to get `""`, which is not None, so it passed the guard, went to
-        Prometheus, 400'd, and came back None — skipped silently.
+        """The same rule as
+        test_unbuilt_judgment_type_falls_back_to_recording_rule, which
+        carries the rationale — reached through load_specs rather than by
+        calling _query_for directly.
         """
         (tmp_path / "svc.yaml").write_text(
             "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
