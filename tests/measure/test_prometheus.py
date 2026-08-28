@@ -881,3 +881,69 @@ async def test_latency_target_is_read_in_its_declared_unit(tmp_path, verdict_sto
     assert results[0].raw_breach is False, (
         "a 2s target read as 2ms makes every response a breach"
     )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="opensrm-vrpa: feedback_latency is in opensrm's v1 schema.json "
+    "but not in nthlayer-common's JUDGMENT_SLO_TYPES, so parser/v1.py never "
+    "sets judgment_type for it. Flips to a pass — and so fails strictly — "
+    "the day the vocabularies are reconciled, which is the signal to "
+    "reconnect the builder here.",
+)
+def test_feedback_latency_cannot_reach_its_own_branch(tmp_path):
+    """Pins a schema-vs-parser divergence, not a decision made in this repo.
+
+    Until it is fixed, a v1 `slos.feedback_latency` is evaluated by the
+    "ratio" rule — `current_value * 100 < target` against a seconds gauge,
+    so 0.5s reads as 50. The builder and judgment_duration branch that would
+    read it correctly exist and cannot be selected.
+    """
+    (tmp_path / "svc.yaml").write_text(
+        "apiVersion: srm/v1\nkind: ServiceReliabilityManifest\n"
+        "metadata: {name: svc, team: t, tier: critical}\n"
+        "spec:\n  type: ai-gate\n  slos:\n"
+        "    feedback_latency: {target: 300, unit: s, window: 7d}\n"
+    )
+    slo = next(
+        s for s in load_specs(tmp_path).slos if s.slo_name == "feedback_latency"
+    )
+    assert slo.query_kind == "judgment_duration"
+
+
+@pytest.mark.parametrize(
+    ("unit", "expected_seconds"),
+    [("s", 2.0), ("S", 2.0), ("sec", 2.0), ("seconds", 2.0), (" ms ", 0.002)],
+)
+def test_duration_units_are_matched_leniently(unit, expected_seconds):
+    """Manifests are hand-written; `unit: seconds` must not mean milliseconds.
+
+    An unmatched unit assumes ms, so every one of these spellings falling
+    through would give a threshold 1000x too small and breach every window.
+    """
+    from nthlayer_workers.measure.adapters.prometheus import _target_seconds
+
+    assert _target_seconds(2.0, unit) == pytest.approx(expected_seconds)
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_evaluate_once_rejects_a_hysteresis_below_one(tmp_path, value, capsys):
+    """`consecutive >= 0` is true before any window runs.
+
+    --hysteresis 0 makes every judgment SLO breach on its first evaluation —
+    the exact false-positive inverse of the bug this bead fixed — and a
+    negative value drives the history window to zero.
+    """
+    import argparse
+
+    from nthlayer_workers.measure.cli import cmd_evaluate_once
+
+    args = argparse.Namespace(
+        specs_dir=str(tmp_path), hysteresis=value,
+        verdict_store=str(tmp_path / "v.db"), prometheus_url="http://prom",
+        decision_store=None,
+    )
+    with pytest.raises(SystemExit) as exc:
+        cmd_evaluate_once(args)
+
+    assert exc.value.code == 2

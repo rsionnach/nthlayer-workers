@@ -122,6 +122,16 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
         load_specs,
     )
 
+    if args.hysteresis < 1:
+        # `breach = consecutive >= 0` is true before any window is evaluated,
+        # so --hysteresis 0 makes every judgment SLO breach immediately; it
+        # also drives the history window size to zero or negative.
+        print(
+            f"--hysteresis must be at least 1, got {args.hysteresis}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     specs_dir = Path(args.specs_dir)
     loaded = load_specs(specs_dir)
     slos = loaded.slos
@@ -520,7 +530,8 @@ def main() -> None:
     eo_parser.add_argument("--verdict-store", default="verdicts.db", help="Path to verdict SQLite DB")
     eo_parser.add_argument(
         "--hysteresis", type=int, default=3,
-        help="Consecutive breach windows before judgment SLO triggers (default: 3)",
+        help="Consecutive breach windows before judgment SLO triggers "
+             "(default: 3, minimum: 1)",
     )
     eo_parser.add_argument(
         "--decision-store", default=None,

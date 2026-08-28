@@ -202,6 +202,15 @@ _JUDGMENT_QUERY_KINDS = {
     "reversal_rate": "judgment_rate",
     "high_confidence_failure": "judgment_rate",
     "calibration": "judgment_rate",
+    # Unreachable today: feedback_latency is in opensrm's v1 schema.json and
+    # in its CHANGELOG, but NOT in nthlayer-common's JUDGMENT_SLO_TYPES, and
+    # parser/v1.py sets judgment_type only on membership. So a manifest
+    # declaring it parses with judgment_type=None and lands on "ratio",
+    # which multiplies a seconds gauge by 100. Kept rather than deleted
+    # because the divergence is the bug (opensrm-vrpa) and this is the
+    # correct handling once it is fixed;
+    # test_feedback_latency_cannot_reach_its_own_branch is a strict xfail
+    # that fails the day it becomes reachable.
     "feedback_latency": "judgment_duration",
 }
 
@@ -227,7 +236,17 @@ def evaluation_custom_metadata(result: EvaluationResult) -> dict:
 
 # Seconds per unit of a duration target. Prometheus latency queries return
 # seconds, so the target is converted TO seconds rather than the reverse.
-_DURATION_UNIT_SECONDS = {"ms": 0.001, "s": 1.0, "us": 0.000_001, "m": 60.0}
+# Keys are matched case-insensitively after stripping; the spelled-out and
+# abbreviated forms are aliases because manifests are hand-written and
+# `unit: seconds` reaching the unknown-unit path would assume milliseconds —
+# a threshold 1000x too small that breaches every window.
+_DURATION_UNIT_SECONDS = {
+    "us": 0.000_001, "µs": 0.000_001, "microsecond": 0.000_001,
+    "microseconds": 0.000_001,
+    "ms": 0.001, "msec": 0.001, "millisecond": 0.001, "milliseconds": 0.001,
+    "s": 1.0, "sec": 1.0, "secs": 1.0, "second": 1.0, "seconds": 1.0,
+    "m": 60.0, "min": 60.0, "minute": 60.0, "minutes": 60.0,
+}
 
 # What a duration target means when the manifest declared no unit. The
 # schema's own latency example uses `ms`, and so does every manifest in the
@@ -246,7 +265,7 @@ def _target_seconds(target: float, unit: str | None) -> float:
             _DEFAULT_DURATION_UNIT,
         )
         unit = _DEFAULT_DURATION_UNIT
-    scale = _DURATION_UNIT_SECONDS.get(unit)
+    scale = _DURATION_UNIT_SECONDS.get(unit.strip().lower())
     if scale is None:
         logger.warning(
             "Unknown duration unit %r for target %s; assuming %s",
