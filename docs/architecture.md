@@ -11,6 +11,8 @@ in `CLAUDE.md` are canonical for runtime invariants — this file is the
 src/nthlayer_workers/
   __init__.py       # Package marker: "Tier 2 background computation modules"
   cli.py            # nthlayer-workers serve  + gate subcommand
+  cli_output.py     # warn_parse_failures() — operator-facing stderr shared
+                    #   by the observe and measure CLIs [opensrm-fxln]
   runner.py         # ModuleRunner orchestrator (see below)
 ```
 
@@ -271,7 +273,15 @@ budget).
 
 `cli.py` — `nthlayer-measure` CLI. Live subcommands: `evaluate` /
 `evaluate-once` / `status` / `calibrate` / `overrides {list, create}` /
-`tiering {show, restore}`. The legacy `serve` / `api-serve` /
+`tiering {show, restore}`. `evaluate-once --hysteresis` has a minimum of
+1 and exits 2 below it: `consecutive >= 0` is true before any window is
+evaluated, so 0 breached every judgment SLO on its first cycle. It also
+surfaces `LoadedSpecs.parse_failures` on stderr via
+`nthlayer_workers.cli_output.warn_parse_failures`, and writes each
+verdict's `metadata.custom` through
+`prometheus.evaluation_custom_metadata` — the same definition
+`count_consecutive_breaches` reads back [opensrm-fxln]. The legacy
+`serve` / `api-serve` /
 `governance {show, restore}` subcommands (and the `_build_pipeline`
 helper they shared) were retired under opensrm-t5yr —
 `nthlayer-measure serve` superseded by `nthlayer-workers serve`
@@ -289,7 +299,10 @@ unknown top-level key (lists offenders + valid set, sort uses
 `governance:` (retired under opensrm-t5yr) is treated as any other
 unknown key — no deprecation grace [opensrm-m655].
 
-`adapters/prometheus.py` — `_query_for(service, slo) -> (query,
+`adapters/prometheus.py` — `load_specs(specs_dir) -> LoadedSpecs`, whose
+`.slos` / `.parse_failures` replace the bare `list[SLODefinition]` it used
+to return; every caller must unwrap it [opensrm-fxln]. `_query_for(service,
+slo) -> (query,
 query_kind)`, the single query builder. The kind rides on
 `SLODefinition.query_kind` (no default — a wrong one is silent) and is
 what `evaluate_slos` dispatches its breach rule on: `judgment_rate`

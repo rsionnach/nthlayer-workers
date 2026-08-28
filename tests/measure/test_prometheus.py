@@ -636,7 +636,7 @@ class TestQueryAndBreachLogicAreAMatchedPair:
             "  judgment_slo:\n    - metadata: {name: reversal-guard}\n"
             "      spec:\n        service: svc\n"
             "        judgment_type: reversal_rate\n"
-            "        target: {maximum_reversal_rate: 0.05}\n"
+            "        target: {maximum_reversal_rate: 5.0}\n"
         )
 
         slo = load_specs(tmp_path).slos[0]
@@ -661,7 +661,7 @@ class TestQueryAndBreachLogicAreAMatchedPair:
             "  judgment_slo:\n    - metadata: {name: seg}\n"
             "      spec:\n        service: svc\n"
             "        judgment_type: segments\n"
-            "        target: {maximum_variance_from_overall: 0.15}\n"
+            "        target: {maximum_variance_from_overall: 15.0}\n"
         )
 
         for slo in load_specs(tmp_path).slos:
@@ -705,9 +705,6 @@ def _seed_verdicts(store, results, n=1):
     """
     from nthlayer_common.verdicts import create
 
-    from nthlayer_workers.measure.adapters.prometheus import (
-        evaluation_custom_metadata,
-    )
     for _ in range(n):
         for r in results:
             store.put(create(
