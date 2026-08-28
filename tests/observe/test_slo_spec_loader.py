@@ -79,9 +79,14 @@ class TestLoadSpecs:
         with pytest.raises(ValueError, match="does not exist"):
             load_specs("/nonexistent/path")
 
-    def test_skips_malformed_yaml(self, tmp_path):
+    def test_malformed_yaml_yields_no_slos_and_is_counted(self, tmp_path):
+        """Renamed from test_skips_malformed_yaml: since opensrm-3470 it is
+        not skipped, it is COUNTED. A syntax error inside a specs directory
+        is a deployment error, and the old name would be read as a live
+        contract that it no longer is."""
         (tmp_path / "bad.yaml").write_text("{{invalid yaml:")
         result = load_specs(tmp_path)
+        assert result.parse_failures == 1
         assert result.service_slos == []
 
     def test_skips_spec_without_metadata_name(self, tmp_path):
@@ -140,11 +145,11 @@ class TestParseFailuresAreVisible:
     Same failure shape as opensrm-oh27's financial figure, one subsystem over.
     """
 
-    def _broken(self, tmp_path, name="broken.yaml"):
+    def _broken(self, tmp_path):
         # Aims at being a manifest (v1 header) and fails: tier is invalid, so
         # ReliabilityManifest.__post_init__ raises ValueError, which the old
         # handler swallowed along with everything else.
-        (tmp_path / name).write_text(yaml.dump({
+        (tmp_path / "broken.yaml").write_text(yaml.dump({
             "apiVersion": "srm/v1",
             "kind": "ServiceReliabilityManifest",
             "metadata": {"name": "svc", "team": "t", "tier": "nonexistent-tier"},
