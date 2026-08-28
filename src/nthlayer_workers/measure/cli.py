@@ -116,7 +116,11 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
     from nthlayer_common.verdicts import create as verdict_create
 
     from nthlayer_workers.cli_output import warn_parse_failures
-    from nthlayer_workers.measure.adapters.prometheus import evaluate_slos, load_specs
+    from nthlayer_workers.measure.adapters.prometheus import (
+        evaluate_slos,
+        evaluation_custom_metadata,
+        load_specs,
+    )
 
     specs_dir = Path(args.specs_dir)
     loaded = load_specs(specs_dir)
@@ -149,14 +153,7 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
                     "confidence": 0.95 if r.slo_type == "traditional" else 0.85,
                 },
                 producer={"system": "nthlayer-measure"},
-                metadata={"custom": {
-                    "slo_type": r.slo_type,
-                    "slo_name": r.slo_name,
-                    "target": r.target,
-                    "current_value": r.current_value,
-                    "breach": r.breach,
-                    "consecutive": r.consecutive,
-                }},
+                metadata={"custom": evaluation_custom_metadata(r)},
             )
             # Typed column matches the worker module's emission. Non-breach
             # is an observation, not a typed decision.

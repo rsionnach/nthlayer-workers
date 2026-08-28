@@ -9,10 +9,12 @@ from nthlayer_common.manifest.models import SLODefinition as ManifestSLO
 
 from nthlayer_workers.measure.adapters.prometheus import (
     _JUDGMENT_SLO_QUERIES,
+    EvaluationResult,
     SLODefinition,
     _query_for,
     count_consecutive_breaches,
     evaluate_slos,
+    evaluation_custom_metadata,
     load_specs,
     query_firing_alerts,
     query_prometheus,
@@ -140,7 +142,7 @@ def test_unbuilt_judgment_type_falls_back_to_recording_rule():
         window="5m",
         judgment_type="segment_disparity",
     )
-    assert _query_for("svc", slo) == 'slo:drift-watch:ratio{service="svc"}'
+    assert _query_for("svc", slo)[0] == 'slo:drift-watch:ratio{service="svc"}'
 
 
 def test_judgment_type_not_slo_name_selects_the_builder():
@@ -154,7 +156,7 @@ def test_judgment_type_not_slo_name_selects_the_builder():
         window="5m",
         judgment_type="reversal_rate",
     )
-    assert "gen_ai_overrides_total" in _query_for("fraud-detect", slo)
+    assert "gen_ai_overrides_total" in _query_for("fraud-detect", slo)[0]
 
 
 # --- query_firing_alerts tests ---
@@ -266,7 +268,11 @@ def test_consecutive_breaches_counts_from_newest():
             subject={"type": "evaluation", "ref": "fraud-detect", "summary": f"test {i}"},
             judgment={"action": "flag", "confidence": 0.9},
             producer={"system": "nthlayer-measure"},
-            metadata={"custom": {"slo_name": "reversal_rate", "breach": True, "current_value": 0.08, "target": 0.05}},
+            metadata={"custom": evaluation_custom_metadata(EvaluationResult(
+                service="fraud-detect", slo_name="reversal_rate",
+                slo_type="judgment", target=95.0, current_value=0.08,
+                breach=False, consecutive=0, raw_breach=True,
+            ))},
         )
         verdicts.append(v)
 
@@ -282,13 +288,17 @@ def test_consecutive_breaches_stops_at_non_breach():
 
     verdicts = []
     # 3 breaches, then 1 non-breach, then 2 breaches (older)
-    for breach in [True, True, True, False, True, True]:
-        cv = 0.08 if breach else 0.02
+    for raw_breach in [True, True, True, False, True, True]:
         v = create(
             subject={"type": "evaluation", "ref": "fraud-detect", "summary": "test"},
             judgment={"action": "flag", "confidence": 0.9},
             producer={"system": "nthlayer-measure"},
-            metadata={"custom": {"slo_name": "reversal_rate", "breach": breach, "current_value": cv, "target": 0.05}},
+            metadata={"custom": evaluation_custom_metadata(EvaluationResult(
+                service="fraud-detect", slo_name="reversal_rate",
+                slo_type="judgment", target=95.0,
+                current_value=0.08 if raw_breach else 0.02,
+                breach=False, consecutive=0, raw_breach=raw_breach,
+            ))},
         )
         verdicts.append(v)
 
@@ -317,6 +327,7 @@ async def test_evaluate_slos_healthy_no_breach(verdict_store):
     slo = SLODefinition(
         service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
         target=95.0, window="7d", query="test_query",
+        query_kind="judgment_rate",
     )
 
     with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
@@ -337,6 +348,7 @@ async def test_evaluate_slos_judgment_hysteresis_not_reached(verdict_store):
     slo = SLODefinition(
         service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
         target=95.0, window="7d", query="test_query",
+        query_kind="judgment_rate",
     )
 
     with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
@@ -348,36 +360,14 @@ async def test_evaluate_slos_judgment_hysteresis_not_reached(verdict_store):
     assert results[0].consecutive == 1
 
 
-@pytest.mark.asyncio
-async def test_evaluate_slos_judgment_hysteresis_reached(verdict_store):
-    """Judgment SLO with enough consecutive breaches in verdict store."""
-    from nthlayer_common.verdicts import create
-
-    # Pre-populate 2 consecutive breach verdicts
-    for _ in range(2):
-        v = create(
-            subject={"type": "evaluation", "ref": "fraud-detect", "summary": "breach"},
-            judgment={"action": "flag", "confidence": 0.9},
-            producer={"system": "nthlayer-measure"},
-            metadata={"custom": {"slo_name": "reversal_rate", "breach": True, "current_value": 0.08, "target": 0.05}},
-        )
-        verdict_store.put(v)
-
-    # target in the canonical 0-100 convention: at least 95% not reversed
-    # (opensrm-fxln — these fixtures previously used a 0.05 RATIO, which
-    # agreed with the dead comparison and is why it looked correct).
-    slo = SLODefinition(
-        service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
-        target=95.0, window="7d", query="test_query",
-    )
-
-    with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
-        mock_query.return_value = 0.08  # 8% reversed -> 92% SLI, under 95 — this makes it 3 consecutive
-        results = await evaluate_slos("http://prom", [slo], verdict_store, hysteresis_threshold=3)
-
-    assert len(results) == 1
-    assert results[0].breach is True
-    assert results[0].consecutive == 3
+# test_evaluate_slos_judgment_hysteresis_reached was deleted in opensrm-fxln.
+# It hand-built its prior-window verdicts with `target: 0.05` — a 0-1 ratio
+# that cmd_evaluate_once never writes, since it stores the manifest's 0-100
+# target. That unreal shape was the only thing that satisfied the counter's
+# `current > target`, so the test passed while the real pipeline could not
+# reach the threshold at all. Superseded by
+# test_judgment_hysteresis_reaches_threshold_over_real_verdicts, which seeds
+# through evaluation_custom_metadata.
 
 
 @pytest.mark.asyncio
@@ -386,6 +376,7 @@ async def test_evaluate_slos_traditional_no_hysteresis(verdict_store):
     slo = SLODefinition(
         service="fraud-detect", slo_name="availability", slo_type="traditional",
         target=0.999, window="30d", query="test_query",
+        query_kind="error_budget",
     )
 
     with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
@@ -407,6 +398,9 @@ async def test_evaluate_slos_recovery_resets_consecutive(verdict_store):
             subject={"type": "evaluation", "ref": "fraud-detect", "summary": "breach"},
             judgment={"action": "flag", "confidence": 0.9},
             producer={"system": "nthlayer-measure"},
+            # No raw_breach: a verdict written before opensrm-fxln. The
+            # counter stops on these rather than guessing their per-window
+            # state, so history reads as 0 and recovery is unambiguous.
             metadata={"custom": {"slo_name": "reversal_rate", "breach": True}},
         )
         verdict_store.put(v)
@@ -414,6 +408,7 @@ async def test_evaluate_slos_recovery_resets_consecutive(verdict_store):
     slo = SLODefinition(
         service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
         target=95.0, window="7d", query="test_query",
+        query_kind="judgment_rate",
     )
 
     with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
@@ -431,6 +426,7 @@ async def test_evaluate_slos_skips_missing_data(verdict_store):
     slo = SLODefinition(
         service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
         target=95.0, window="7d", query="test_query",
+        query_kind="judgment_rate",
     )
 
     with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
@@ -464,6 +460,7 @@ async def test_judgment_slo_breaches_when_reversal_exceeds_target(verdict_store)
     slo = SLODefinition(
         service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
         target=98.5, window="7d", query="test_query",
+        query_kind="judgment_rate",
     )
 
     with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
@@ -483,6 +480,7 @@ async def test_judgment_slo_healthy_when_reversal_within_target(verdict_store):
     slo = SLODefinition(
         service="fraud-detect", slo_name="reversal_rate", slo_type="judgment",
         target=98.5, window="7d", query="test_query",
+        query_kind="judgment_rate",
     )
 
     with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
@@ -681,7 +679,8 @@ async def test_breach_dispatches_on_judgment_type_not_name(verdict_store):
     """
     slo = SLODefinition(
         service="fraud-detect", slo_name="reversal-guard", slo_type="judgment",
-        target=98.5, window="7d", query="test_query", judgment_type="reversal_rate",
+        target=98.5, window="7d", query="test_query",
+        query_kind="judgment_rate", judgment_type="reversal_rate",
     )
 
     with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
@@ -690,3 +689,130 @@ async def test_breach_dispatches_on_judgment_type_not_name(verdict_store):
 
     assert results[0].breach is False
     assert results[0].consecutive == 0, "a healthy judgment SLO must not breach"
+
+
+# --- opensrm-fxln edge-cases pass: the breach rule must travel with the query ---
+
+
+def _seed_verdicts(store, results, n=1):
+    """Seed prior-window verdicts the way cmd_evaluate_once actually writes them.
+
+    Goes through evaluation_custom_metadata, the single definition shared by
+    the CLI writer and count_consecutive_breaches. A hand-built dict here is
+    exactly the fixture-provenance trap this pass caught: the old hysteresis
+    fixture seeded `target: 0.05`, a ratio shape the pipeline never produces,
+    so it agreed with a comparison that could not fire.
+    """
+    from nthlayer_common.verdicts import create
+
+    from nthlayer_workers.measure.adapters.prometheus import (
+        evaluation_custom_metadata,
+    )
+    for _ in range(n):
+        for r in results:
+            store.put(create(
+                subject={"type": "evaluation", "ref": r.service, "summary": "w"},
+                judgment={"action": "flag", "confidence": 0.9},
+                producer={"system": "nthlayer-measure"},
+                metadata={"custom": evaluation_custom_metadata(r)},
+            ))
+
+
+@pytest.mark.asyncio
+async def test_judgment_hysteresis_reaches_threshold_over_real_verdicts(verdict_store):
+    """The bead's headline defect, end-to-end rather than per-window.
+
+    The per-window raw_breach was fixed, but count_consecutive_breaches
+    re-derived breach as `current_value > target` — a raw 0-1 rate against a
+    0-100 target, so 0.08 > 95.0 was never true. History always returned 0,
+    consecutive capped at 1, and `breach = consecutive >= 3` stayed
+    unreachable. The fix could not fire through the pipeline it exists for.
+    """
+    slo = SLODefinition(
+        service="fraud-detect", slo_name="reversal-guard", slo_type="judgment",
+        judgment_type="reversal_rate", target=95.0, window="7d",
+        query="q", query_kind="judgment_rate",
+    )
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.return_value = 0.08  # 8% reversed -> 92% SLI, under 95
+        first = await evaluate_slos("http://prom", [slo], verdict_store,
+                                    hysteresis_threshold=3)
+        _seed_verdicts(verdict_store, first)
+        second = await evaluate_slos("http://prom", [slo], verdict_store,
+                                     hysteresis_threshold=3)
+        _seed_verdicts(verdict_store, second)
+        third = await evaluate_slos("http://prom", [slo], verdict_store,
+                                    hysteresis_threshold=3)
+
+    assert [r.consecutive for r in (first[0], second[0], third[0])] == [1, 2, 3]
+    assert first[0].breach is False
+    assert third[0].breach is True
+
+
+@pytest.mark.asyncio
+async def test_recording_rule_fallback_is_not_inverted(verdict_store):
+    """A builder-less judgment type gets an SLI query, so it must not invert.
+
+    Four of the eight JUDGMENT_SLO_TYPES fall through to `slo:{name}:ratio`,
+    which is a GOOD-ratio SLI by convention, not an overrides/decisions rate.
+    Inverting it read a healthy 0.99 as 1.0% and breached every window, while
+    a genuinely bad 0.01 read as 99% healthy — verdicts exactly backwards for
+    half the taxonomy.
+    """
+    healthy = SLODefinition(
+        service="svc", slo_name="seg", slo_type="judgment",
+        judgment_type="segment_disparity", target=95.0, window="7d",
+        query="q", query_kind="ratio",
+    )
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.return_value = 0.99  # 99% good — comfortably above 95
+        results = await evaluate_slos("http://prom", [healthy], verdict_store)
+
+    assert results[0].raw_breach is False, (
+        "0.99 is a 99% SLI against a 95 target; inverting it makes it 1.0%"
+    )
+
+
+@pytest.mark.asyncio
+async def test_latency_rule_follows_the_query_not_the_slo_name(verdict_store):
+    """Same name-vs-type gap the judgment branch closed, on the classical side.
+
+    The latency comparison keyed on `slo_name == "latency"`. A v2 SLO named
+    anything else — p99-latency, checkout-latency — fell to the ratio branch
+    and had its seconds compared against a 0-100 target.
+    """
+    slo = SLODefinition(
+        service="svc", slo_name="p99-latency", slo_type="traditional",
+        target=100.0, window="30d", query="q", query_kind="latency_seconds",
+    )
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.return_value = 0.05  # 50ms, well inside a 100ms target
+        results = await evaluate_slos("http://prom", [slo], verdict_store)
+
+    assert results[0].raw_breach is False
+
+
+def test_query_for_reports_the_breach_rule_with_the_query():
+    """_query_for's invariant, as a returned value rather than a comment."""
+    rate = ManifestSLO(name="rev", target=98.5, slo_type="judgment",
+                       window="5m", judgment_type="reversal_rate")
+    unbuilt = ManifestSLO(name="seg", target=98.0, slo_type="judgment",
+                          window="5m", judgment_type="segment_disparity")
+    latency = ManifestSLO(name="latency", target=100.0, slo_type="traditional",
+                          window="30d")
+    avail = ManifestSLO(name="availability", target=99.9, slo_type="traditional",
+                        window="30d")
+
+    assert _query_for("s", rate)[1] == "judgment_rate"
+    assert _query_for("s", unbuilt)[1] == "ratio"
+    assert _query_for("s", latency)[1] == "latency_seconds"
+    assert _query_for("s", avail)[1] == "error_budget"

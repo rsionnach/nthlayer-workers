@@ -289,8 +289,16 @@ unknown top-level key (lists offenders + valid set, sort uses
 `governance:` (retired under opensrm-t5yr) is treated as any other
 unknown key — no deprecation grace [opensrm-m655].
 
-`adapters/prometheus.py` — `_query_for(service, slo) -> str`,
-the single query builder. Module-level `_JUDGMENT_SLO_QUERIES` lookup
+`adapters/prometheus.py` — `_query_for(service, slo) -> (query,
+query_kind)`, the single query builder. The kind rides on
+`SLODefinition.query_kind` (no default — a wrong one is silent) and is
+what `evaluate_slos` dispatches its breach rule on: `judgment_rate`
+inverts a 0-1 rate to an SLI, `ratio` scales a good-ratio SLI without
+inverting, `judgment_duration` and `latency_seconds` compare durations,
+`error_budget` tests a signed budget against zero. Dispatching on the
+SLO's name or `slo_type` instead is what broke: the name is author-chosen
+in v2, and half the judgment taxonomy has no rate builder, so neither
+answers what units the value is in [opensrm-fxln]. Module-level `_JUDGMENT_SLO_QUERIES` lookup
 dict of lambdas keyed by **`spec.judgment_type`**, not by SLO name: in
 v2 `metadata.name` is author-chosen and independent of the type
 (`reversal_rate` / `high_confidence_failure` / `calibration` /
@@ -299,7 +307,15 @@ builder; the other 4 fall through to the `slo:{name}:ratio` recording-
 rule convention. They must NOT yield `""` — Prometheus 400s on an empty
 query and `query_prometheus` reads that as no-data, silently skipping
 the SLO (opensrm-fxln; the `_judgment_slo_query` wrapper that returned
-`""` was deleted there). `calibration` + `feedback_latency` are
+`""` was deleted there). Hysteresis reads each window's `raw_breach`
+back out of the verdict blob built by `evaluation_custom_metadata` —
+one definition shared by the CLI writer and
+`count_consecutive_breaches`, which previously re-derived breach as
+`current_value > target`, a 0-1 rate against a 0-100 target, so it never
+counted a judgment window and the threshold was unreachable. Verdicts
+written before opensrm-fxln carry no `raw_breach` and stop the count:
+one restarted hysteresis window per SLO at upgrade. `calibration` +
+`feedback_latency` are
 window-agnostic (gauge metrics) so their lambdas use a `_window`
 underscore param. The module logs through `logging.getLogger`, NOT
 structlog — %-style args only; kwargs would TypeError (load-bearing
