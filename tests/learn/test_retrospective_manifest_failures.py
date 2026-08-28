@@ -321,3 +321,63 @@ class TestSpecsDirShapes:
         out = capsys.readouterr().out
         assert "Financial impact" not in out
         assert "Manifest parse failures: 1" in out
+
+
+class TestEmptyAndAmbiguousFiles:
+    """R5 pass 3 iteration 2. Gating the count on "does this file declare
+    itself a manifest" must not re-open the hole it was narrowing. A file that
+    parses to *nothing* is a broken manifest, not foreign YAML — an interrupted
+    write or a clobbered spec is exactly the case the count exists for.
+    """
+
+    def test_empty_file_is_counted(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "truncated.yaml").write_text("")
+
+        assert _load_manifests_from_specs(str(specs)).parse_failures == 1
+
+    def test_comment_only_file_is_counted(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "stub.yaml").write_text("# TODO: write this spec\n")
+
+        assert _load_manifests_from_specs(str(specs)).parse_failures == 1
+
+    def test_unreadable_file_is_counted(self, tmp_path: Path):
+        """The second read can fail where the first succeeded — the file moved
+        between them. Counting is the conservative read.
+        """
+        from nthlayer_workers.learn.retrospective import (
+            _declares_itself_a_manifest,
+        )
+
+        assert _declares_itself_a_manifest(tmp_path / "vanished.yaml") is True
+
+    def test_non_utf8_file_is_counted(self, tmp_path: Path):
+        from nthlayer_workers.learn.retrospective import (
+            _declares_itself_a_manifest,
+        )
+
+        binary = tmp_path / "blob.yaml"
+        binary.write_bytes(b"\xff\xfe\x00binary garbage")
+
+        assert _declares_itself_a_manifest(binary) is True
+
+
+class TestSameServiceInBothSuffixes:
+    """R5 pass 3 iteration 2: now that both suffixes are visible, a service
+    present as ``svc.yaml`` and ``svc.yml`` hits the duplicate branch. Sorted
+    iteration makes the winner deterministic instead of filesystem-ordered.
+    """
+
+    def test_yaml_wins_and_nothing_is_counted_as_a_failure(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "svc-good.yml").write_text(GOOD_MANIFEST)
+
+        with structlog.testing.capture_logs() as logs:
+            loaded_specs = _load_manifests_from_specs(str(specs))
+
+        assert loaded_specs.parse_failures == 0
+        assert set(loaded_specs.manifests) == {"svc-good"}
+        duplicates = [e for e in logs if e["event"] == "manifest_duplicate_skipped"]
+        assert len(duplicates) == 1
+        assert duplicates[0]["spec_file"].endswith("svc-good.yml")

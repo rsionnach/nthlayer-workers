@@ -261,12 +261,23 @@ def _declares_itself_a_manifest(spec_file: Path) -> bool:
 
     Uses the canonical v1/v2 format predicates rather than a local re-reading
     of apiVersion/kind, so this cannot drift from what the parser accepts.
-    YAML too malformed to inspect counts as a manifest: a syntax error inside
-    a specs directory is a deployment error either way.
+
+    Anything this cannot positively identify as *something else* counts as a
+    manifest, because the failure this gate could re-open is the one the bead
+    closed. So: YAML too malformed to inspect counts (a syntax error inside a
+    specs directory is a deployment error either way); a file that reads as
+    nothing — zero-byte, whitespace, comments — counts, since a truncated or
+    interrupted write is precisely the case the count exists for; and a second
+    read that fails where ``load_manifest``'s first read succeeded counts,
+    since the file moved underneath us. Only a structure that positively looks
+    like a different kind of document is dropped uncounted.
     """
     try:
         data = yaml.safe_load(spec_file.read_text())
-    except (OSError, yaml.YAMLError):
+    except (OSError, ValueError, yaml.YAMLError):
+        # ValueError covers UnicodeDecodeError on non-UTF-8 bytes.
+        return True
+    if data is None:
         return True
     if not isinstance(data, dict):
         return False
