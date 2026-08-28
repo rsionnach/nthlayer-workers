@@ -11,6 +11,8 @@ in `CLAUDE.md` are canonical for runtime invariants — this file is the
 src/nthlayer_workers/
   __init__.py       # Package marker: "Tier 2 background computation modules"
   cli.py            # nthlayer-workers serve  + gate subcommand
+  cli_output.py     # warn_parse_failures() — operator-facing stderr shared
+                    #   by the observe and measure CLIs [opensrm-fxln]
   runner.py         # ModuleRunner orchestrator (see below)
 ```
 
@@ -271,7 +273,15 @@ budget).
 
 `cli.py` — `nthlayer-measure` CLI. Live subcommands: `evaluate` /
 `evaluate-once` / `status` / `calibrate` / `overrides {list, create}` /
-`tiering {show, restore}`. The legacy `serve` / `api-serve` /
+`tiering {show, restore}`. `evaluate-once --hysteresis` has a minimum of
+1 and exits 2 below it: `consecutive >= 0` is true before any window is
+evaluated, so 0 breached every judgment SLO on its first cycle. It also
+surfaces `LoadedSpecs.parse_failures` on stderr via
+`nthlayer_workers.cli_output.warn_parse_failures`, and writes each
+verdict's `metadata.custom` through
+`prometheus.evaluation_custom_metadata` — the same definition
+`count_consecutive_breaches` reads back [opensrm-fxln]. The legacy
+`serve` / `api-serve` /
 `governance {show, restore}` subcommands (and the `_build_pipeline`
 helper they shared) were retired under opensrm-t5yr —
 `nthlayer-measure serve` superseded by `nthlayer-workers serve`
@@ -289,15 +299,51 @@ unknown top-level key (lists offenders + valid set, sort uses
 `governance:` (retired under opensrm-t5yr) is treated as any other
 unknown key — no deprecation grace [opensrm-m655].
 
-`adapters/prometheus.py` — `_judgment_slo_query(service, slo_name,
-window) -> str`. Module-level `_JUDGMENT_SLO_QUERIES` lookup dict of
-lambdas keyed by SLO name (`reversal_rate` /
-`high_confidence_failure` / `calibration` / `feedback_latency`).
-Unknown key → stdlib-logger warning + return `""` (uses
-`logging.getLogger`, NOT structlog — kwargs would TypeError;
-load-bearing fact per opensrm-y7dd R5 Pass 3). `calibration` +
-`feedback_latency` are window-agnostic (gauge metrics) so their
-lambdas use `_window` underscore param.
+`adapters/prometheus.py` — `load_specs(specs_dir) -> LoadedSpecs`, whose
+`.slos` / `.parse_failures` replace the bare `list[SLODefinition]` it used
+to return; every caller must unwrap it [opensrm-fxln]. `_query_for(service,
+slo) -> (query,
+query_kind)`, the single query builder. The kind rides on
+`SLODefinition.query_kind` (no default — a wrong one is silent) and is
+what `evaluate_slos` dispatches its breach rule on: `judgment_rate`
+inverts a 0-1 rate to an SLI, `ratio` scales a good-ratio SLI without
+inverting, `judgment_duration` and `latency_seconds` compare durations,
+`error_budget` tests a signed budget against zero. Dispatching on the
+SLO's name or `slo_type` instead is what broke: the name is author-chosen
+in v2, and half the judgment taxonomy has no rate builder, so neither
+answers what units the value is in [opensrm-fxln]. Module-level `_JUDGMENT_SLO_QUERIES` lookup
+dict of lambdas keyed by **`spec.judgment_type`**, not by SLO name: in
+v2 `metadata.name` is author-chosen and independent of the type
+(`reversal_rate` / `high_confidence_failure` / `calibration` /
+`feedback_latency`). Only 4 of the 8 `JUDGMENT_SLO_TYPES` have a
+builder; the other 4 fall through to the `slo:{name}:ratio` recording-
+rule convention. They must NOT yield `""` — Prometheus 400s on an empty
+query and `query_prometheus` reads that as no-data, silently skipping
+the SLO (opensrm-fxln; the `_judgment_slo_query` wrapper that returned
+`""` was deleted there). Hysteresis reads each window's `raw_breach`
+back out of the verdict blob built by `evaluation_custom_metadata` —
+one definition shared by the CLI writer and
+`count_consecutive_breaches`, which previously re-derived breach as
+`current_value > target`, a 0-1 rate against a 0-100 target, so it never
+counted a judgment window and the threshold was unreachable. Verdicts
+written before opensrm-fxln carry no `raw_breach` and stop the count:
+one restarted hysteresis window per SLO at upgrade. The history window
+is sized `(hysteresis_threshold + 1) * len(slos) * 2` rather than a flat
+20 — one cycle writes one verdict per SLO, so a constant limit held less
+than a full cycle once a run covered 20 SLOs and capped `consecutive` at
+1 again. It is deliberately unscoped by `VerdictFilter.subject_service`:
+measure writes the service into `subject.ref` and leaves
+`subject.service` None, so that filter matches nothing, and populating
+it now would silently shorten history for every SLO already running.
+Duration targets convert via `_target_seconds` using the manifest's
+declared `unit`, which the parser preserves; a missing or unknown unit
+logs a warning and assumes `ms` rather than dropping the SLO.
+`calibration` +
+`feedback_latency` are
+window-agnostic (gauge metrics) so their lambdas use a `_window`
+underscore param. The module logs through `logging.getLogger`, NOT
+structlog — %-style args only; kwargs would TypeError (load-bearing
+fact per opensrm-y7dd R5 Pass 3).
 
 `governance/` — `GovernanceEngine(Protocol)` only. Legacy
 LLM-driven `ErrorBudgetGovernance` retired under opensrm-t5yr; the

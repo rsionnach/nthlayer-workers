@@ -223,7 +223,7 @@ class TestParseFailuresAreVisible:
 class TestSharedGateResolvesCorrectly:
     """Guards the CROSS-REPO version boundary, not local behaviour.
 
-    workers depends on nthlayer-common by RANGE (>=2.1.1,<3.0.0) and CI
+    workers depends on nthlayer-common by RANGE (>=2.1.2,<3.0.0) and CI
     resolves it from a sibling checkout, so nothing here would otherwise
     notice an install picking up a common whose scan gate is broken.
 

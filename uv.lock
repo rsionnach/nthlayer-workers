@@ -874,7 +874,7 @@ wheels = [
 
 [[package]]
 name = "nthlayer-common"
-version = "1.6.0"
+version = "2.1.2"
 source = { editable = "../nthlayer-common" }
 dependencies = [
     { name = "anthropic" },
@@ -900,6 +900,7 @@ requires-dist = [
     { name = "circuitbreaker", specifier = ">=2.0.0,<3.0.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "instructor", specifier = ">=1.5" },
+    { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.21" },
     { name = "openai", specifier = ">=1.50" },
     { name = "opentelemetry-api", specifier = ">=1.28" },
     { name = "pagerduty", specifier = ">=6.0.0,<7.0.0" },
@@ -917,7 +918,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "nthlayer-workers"
-version = "1.6.0"
+version = "1.7.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

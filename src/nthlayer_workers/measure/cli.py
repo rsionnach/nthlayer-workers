@@ -115,10 +115,27 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
     from nthlayer_common.verdicts import SQLiteVerdictStore
     from nthlayer_common.verdicts import create as verdict_create
 
-    from nthlayer_workers.measure.adapters.prometheus import evaluate_slos, load_specs
+    from nthlayer_workers.cli_output import warn_parse_failures
+    from nthlayer_workers.measure.adapters.prometheus import (
+        evaluate_slos,
+        evaluation_custom_metadata,
+        load_specs,
+    )
+
+    if args.hysteresis < 1:
+        # `breach = consecutive >= 0` is true before any window is evaluated,
+        # so --hysteresis 0 makes every judgment SLO breach immediately; it
+        # also drives the history window size to zero or negative.
+        print(
+            f"--hysteresis must be at least 1, got {args.hysteresis}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     specs_dir = Path(args.specs_dir)
-    slos = load_specs(specs_dir)
+    loaded = load_specs(specs_dir)
+    slos = loaded.slos
+    warn_parse_failures(loaded.parse_failures, specs_dir)
     if not slos:
         print(f"No SLO definitions found in {specs_dir}", file=sys.stderr)
         sys.exit(1)
@@ -146,14 +163,7 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
                     "confidence": 0.95 if r.slo_type == "traditional" else 0.85,
                 },
                 producer={"system": "nthlayer-measure"},
-                metadata={"custom": {
-                    "slo_type": r.slo_type,
-                    "slo_name": r.slo_name,
-                    "target": r.target,
-                    "current_value": r.current_value,
-                    "breach": r.breach,
-                    "consecutive": r.consecutive,
-                }},
+                metadata={"custom": evaluation_custom_metadata(r)},
             )
             # Typed column matches the worker module's emission. Non-breach
             # is an observation, not a typed decision.
@@ -520,7 +530,8 @@ def main() -> None:
     eo_parser.add_argument("--verdict-store", default="verdicts.db", help="Path to verdict SQLite DB")
     eo_parser.add_argument(
         "--hysteresis", type=int, default=3,
-        help="Consecutive breach windows before judgment SLO triggers (default: 3)",
+        help="Consecutive breach windows before judgment SLO triggers "
+             "(default: 3, minimum: 1)",
     )
     eo_parser.add_argument(
         "--decision-store", default=None,

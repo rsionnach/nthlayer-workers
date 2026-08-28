@@ -110,8 +110,9 @@ verdict chain, or make module composition impossible.
     (see `feedback_shared_db_test`). Assertions on structured-data
     primitives (response fields, dataclass shape, enum values), not
     captured strings. Tests pin behaviour at boundaries — opensrm-y7dd
-    R5 Pass 3 surfaced that `_judgment_slo_query` uses stdlib logger
-    (kwargs would TypeError under structlog) as a load-bearing fact.
+    R5 Pass 3 surfaced that `measure/adapters/prometheus.py` logs via
+    stdlib `logging.getLogger`, so %-style args only (kwargs would
+    TypeError under structlog), as a load-bearing fact.
 
 ## Where to find detail
 
