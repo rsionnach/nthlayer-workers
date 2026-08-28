@@ -218,3 +218,66 @@ class TestParseFailuresAreVisible:
         result = load_specs(tmp_path)
 
         assert result.parse_failures == 0
+
+
+class TestSharedGateResolvesCorrectly:
+    """Guards the CROSS-REPO version boundary, not local behaviour.
+
+    workers depends on nthlayer-common by RANGE (>=2.1.1,<3.0.0) and CI
+    resolves it from a sibling checkout, so nothing here would otherwise
+    notice an install picking up a common whose scan gate is broken.
+
+    That is not hypothetical: common 2.1.0 shipped a body-recovery step that
+    was INERT — it tested spec.slos as a list, but v1 writes a mapping and v2
+    has no spec.slos at all — so a header-stripped manifest was dropped with
+    parse_failures == 0. workers' own fixtures used the unreal list shape and
+    agreed with the broken predicate, so they passed either way.
+
+    These use the shapes the PARSERS actually produce. Against a common
+    without the 2.1.1 fixes they fail; that is the point.
+    """
+
+    def _count(self, tmp_path, body: str) -> int:
+        import textwrap
+
+        (tmp_path / "headerless.yaml").write_text(textwrap.dedent(body).strip() + "\n")
+        return load_specs(tmp_path).parse_failures
+
+    def test_headerless_v1_slos_mapping_is_counted(self, tmp_path):
+        """v1 writes spec.slos as a MAPPING — parser/v1 does slos_data.items()."""
+        assert self._count(tmp_path, """
+            spec:
+              type: api
+              slos:
+                availability:
+                  target: 99.9
+        """) == 1
+
+    def test_headerless_v2_slo_list_is_counted(self, tmp_path):
+        """v2 has no spec.slos at all; its key is spec.slo, a list."""
+        assert self._count(tmp_path, """
+            spec:
+              slo:
+                - apiVersion: openslo/v1
+                  kind: SLO
+        """) == 1
+
+    def test_headerless_manifest_with_only_a_required_key_is_counted(self, tmp_path):
+        """spec.owner is REQUIRED by parse_opensrm_v2. A file carrying the one
+        key its format cannot be parsed without is making about as strong a
+        claim to being a manifest as a body can."""
+        assert self._count(tmp_path, """
+            spec:
+              owner:
+                group: group:default/team
+              contracts: []
+        """) == 1
+
+    def test_foreign_yaml_is_still_not_counted(self, tmp_path):
+        """The other half of the boundary: widening must not start counting
+        the Prometheus rules file sharing the directory."""
+        assert self._count(tmp_path, """
+            groups:
+              - name: g
+                rules: []
+        """) == 0
