@@ -346,11 +346,9 @@ class TestEmptyAndAmbiguousFiles:
         """The second read can fail where the first succeeded — the file moved
         between them. Counting is the conservative read.
         """
-        from nthlayer_workers.learn.retrospective import (
-            _declares_itself_a_manifest,
-        )
+        from nthlayer_workers.learn.retrospective import _foreign_yaml_reason
 
-        assert _declares_itself_a_manifest(tmp_path / "vanished.yaml") is True
+        assert _foreign_yaml_reason(tmp_path / "vanished.yaml") is None
 
     def test_non_utf8_file_is_counted(self, tmp_path: Path):
         """`load_manifest` opens with the default encoding and only wraps
@@ -449,3 +447,103 @@ class TestNearMissManifests:
             kind: Deployment
             metadata: {name: svc-good}
         """) == 0
+
+
+class TestHeaderlessManifests:
+    """R5 pass 3 iteration 5. The gate recovers intent only while evidence of
+    intent survives, and a stripped ``apiVersion``/``kind`` pair is not the end
+    of that evidence — a bad merge, a truncated write, or a mis-indent that
+    reparents the header still leaves an unmistakable manifest body behind.
+
+    Where the body is gone too, the file is indistinguishable in principle
+    from any other headerless YAML mapping, and no content heuristic separates
+    them. That is the gate's stated limit, not a gap to close later.
+    """
+
+    @staticmethod
+    def _count(specs_dir: Path, name: str, body: str) -> int:
+        (specs_dir / f"{name}.yaml").write_text(textwrap.dedent(body).strip())
+        return _load_manifests_from_specs(str(specs_dir)).parse_failures
+
+    def test_stripped_header_with_intact_body_is_counted(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        assert self._count(specs, "checkout", """
+            metadata: {name: checkout}
+            spec:
+              owner: {group: group:default/team-a}
+              service: {name: checkout, type: api}
+        """) == 1
+
+    def test_null_header_is_counted(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        assert self._count(specs, "nulled", """
+            apiVersion:
+            kind:
+            metadata: {name: nulled}
+            spec:
+              service: {name: nulled, type: api}
+        """) == 1
+
+    def test_empty_string_header_is_counted(self, tmp_path: Path):
+        """A failed environment substitution leaves the keys present and blank."""
+        specs = _write_specs(tmp_path / "specs")
+        assert self._count(specs, "blank", '''
+            apiVersion: ""
+            kind: ""
+            metadata: {name: blank}
+            spec:
+              slos:
+                - name: availability
+                  target: 99.9
+        ''') == 1
+
+    def test_spec_only_truncation_is_counted(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        assert self._count(specs, "torn", """
+            spec:
+              outcomes: {estimated_daily_decisions: 1000}
+        """) == 1
+
+    def test_backstage_catalog_info_is_not_counted(self, tmp_path: Path):
+        """`spec` is a mapping and `spec.owner` exists, but `spec.service` is
+        absent — Backstage entities plausibly share a specs directory.
+        """
+        specs = _write_specs(tmp_path / "specs")
+        assert self._count(specs, "catalog-info", """
+            apiVersion: backstage.io/v1alpha1
+            kind: Component
+            metadata: {name: svc-good}
+            spec: {type: service, lifecycle: production, owner: team-a}
+        """) == 0
+
+    def test_openslo_is_not_counted(self, tmp_path: Path):
+        """OpenSLO also has ``spec.service`` — but as a string, not a mapping."""
+        specs = _write_specs(tmp_path / "specs")
+        assert self._count(specs, "openslo", """
+            apiVersion: openslo/v1
+            kind: SLO
+            metadata: {name: svc-good-availability}
+            spec:
+              service: svc-good
+              budgetingMethod: Occurrences
+        """) == 0
+
+
+class TestDropsAreRecorded:
+    """A dropped file must leave a trace. The original bug was not that the
+    loop skipped something — it is that it skipped without saying so, and a
+    drop with no record is that same shape one level up.
+    """
+
+    def test_ignored_file_logs_reason_at_debug(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "kustomization.yaml").write_text("resources:\n  - deployment.yaml\n")
+
+        with structlog.testing.capture_logs() as logs:
+            _load_manifests_from_specs(str(specs))
+
+        ignored = [e for e in logs if e["event"] == "manifest_file_ignored"]
+        assert len(ignored) == 1
+        assert ignored[0]["log_level"] == "debug"
+        assert ignored[0]["spec_file"].endswith("kustomization.yaml")
+        assert ignored[0]["reason"]

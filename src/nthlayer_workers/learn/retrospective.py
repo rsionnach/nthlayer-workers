@@ -250,54 +250,73 @@ def _spec_files(specs_path: Path) -> list[Path]:
     )
 
 
-def _declares_itself_a_manifest(spec_file: Path) -> bool:
-    """Whether a file that failed to load was *claiming* to be a manifest.
+def _foreign_yaml_reason(spec_file: Path) -> str | None:
+    """Why a file that failed to load should NOT count as a broken manifest.
 
     ``load_manifest`` raises ``ManifestLoadError`` for any YAML it cannot parse
     as a manifest, including files that never claimed to be one — a
     ``kustomization.yaml``, a Prometheus rules file. Counting those would fire
     the caller's "computed over a subset" caveat on every run over a mixed
-    directory, and a caveat that always fires stops being read.
+    directory, and a caveat that always fires stops being read. Returns None
+    when the file was aiming at being a manifest (so the caller counts it), or
+    a short reason when it plainly was not (so the caller drops it).
 
-    Uses the canonical v1/v2 format predicates rather than a local re-reading
-    of apiVersion/kind, so this cannot drift from what the parser accepts.
+    Evidence of intent is checked in three widening steps: the canonical v1/v2
+    format predicates, so this cannot drift from what the parser accepts; then
+    a near miss on those headers, since a typo'd kind or a drifted API group is
+    an ordinary way a real manifest breaks; then the body, since a bad merge or
+    a mis-indent can strip the header while leaving ``spec.service`` intact.
+    Anything unreadable or empty counts too — a syntax error or a truncated
+    write inside a specs directory is a deployment error either way.
 
-    Anything this cannot positively identify as *something else* counts as a
-    manifest, because the failure this gate could re-open is the one the bead
-    closed. So: YAML too malformed to inspect counts (a syntax error inside a
-    specs directory is a deployment error either way); a file that reads as
-    nothing — zero-byte, whitespace, comments — counts, since a truncated or
-    interrupted write is precisely the case the count exists for; and a second
-    read that fails where ``load_manifest``'s first read succeeded counts,
-    since the file moved underneath us. Only a structure that positively looks
-    like a different kind of document is dropped uncounted.
+    LIMIT, stated rather than deferred: this recovers intent only while
+    evidence of intent survives. A file that has lost both its header and its
+    body is indistinguishable in principle from any other headerless YAML
+    mapping — both are dicts with no apiVersion, no kind, no ``spec.service``.
+    No content heuristic separates those, and adding more markers would not
+    change that. Such a file is dropped, recorded at debug rather than
+    silently, and the ``manifest_file_ignored`` log is where an investigator
+    chasing a number that looks wrong picks the trail back up.
     """
     try:
         data = yaml.safe_load(spec_file.read_text())
     except (OSError, ValueError, yaml.YAMLError):
-        # ValueError covers UnicodeDecodeError on non-UTF-8 bytes.
-        return True
+        # ValueError covers UnicodeDecodeError on non-UTF-8 bytes. Too
+        # malformed to inspect, so it counts.
+        return None
     if not data:
         # None (zero-byte, whitespace, comments) or an empty container.
-        return True
+        return None
     if not isinstance(data, dict):
-        return False
+        return f"top-level YAML is {type(data).__name__}, not a mapping"
+
     # "service" is the legacy pre-apiVersion shape load_manifest still accepts.
     if is_opensrm_v2_format(data) or is_srm_v1_format(data) or "service" in data:
-        return True
-    # Near miss. The predicates above demand an exact apiVersion+kind pair, so
-    # a typo'd kind or a drifted API group matches neither — and version drift
-    # is an ordinary way a real manifest breaks. Aiming at us and missing is a
-    # parse failure; a Deployment or a Kustomization is not.
+        return None
+
     api_version = data.get("apiVersion")
     kind = data.get("kind")
-    return (
+    near_miss = (
         isinstance(api_version, str)
         and (api_version.startswith("srm/") or "opensrm" in api_version)
     ) or (
         isinstance(kind, str)
         and kind.startswith(("ServiceManifest", "ServiceReliabilityManifest"))
     )
+    if near_miss:
+        return None
+
+    # Header gone, body may not be. `spec.service` as a *mapping* is the
+    # discriminator: OpenSLO also carries `spec.service`, but as a string.
+    spec = data.get("spec")
+    if isinstance(spec, dict) and (
+        isinstance(spec.get("service"), dict)
+        or isinstance(spec.get("slos"), list)
+        or isinstance(spec.get("outcomes"), dict)
+    ):
+        return None
+
+    return f"no manifest markers (apiVersion={api_version!r}, kind={kind!r})"
 
 
 @dataclass(frozen=True)
@@ -351,9 +370,16 @@ def _load_manifests_from_specs(specs_dir: str | None) -> LoadedManifests:
         try:
             manifest = load_manifest(str(spec_file))
         except (ManifestLoadError, UnicodeDecodeError) as exc:
-            if not _declares_itself_a_manifest(spec_file):
+            foreign_reason = _foreign_yaml_reason(spec_file)
+            if foreign_reason is not None:
                 # Foreign YAML sharing the directory, not a broken manifest.
-                log.debug("manifest_file_ignored", spec_file=str(spec_file))
+                # Recorded rather than dropped without trace — skipping
+                # without saying so is the shape this bead exists to remove.
+                log.debug(
+                    "manifest_file_ignored",
+                    spec_file=str(spec_file),
+                    reason=foreign_reason,
+                )
                 continue
             parse_failures += 1
             log.warning(
