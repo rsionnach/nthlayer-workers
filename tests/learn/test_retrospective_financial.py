@@ -225,7 +225,7 @@ class TestDeclaredDependenciesByService:
         (tmp_path / "svc-b.yaml").write_text(svc_b)
 
         loaded = _load_manifests_from_specs(str(tmp_path))
-        declared = _extract_declared_dependencies(loaded)
+        declared = _extract_declared_dependencies(loaded.manifests)
 
         assert declared == {
             "svc-a": ["dep-one", "dep-two"],
@@ -239,7 +239,7 @@ class TestDeclaredDependenciesByService:
         )
 
         loaded = _load_manifests_from_specs(None)
-        assert _extract_declared_dependencies(loaded) == {}
+        assert _extract_declared_dependencies(loaded.manifests) == {}
 
     def test_declared_dependencies_empty_list_for_no_deps_block(self, tmp_path: Path):
         """Services without ``dependencies:`` yield an empty list, never an absent key.
@@ -265,7 +265,7 @@ class TestDeclaredDependenciesByService:
         (tmp_path / "silent-svc.yaml").write_text(spec)
 
         loaded = _load_manifests_from_specs(str(tmp_path))
-        declared = _extract_declared_dependencies(loaded)
+        declared = _extract_declared_dependencies(loaded.manifests)
 
         assert "silent-svc" in declared
         assert declared["silent-svc"] == []

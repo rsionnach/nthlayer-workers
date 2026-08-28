@@ -1,6 +1,7 @@
 """Retrospective builder — walks verdict lineage to produce a post-incident analysis."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -116,8 +117,8 @@ def build_retrospective(
     # ground-truth view of operator-declared deps that downstream
     # add_dependency recommendation logic compares against the
     # incident's observed call graph.
-    loaded_manifests = _load_manifests_from_specs(specs_dir)
-    declared_dependencies_by_service = _extract_declared_dependencies(loaded_manifests)
+    loaded = _load_manifests_from_specs(specs_dir)
+    declared_dependencies_by_service = _extract_declared_dependencies(loaded.manifests)
 
     # Financial impact (if specs available)
     financial_impact = _compute_financial_impact(
@@ -125,7 +126,7 @@ def build_retrospective(
         duration_minutes,
         breach_counts_by_service,
         specs_dir,
-        loaded_manifests=loaded_manifests,
+        loaded_manifests=loaded.manifests,
     )
 
     # Generate recommendations
@@ -155,6 +156,10 @@ def build_retrospective(
         "financial_impact": financial_impact,
         "recommendations": recommendations,
         "declared_dependencies_by_service": declared_dependencies_by_service,
+        # opensrm-oh27: always present, 0 on a clean load. An absent key
+        # would read the same as "no failures", which is the ambiguity
+        # the silent skip created in the first place.
+        "manifest_parse_failures": loaded.parse_failures,
     }
     if trigger_service is not None:
         retro_custom["trigger_service"] = trigger_service
@@ -225,32 +230,55 @@ def _parse_ts(ts: Any) -> datetime:
     return dt
 
 
-def _load_manifests_from_specs(specs_dir: str | None) -> dict[str, Any]:
+@dataclass(frozen=True)
+class LoadedManifests:
+    """Outcome of scanning a specs directory (opensrm-oh27).
+
+    ``manifests`` is the parsed view keyed by service name; ``parse_failures``
+    counts the ``*.yaml`` files that raised ``ManifestLoadError`` and were
+    therefore *not* included. The count travels with the manifests because
+    the downstream financial figure is computed over ``manifests`` alone —
+    without it, a partial view is indistinguishable from a complete one.
+    """
+
+    manifests: dict[str, Any]
+    parse_failures: int = 0
+
+
+def _load_manifests_from_specs(specs_dir: str | None) -> LoadedManifests:
     """Load all ``*.yaml`` manifests under ``specs_dir`` once, keyed by
     ``manifest.name`` (the canonical service identity).
 
-    Returns an empty dict when ``specs_dir`` is None or not a directory,
+    Returns empty manifests when ``specs_dir`` is None or not a directory,
     so callers can treat the result uniformly without re-checking the
     filesystem. Duplicate manifests for the same service (template forks,
     environment overlays) are deduplicated by keeping the first one
     encountered and emitting a warning — this matches the pre-jmy.21
     behaviour of ``_compute_financial_impact``.
 
-    Parse failures from ``load_manifest`` are silently skipped (consistent
-    with the prior inline ``ManifestLoadError`` swallow); the financial-
-    impact and dependency-extraction paths both tolerate a partial view.
+    Parse failures from ``load_manifest`` are logged and counted, then
+    skipped (opensrm-oh27). The financial-impact and dependency-extraction
+    paths both tolerate a partial view, but the caller is told how partial
+    it is via ``LoadedManifests.parse_failures``.
     """
     if not specs_dir:
-        return {}
+        return LoadedManifests(manifests={})
     specs_path = Path(specs_dir)
     if not specs_path.is_dir():
-        return {}
+        return LoadedManifests(manifests={})
 
     manifests: dict[str, Any] = {}
+    parse_failures = 0
     for spec_file in specs_path.glob("*.yaml"):
         try:
             manifest = load_manifest(str(spec_file))
-        except ManifestLoadError:
+        except ManifestLoadError as exc:
+            parse_failures += 1
+            log.warning(
+                "manifest_parse_failed",
+                spec_file=str(spec_file),
+                error=str(exc),
+            )
             continue
         if manifest.name in manifests:
             log.warning(
@@ -260,7 +288,7 @@ def _load_manifests_from_specs(specs_dir: str | None) -> dict[str, Any]:
             )
             continue
         manifests[manifest.name] = manifest
-    return manifests
+    return LoadedManifests(manifests=manifests, parse_failures=parse_failures)
 
 
 def _extract_declared_dependencies(
@@ -290,9 +318,13 @@ def _compute_financial_impact(
     skipped with a warning.
 
     ``loaded_manifests`` is the shared cache produced by
-    ``_load_manifests_from_specs`` (opensrm-jmy.21). When omitted the
-    function loads manifests itself — preserves the pre-jmy.21 calling
-    convention used by ``tests/learn/test_retrospective_financial.py``.
+    ``_load_manifests_from_specs(...).manifests`` (opensrm-jmy.21). When
+    omitted the function loads manifests itself — preserves the pre-jmy.21
+    calling convention used by ``tests/learn/test_retrospective_financial.py``.
+    That self-loading path discards the parse-failure count; only
+    ``build_retrospective`` surfaces it (as
+    ``metadata.custom["manifest_parse_failures"]``), and the per-file
+    warning log fires either way.
     """
     if not specs_dir or not blast_radius:
         return None
@@ -308,7 +340,7 @@ def _compute_financial_impact(
         return None
 
     if loaded_manifests is None:
-        loaded_manifests = _load_manifests_from_specs(specs_dir)
+        loaded_manifests = _load_manifests_from_specs(specs_dir).manifests
     if not loaded_manifests:
         return None
 
