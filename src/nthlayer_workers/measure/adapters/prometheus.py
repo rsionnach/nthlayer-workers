@@ -27,6 +27,11 @@ class SLODefinition:
     target: float
     window: str
     query: str  # PromQL query that returns the current value
+    # The judgment kind (reversal_rate, calibration, ...). The breach check
+    # dispatches on THIS, not on slo_name: in v2 metadata.name is
+    # author-chosen and independent of spec.judgment_type, so a judgment SLO
+    # called anything else would fall to the classical branch (opensrm-fxln).
+    judgment_type: str | None = None
 
 
 @dataclass
@@ -90,7 +95,14 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
             continue
 
         for slo in manifest.slos:
-            query = slo.indicator_query or _query_for(manifest.name, slo)
+            # Deliberately NOT slo.indicator_query. evaluate_slos' branches
+            # are hard-coded to the semantics of the synthesised queries:
+            # availability breaches on `current < 0.0`, meaningful only for
+            # slo:error_budget:ratio, and judgment inverts, right only for
+            # the overrides/decisions RATIO. A manifest's own query supplies
+            # an SLI instead, which would make availability unbreachable and
+            # double-invert judgment. Query and breach rule travel together.
+            query = _query_for(manifest.name, slo)
             if query is None:
                 logger.debug(
                     "No query for %s/%s; skipping", manifest.name, slo.name
@@ -100,6 +112,7 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
                 service=manifest.name,
                 slo_name=slo.name,
                 slo_type="judgment" if slo.judgment_type else "traditional",
+                judgment_type=slo.judgment_type,
                 target=slo.target,
                 window=slo.window or "7d",
                 query=query,
@@ -116,7 +129,14 @@ def _query_for(service: str, slo) -> str | None:
     """
     name = slo.name
     if slo.judgment_type:
-        return _judgment_slo_query(service, name, slo.window or "7d")
+        # Keyed by judgment_type, not name: _JUDGMENT_SLO_QUERIES is a map of
+        # judgment KINDS. Only 4 of the 8 JUDGMENT_SLO_TYPES have a builder;
+        # the rest fall through to the recording-rule convention below rather
+        # than yielding an empty query, which Prometheus 400s and which then
+        # reads as no-data (opensrm-fxln).
+        builder = _JUDGMENT_SLO_QUERIES.get(slo.judgment_type)
+        if builder is not None:
+            return builder(service, slo.window or "7d")
     if name == "availability":
         return f'slo:error_budget:ratio{{service="{service}"}}'
     if name == "latency":
@@ -267,7 +287,7 @@ async def evaluate_slos(
                 continue
 
             # Determine if current value breaches the target
-            if slo.slo_name in ("reversal_rate", "high_confidence_failure", "calibration"):
+            if slo.slo_type == "judgment" and slo.judgment_type != "feedback_latency":
                 # Judgment SLOs. Prometheus returns a 0.0-1.0 ratio; targets
                 # use the canonical 0-100 percentage convention
                 # (nthlayer-common CLAUDE.md hard rule 1, opensrm-5fff.1), and
@@ -276,11 +296,23 @@ async def evaluate_slos(
                 #
                 # Comparing the raw ratio against the 0-100 target made these
                 # SLOs unbreachable — 0.05 > 98.5 is never true (opensrm-fxln).
-                # measure/worker.py:240 already scaled correctly; this is the
-                # adapter catching up to its own sibling.
+                #
+                # Dispatched on slo_TYPE, not on the SLO's name and not on a
+                # list of known judgment_types. In v2 metadata.name is
+                # author-chosen and independent of spec.judgment_type, and
+                # only 4 of the 8 JUDGMENT_SLO_TYPES are enumerated anywhere
+                # here — either narrower test would send a real judgment SLO
+                # to the classical branch below, where a 0-1 ratio against a
+                # 0-100 target breaches every single window.
+                #
+                # NOT the same as measure/worker.py:242, which does not
+                # invert: it feeds get_sli_value(indicator_query), whose
+                # value is ALREADY an SLI. The inversion belongs to the
+                # synthesised overrides/decisions ratio, not to judgment
+                # SLOs in general.
                 sli_pct = (1.0 - current_value) * 100
                 raw_breach = sli_pct < slo.target
-            elif slo.slo_name == "feedback_latency":
+            elif slo.slo_type == "judgment":  # feedback_latency: a duration, not a rate
                 # Breach if latency exceeds target (in seconds)
                 raw_breach = current_value > slo.target
             elif slo.slo_name == "availability":

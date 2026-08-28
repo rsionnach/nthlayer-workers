@@ -566,3 +566,105 @@ class TestLoadSpecsUnderstandsBothFormats:
 
         assert [s.service for s in loaded.slos] == []
         assert loaded.parse_failures == 1
+
+
+class TestQueryAndBreachLogicAreAMatchedPair:
+    """opensrm-fxln R5 correctness — the adapter's breach branches are
+    hard-coded to the semantics of its OWN synthesised queries.
+
+    `availability` breaches on `current < 0.0`, which is only meaningful for
+    the synthesised `slo:error_budget:ratio`. Judgment SLOs invert
+    (`(1-rate)*100`), which is only right for the synthesised
+    overrides/decisions RATIO — measure/worker.py does not invert because it
+    feeds get_sli_value(indicator_query), whose value is already an SLI.
+
+    So preferring a manifest's indicator_query over the synthesised one
+    silently breaks both: availability compares a plain ratio against zero
+    and can never breach, and a judgment SLI gets inverted twice.
+    """
+
+    def test_availability_uses_the_synthesised_error_budget_query(self, tmp_path):
+        """Even though this manifest declares its own indicator query."""
+        (tmp_path / "svc.yaml").write_text(
+            "apiVersion: srm/v1\nkind: ServiceReliabilityManifest\n"
+            "metadata: {name: svc, team: t, tier: critical}\n"
+            "spec:\n  type: api\n  slos:\n    availability:\n"
+            "      target: 99.9\n      window: 30d\n"
+            "      indicator: {query: 'up{job=\"x\"}'}\n"
+        )
+
+        slo = load_specs(tmp_path).slos[0]
+
+        assert "slo:error_budget:ratio" in slo.query, (
+            "availability's breach check is `current < 0.0`, which only the "
+            "synthesised error-budget query can satisfy"
+        )
+
+    def test_judgment_slo_is_classified_by_type_not_by_name(self, tmp_path):
+        """In v2, metadata.name and spec.judgment_type are independent.
+
+        Dispatching the breach check on the NAME sends a judgment SLO called
+        anything else to the classical `current < target` branch — and with a
+        0-100 target against a 0-1 ratio that is always a breach, then
+        hysteresis turns it into a real one. The exact inverse of the bug
+        this bead fixed.
+        """
+        (tmp_path / "svc.yaml").write_text(
+            "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
+            "metadata: {name: svc, labels: {tier: critical}}\n"
+            "spec:\n  owner: {group: 'group:default/t'}\n"
+            "  service: {name: svc, type: ai-gate}\n"
+            "  judgment_slo:\n    - metadata: {name: reversal-guard}\n"
+            "      spec:\n        service: svc\n"
+            "        judgment_type: reversal_rate\n"
+            "        target: {maximum_reversal_rate: 0.05}\n"
+        )
+
+        slo = load_specs(tmp_path).slos[0]
+
+        assert slo.slo_name == "reversal-guard"
+        assert slo.judgment_type == "reversal_rate", (
+            "the breach check must dispatch on judgment_type; the NAME is "
+            "author-chosen and independent of it in v2"
+        )
+
+    def test_a_judgment_type_with_no_builder_is_skipped_not_queried_empty(self, tmp_path):
+        """_JUDGMENT_SLO_QUERIES covers 4 of the 8 JUDGMENT_SLO_TYPES and
+        returns "" for the rest. An empty PromQL string is not None, so it
+        passed the guard, got sent to Prometheus, 400'd, and came back None —
+        skipped silently."""
+        (tmp_path / "svc.yaml").write_text(
+            "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
+            "metadata: {name: svc, labels: {tier: critical}}\n"
+            "spec:\n  owner: {group: 'group:default/t'}\n"
+            "  service: {name: svc, type: ai-gate}\n"
+            "  judgment_slo:\n    - metadata: {name: seg}\n"
+            "      spec:\n        service: svc\n"
+            "        judgment_type: segments\n"
+            "        target: {maximum_variance_from_overall: 0.15}\n"
+        )
+
+        for slo in load_specs(tmp_path).slos:
+            assert slo.query, f"{slo.slo_name} got an empty query"
+
+
+@pytest.mark.asyncio
+async def test_breach_dispatches_on_judgment_type_not_name(verdict_store):
+    """A judgment SLO whose author named it something other than its type.
+
+    Dispatching on slo_name sent this to the classical `current < target`
+    branch: 0.04 < 98.5 is always true, so it breached every window and
+    hysteresis turned that into a real breach after three — the inverse of
+    the bug this bead fixed, on the path v2 manifests actually take.
+    """
+    slo = SLODefinition(
+        service="fraud-detect", slo_name="reversal-guard", slo_type="judgment",
+        target=98.5, window="7d", query="test_query", judgment_type="reversal_rate",
+    )
+
+    with patch("nthlayer_workers.measure.adapters.prometheus.query_prometheus") as mock_query:
+        mock_query.return_value = 0.01  # 1% reversed -> 99% SLI, healthy
+        results = await evaluate_slos("http://prom", [slo], verdict_store)
+
+    assert results[0].breach is False
+    assert results[0].consecutive == 0, "a healthy judgment SLO must not breach"
