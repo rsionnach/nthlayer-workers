@@ -7,14 +7,13 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-import yaml
 from nthlayer_common.manifest import (
     ManifestLoadError,
     extract_declared_dependencies,
+    foreign_yaml_reason,
+    iter_manifest_files,
     load_manifest,
 )
-from nthlayer_common.manifest.parser.v1 import is_srm_v1_format
-from nthlayer_common.manifest.parser.v2 import is_opensrm_v2_format
 from nthlayer_common.outcomes import (
     compute_financial_impact,
     estimate_decisions_in_window,
@@ -233,101 +232,6 @@ def _parse_ts(ts: Any) -> datetime:
     return dt
 
 
-def _spec_files(specs_path: Path) -> list[Path]:
-    """Every manifest-suffixed file directly under ``specs_path``, in a stable
-    order.
-
-    Both suffixes, because ``observe/slo/spec_loader.py`` has always accepted
-    both and a ``.yml`` manifest that this glob could not see was dropped from
-    the financial figure with ``parse_failures == 0`` — the same silent-subset
-    failure as opensrm-oh27, reached by file extension rather than parse error.
-
-    Sorted, because the duplicate-skip branch below is first-wins and would
-    otherwise resolve on filesystem order.
-    """
-    return sorted(
-        p for p in specs_path.iterdir() if p.suffix in (".yaml", ".yml")
-    )
-
-
-def _foreign_yaml_reason(spec_file: Path) -> str | None:
-    """Why a file that failed to load should NOT count as a broken manifest.
-
-    ``load_manifest`` raises ``ManifestLoadError`` for any YAML it cannot parse
-    as a manifest, including files that never claimed to be one — a
-    ``kustomization.yaml``, a Prometheus rules file. Counting those would fire
-    the caller's "computed over a subset" caveat on every run over a mixed
-    directory, and a caveat that always fires stops being read. Returns None
-    when the file was aiming at being a manifest (so the caller counts it), or
-    a short reason when it plainly was not (so the caller drops it).
-
-    Evidence of intent is checked in three widening steps: the canonical v1/v2
-    format predicates, so this cannot drift from what the parser accepts; then
-    a near miss on those headers, since a typo'd kind or a drifted API group is
-    an ordinary way a real manifest breaks; then the body, since a bad merge or
-    a mis-indent can strip the header while leaving ``spec.service`` (as a
-    mapping), ``spec.slos`` or ``spec.outcomes`` intact.
-    Anything unreadable or empty counts too — a syntax error or a truncated
-    write inside a specs directory is a deployment error either way.
-
-    The two format predicates are imported from
-    ``nthlayer_common.manifest.parser.v1`` / ``.v2`` rather than the top-level
-    manifest API, which exports only the path-level ``is_manifest_file``. That
-    one re-reads and re-parses the file and swallows every exception as False
-    — the silent-skip shape this module is removing — where these operate on
-    the dict already in hand. Exporting them from ``nthlayer_common.manifest``
-    is filed as a follow-up.
-
-    LIMIT, stated rather than deferred: this recovers intent only while
-    evidence of intent survives. A file that has lost both its header and its
-    body is indistinguishable in principle from any other headerless YAML
-    mapping — both are dicts with no apiVersion, no kind, no ``spec.service``.
-    No content heuristic separates those, and adding more markers would not
-    change that. Such a file is dropped, recorded at debug rather than
-    silently, and the ``manifest_file_ignored`` log is where an investigator
-    chasing a number that looks wrong picks the trail back up.
-    """
-    try:
-        data = yaml.safe_load(spec_file.read_text())
-    except (OSError, ValueError, yaml.YAMLError):
-        # ValueError covers UnicodeDecodeError on non-UTF-8 bytes. Too
-        # malformed to inspect, so it counts.
-        return None
-    if not data:
-        # None (zero-byte, whitespace, comments) or an empty container.
-        return None
-    if not isinstance(data, dict):
-        return f"top-level YAML is {type(data).__name__}, not a mapping"
-
-    # "service" is the legacy pre-apiVersion shape load_manifest still accepts.
-    if is_opensrm_v2_format(data) or is_srm_v1_format(data) or "service" in data:
-        return None
-
-    api_version = data.get("apiVersion")
-    kind = data.get("kind")
-    near_miss = (
-        isinstance(api_version, str)
-        and (api_version.startswith("srm/") or "opensrm" in api_version)
-    ) or (
-        isinstance(kind, str)
-        and kind.startswith(("ServiceManifest", "ServiceReliabilityManifest"))
-    )
-    if near_miss:
-        return None
-
-    # Header gone, body may not be. `spec.service` as a *mapping* is the
-    # discriminator: OpenSLO also carries `spec.service`, but as a string.
-    spec = data.get("spec")
-    if isinstance(spec, dict) and (
-        isinstance(spec.get("service"), dict)
-        or isinstance(spec.get("slos"), list)
-        or isinstance(spec.get("outcomes"), dict)
-    ):
-        return None
-
-    return f"no manifest markers (apiVersion={api_version!r}, kind={kind!r})"
-
-
 @dataclass(frozen=True)
 class LoadedManifests:
     """Outcome of scanning a specs directory (opensrm-oh27).
@@ -375,11 +279,11 @@ def _load_manifests_from_specs(specs_dir: str | None) -> LoadedManifests:
 
     manifests: dict[str, Any] = {}
     parse_failures = 0
-    for spec_file in _spec_files(specs_path):
+    for spec_file in iter_manifest_files(specs_path):
         try:
             manifest = load_manifest(str(spec_file))
         except (ManifestLoadError, UnicodeDecodeError) as exc:
-            foreign_reason = _foreign_yaml_reason(spec_file)
+            foreign_reason = foreign_yaml_reason(spec_file)
             if foreign_reason is not None:
                 # Foreign YAML sharing the directory, not a broken manifest.
                 # Recorded rather than dropped without trace — skipping
