@@ -282,7 +282,21 @@ def _declares_itself_a_manifest(spec_file: Path) -> bool:
     if not isinstance(data, dict):
         return False
     # "service" is the legacy pre-apiVersion shape load_manifest still accepts.
-    return is_opensrm_v2_format(data) or is_srm_v1_format(data) or "service" in data
+    if is_opensrm_v2_format(data) or is_srm_v1_format(data) or "service" in data:
+        return True
+    # Near miss. The predicates above demand an exact apiVersion+kind pair, so
+    # a typo'd kind or a drifted API group matches neither — and version drift
+    # is an ordinary way a real manifest breaks. Aiming at us and missing is a
+    # parse failure; a Deployment or a Kustomization is not.
+    api_version = data.get("apiVersion")
+    kind = data.get("kind")
+    return (
+        isinstance(api_version, str)
+        and (api_version.startswith("srm/") or "opensrm" in api_version)
+    ) or (
+        isinstance(kind, str)
+        and kind.startswith(("ServiceManifest", "ServiceReliabilityManifest"))
+    )
 
 
 @dataclass(frozen=True)

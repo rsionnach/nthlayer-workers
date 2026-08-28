@@ -381,3 +381,60 @@ class TestSameServiceInBothSuffixes:
         duplicates = [e for e in logs if e["event"] == "manifest_duplicate_skipped"]
         assert len(duplicates) == 1
         assert duplicates[0]["spec_file"].endswith("svc-good.yml")
+
+
+class TestNearMissManifests:
+    """R5 pass 3 iteration 3. The canonical format predicates demand an exact
+    apiVersion+kind pair, so a manifest that gets one half right matches
+    neither, has no legacy ``service:`` key, and would be dropped as foreign
+    YAML. Version drift and a typo'd kind are the ordinary ways a real
+    manifest breaks — dropping those uncounted is the bead's failure mode
+    reached by a different route.
+    """
+
+    @staticmethod
+    def _count(specs_dir: Path, name: str, body: str) -> int:
+        (specs_dir / f"{name}.yaml").write_text(textwrap.dedent(body).strip())
+        return _load_manifests_from_specs(str(specs_dir)).parse_failures
+
+    def test_typo_in_kind_is_counted(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        assert self._count(specs, "typo", """
+            apiVersion: opensrm.nthlayer.io/v2
+            kind: ServiceManifests
+            metadata: {name: svc-typo}
+        """) == 1
+
+    def test_missing_kind_is_counted(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        assert self._count(specs, "nokind", """
+            apiVersion: opensrm.nthlayer.io/v2
+            metadata: {name: svc-nokind}
+        """) == 1
+
+    def test_drifted_api_group_is_counted(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        assert self._count(specs, "drift", """
+            apiVersion: opensrm.io/v2
+            kind: ServiceManifest
+            metadata: {name: svc-drift}
+        """) == 1
+
+    def test_drifted_v1_kind_is_counted(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        assert self._count(specs, "v1drift", """
+            apiVersion: srm/v1
+            kind: ServiceReliabilityManifests
+            metadata: {name: svc-v1drift}
+        """) == 1
+
+    def test_foreign_kubernetes_resource_is_still_not_counted(self, tmp_path: Path):
+        """The gate must stay narrow: a k8s resource declares apiVersion and
+        kind too, and is not a broken manifest.
+        """
+        specs = _write_specs(tmp_path / "specs")
+        assert self._count(specs, "deployment", """
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata: {name: svc-good}
+        """) == 0
