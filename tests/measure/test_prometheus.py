@@ -947,3 +947,15 @@ def test_evaluate_once_rejects_a_hysteresis_below_one(tmp_path, value, capsys):
         cmd_evaluate_once(args)
 
     assert exc.value.code == 2
+
+
+def test_a_non_string_unit_warns_rather_than_aborting_the_cycle():
+    """`unit: 100` reaches here as an int; the parser does not validate it.
+
+    Raising would propagate out of evaluate_slos' per-SLO loop and end the
+    run with verdicts already written for earlier SLOs — a partial cycle,
+    which is worse than a wrong-but-flagged threshold.
+    """
+    from nthlayer_workers.measure.adapters.prometheus import _target_seconds
+
+    assert _target_seconds(2.0, 100) == pytest.approx(0.002)  # assumes ms

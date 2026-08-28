@@ -265,7 +265,12 @@ def _target_seconds(target: float, unit: str | None) -> float:
             _DEFAULT_DURATION_UNIT,
         )
         unit = _DEFAULT_DURATION_UNIT
-    scale = _DURATION_UNIT_SECONDS.get(unit.strip().lower())
+    # str() before strip(): parser/v1.py passes config.get("unit") through
+    # unvalidated, so `unit: 100` arrives as an int. Calling .strip() on it
+    # would raise out of evaluate_slos' loop and abort the cycle with
+    # verdicts already written for earlier SLOs — a partial cycle rather
+    # than a clean failure. Coercing routes it to the warning below.
+    scale = _DURATION_UNIT_SECONDS.get(str(unit).strip().lower())
     if scale is None:
         logger.warning(
             "Unknown duration unit %r for target %s; assuming %s",
