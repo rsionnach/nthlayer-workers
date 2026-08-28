@@ -323,8 +323,8 @@ class LearnRetrospectiveModule:
                     ]
                     if len(trigger_matches) > 1:
                         # First-wins (matches the existing
-                        # _load_manifests_from_specs dedup behaviour
-                        # on the CLI side, retrospective.py line 238).
+                        # _load_manifests_from_specs dedup behaviour on the
+                        # CLI side, which logs manifest_duplicate_skipped).
                         logger.warning(
                             "learn_manifest_duplicate_skipped",
                             service=trigger_service,

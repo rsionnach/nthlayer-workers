@@ -760,6 +760,19 @@ failure_mode, volume_source}` or None when no service has an
 outcomes block. Duplicate manifests per service deduplicated by
 `metadata.name`.
 
+`_load_manifests_from_specs` (opensrm-jmy.21) returns
+`LoadedManifests(manifests, parse_failures)` over both `*.yaml` and
+`*.yml`, sorted. `manifests` feeds `declared_dependencies_by_service`
+(`_extract_declared_dependencies`, opensrm-jmy.21) and
+`_compute_financial_impact`; `parse_failures` reaches callers as
+`retro.metadata.custom["manifest_parse_failures"]` — always present, 0
+on a clean load — and as the CLI's "Manifest parse failures: N" line
+(opensrm-oh27). A file that fails to load is counted only when
+`_foreign_yaml_reason` finds evidence it was aiming at being a
+manifest; foreign YAML sharing the directory is dropped with a
+`manifest_file_ignored` debug log carrying the reason. Parse failures
+log `manifest_parse_failed` with `spec_file` and `error`.
+
 `recommendations.py` — NEW (opensrm-jmy.2): `SpecRecommendation` +
 `Recommendation` dataclasses + `analyze_incident()` glue.
 `Recommendation` fields: service / type / rationale / proposed_value

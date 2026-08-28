@@ -139,6 +139,15 @@ def _cmd_retrospective(args: argparse.Namespace) -> None:
         impact = custom.get("financial_impact")
         if impact:
             print(f"  Financial impact: ${impact.get('estimated', 0):.2f} ({impact.get('failure_mode')})")
+        # opensrm-oh27: an unparseable manifest drops its service from the
+        # figures above. Print the count so the reader knows the numbers
+        # were computed over a subset rather than over everything.
+        parse_failures = custom.get("manifest_parse_failures", 0)
+        if parse_failures:
+            print(
+                f"  Manifest parse failures: {parse_failures} "
+                "(figures computed over a subset; see manifest_parse_failed logs)"
+            )
     except KeyError as e:
         print(f"Error: {e}", file=__import__("sys").stderr)
         __import__("sys").exit(1)
