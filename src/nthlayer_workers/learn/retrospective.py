@@ -235,10 +235,14 @@ class LoadedManifests:
     """Outcome of scanning a specs directory (opensrm-oh27).
 
     ``manifests`` is the parsed view keyed by service name; ``parse_failures``
-    counts the ``*.yaml`` files that raised ``ManifestLoadError`` and were
-    therefore *not* included. The count travels with the manifests because
-    the downstream financial figure is computed over ``manifests`` alone —
-    without it, a partial view is indistinguishable from a complete one.
+    counts *files* that raised ``ManifestLoadError``, not services missing
+    from ``manifests`` — a failed environment overlay for a service whose
+    base manifest parsed still counts one. The count is deliberately a
+    coverage-doubt signal rather than a precise miss-count, and it travels
+    with the manifests because the downstream financial figure is computed
+    over ``manifests`` alone: without it, a partial view is
+    indistinguishable from a complete one. The per-file
+    ``manifest_parse_failed`` warning carries which file and why.
     """
 
     manifests: dict[str, Any]

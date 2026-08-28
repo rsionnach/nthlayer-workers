@@ -47,6 +47,7 @@ BROKEN_MANIFEST = textwrap.dedent("""
 
 
 def _write_specs(tmp_path: Path, *, broken: int = 0, good: bool = True) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     if good:
         (tmp_path / "svc-good.yaml").write_text(GOOD_MANIFEST)
     for i in range(broken):
@@ -145,3 +146,55 @@ class TestRetrospectiveSurfacesParseFailures:
         retro = build_retrospective(incident.id, store)
 
         assert retro.metadata.custom["manifest_parse_failures"] == 0
+
+
+class TestCliSurfacesParseFailures:
+    """R5 pass 1: the count reaching ``retro.metadata.custom`` is only half
+    the fix while the human-facing surface still prints the financial figure
+    with no caveat. ``nthlayer-learn retrospective`` is the caller a person
+    actually reads.
+    """
+
+    @staticmethod
+    def _run_cli(db_path: Path, incident_id: str, specs_dir: str | None):
+        import argparse
+
+        from nthlayer_workers.learn.cli import _cmd_retrospective
+
+        _cmd_retrospective(
+            argparse.Namespace(
+                db=str(db_path),
+                incident_verdict=incident_id,
+                specs_dir=specs_dir,
+                decision_store=None,
+            )
+        )
+
+    def test_cli_reports_parse_failures(self, tmp_path: Path, capsys):
+        from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
+
+        specs = _write_specs(tmp_path / "specs", broken=1)
+        db = tmp_path / "verdicts.db"
+        store = SQLiteVerdictStore(str(db))
+        incident = TestRetrospectiveSurfacesParseFailures._incident()
+        store.put(incident)
+        store.close()
+
+        self._run_cli(db, incident.id, str(specs))
+
+        out = capsys.readouterr().out
+        assert "Manifest parse failures: 1" in out
+
+    def test_cli_silent_when_no_parse_failures(self, tmp_path: Path, capsys):
+        from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
+
+        specs = _write_specs(tmp_path / "specs")
+        db = tmp_path / "verdicts.db"
+        store = SQLiteVerdictStore(str(db))
+        incident = TestRetrospectiveSurfacesParseFailures._incident()
+        store.put(incident)
+        store.close()
+
+        self._run_cli(db, incident.id, str(specs))
+
+        assert "Manifest parse failures" not in capsys.readouterr().out
