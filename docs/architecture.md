@@ -289,7 +289,7 @@ unknown top-level key (lists offenders + valid set, sort uses
 `governance:` (retired under opensrm-t5yr) is treated as any other
 unknown key — no deprecation grace [opensrm-m655].
 
-`adapters/prometheus.py` — `_query_for(service, slo) -> str | None`,
+`adapters/prometheus.py` — `_query_for(service, slo) -> str`,
 the single query builder. Module-level `_JUDGMENT_SLO_QUERIES` lookup
 dict of lambdas keyed by **`spec.judgment_type`**, not by SLO name: in
 v2 `metadata.name` is author-chosen and independent of the type

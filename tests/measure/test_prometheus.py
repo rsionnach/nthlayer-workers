@@ -649,11 +649,13 @@ class TestQueryAndBreachLogicAreAMatchedPair:
             "author-chosen and independent of it in v2"
         )
 
-    def test_a_judgment_type_with_no_builder_is_skipped_not_queried_empty(self, tmp_path):
-        """_JUDGMENT_SLO_QUERIES covers 4 of the 8 JUDGMENT_SLO_TYPES and
-        returns "" for the rest. An empty PromQL string is not None, so it
-        passed the guard, got sent to Prometheus, 400'd, and came back None —
-        skipped silently."""
+    def test_a_judgment_type_with_no_builder_gets_the_recording_rule_query(self, tmp_path):
+        """_JUDGMENT_SLO_QUERIES covers 4 of the 8 JUDGMENT_SLO_TYPES.
+
+        The other 4 must reach the `slo:{name}:ratio` convention. They used
+        to get `""`, which is not None, so it passed the guard, went to
+        Prometheus, 400'd, and came back None — skipped silently.
+        """
         (tmp_path / "svc.yaml").write_text(
             "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
             "metadata: {name: svc, labels: {tier: critical}}\n"

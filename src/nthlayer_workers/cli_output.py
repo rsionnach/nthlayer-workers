@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 
-def warn_parse_failures(parse_failures: int, specs_dir: object) -> None:
+def warn_parse_failures(parse_failures: int, specs_dir: str | Path) -> None:
     """Tell the operator when the SLOs that follow cover only part of a directory.
 
     Surfaced on stderr rather than only logged: whoever reads SLO output is

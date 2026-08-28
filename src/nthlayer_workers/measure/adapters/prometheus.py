@@ -104,11 +104,6 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
             # an SLI instead, which would make availability unbreachable and
             # double-invert judgment. Query and breach rule travel together.
             query = _query_for(manifest.name, slo)
-            if query is None:
-                logger.debug(
-                    "No query for %s/%s; skipping", manifest.name, slo.name
-                )
-                continue
             slos.append(SLODefinition(
                 service=manifest.name,
                 slo_name=slo.name,
@@ -122,11 +117,13 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
     return LoadedSpecs(slos=slos, parse_failures=parse_failures)
 
 
-def _query_for(service: str, slo: ManifestSLO) -> str | None:
+def _query_for(service: str, slo: ManifestSLO) -> str:
     """PromQL for an SLO whose manifest declared no indicator query.
 
     Judgment SLOs get the interim raw-metric queries below. Classical SLOs
-    fall back to the recording-rule naming convention.
+    fall back to the recording-rule naming convention. Always returns a
+    query: the recording-rule form is the universal fallback, and an SLO
+    with no query at all would be dropped from evaluation silently.
     """
     name = slo.name
     if slo.judgment_type:
