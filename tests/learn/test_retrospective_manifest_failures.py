@@ -342,9 +342,13 @@ class TestEmptyAndAmbiguousFiles:
 
         assert _load_manifests_from_specs(str(specs)).parse_failures == 1
 
-    def test_unreadable_file_is_counted(self, tmp_path: Path):
-        """The second read can fail where the first succeeded — the file moved
-        between them. Counting is the conservative read.
+    def test_vanished_file_is_not_treated_as_foreign(self, tmp_path: Path):
+        """Unit test on the gate alone, deliberately. The gate's second read
+        can fail where ``load_manifest``'s first read succeeded — the file
+        moved between them — and treating that as foreign YAML would drop it
+        uncounted. End to end a file that never existed raises
+        ``FileNotFoundError`` out of ``load_manifest`` instead, which this
+        does not cover and does not claim to.
         """
         from nthlayer_workers.learn.retrospective import _foreign_yaml_reason
 

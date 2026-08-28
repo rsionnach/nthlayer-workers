@@ -270,6 +270,14 @@ def _foreign_yaml_reason(spec_file: Path) -> str | None:
     Anything unreadable or empty counts too — a syntax error or a truncated
     write inside a specs directory is a deployment error either way.
 
+    The two format predicates are imported from
+    ``nthlayer_common.manifest.parser.v1`` / ``.v2`` rather than the top-level
+    manifest API, which exports only the path-level ``is_manifest_file``. That
+    one re-reads and re-parses the file and swallows every exception as False
+    — the silent-skip shape this module is removing — where these operate on
+    the dict already in hand. Exporting them from ``nthlayer_common.manifest``
+    is filed as a follow-up.
+
     LIMIT, stated rather than deferred: this recovers intent only while
     evidence of intent survives. A file that has lost both its header and its
     body is indistinguishable in principle from any other headerless YAML
