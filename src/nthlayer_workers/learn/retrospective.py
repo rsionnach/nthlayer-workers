@@ -7,11 +7,14 @@ from pathlib import Path
 from typing import Any
 
 import structlog
+import yaml
 from nthlayer_common.manifest import (
     ManifestLoadError,
     extract_declared_dependencies,
     load_manifest,
 )
+from nthlayer_common.manifest.parser.v1 import is_srm_v1_format
+from nthlayer_common.manifest.parser.v2 import is_opensrm_v2_format
 from nthlayer_common.outcomes import (
     compute_financial_impact,
     estimate_decisions_in_window,
@@ -230,6 +233,47 @@ def _parse_ts(ts: Any) -> datetime:
     return dt
 
 
+def _spec_files(specs_path: Path) -> list[Path]:
+    """Every manifest-suffixed file directly under ``specs_path``, in a stable
+    order.
+
+    Both suffixes, because ``observe/slo/spec_loader.py`` has always accepted
+    both and a ``.yml`` manifest that this glob could not see was dropped from
+    the financial figure with ``parse_failures == 0`` — the same silent-subset
+    failure as opensrm-oh27, reached by file extension rather than parse error.
+
+    Sorted, because the duplicate-skip branch below is first-wins and would
+    otherwise resolve on filesystem order.
+    """
+    return sorted(
+        p for p in specs_path.iterdir() if p.suffix in (".yaml", ".yml")
+    )
+
+
+def _declares_itself_a_manifest(spec_file: Path) -> bool:
+    """Whether a file that failed to load was *claiming* to be a manifest.
+
+    ``load_manifest`` raises ``ManifestLoadError`` for any YAML it cannot parse
+    as a manifest, including files that never claimed to be one — a
+    ``kustomization.yaml``, a Prometheus rules file. Counting those would fire
+    the caller's "computed over a subset" caveat on every run over a mixed
+    directory, and a caveat that always fires stops being read.
+
+    Uses the canonical v1/v2 format predicates rather than a local re-reading
+    of apiVersion/kind, so this cannot drift from what the parser accepts.
+    YAML too malformed to inspect counts as a manifest: a syntax error inside
+    a specs directory is a deployment error either way.
+    """
+    try:
+        data = yaml.safe_load(spec_file.read_text())
+    except (OSError, yaml.YAMLError):
+        return True
+    if not isinstance(data, dict):
+        return False
+    # "service" is the legacy pre-apiVersion shape load_manifest still accepts.
+    return is_opensrm_v2_format(data) or is_srm_v1_format(data) or "service" in data
+
+
 @dataclass(frozen=True)
 class LoadedManifests:
     """Outcome of scanning a specs directory (opensrm-oh27).
@@ -273,10 +317,14 @@ def _load_manifests_from_specs(specs_dir: str | None) -> LoadedManifests:
 
     manifests: dict[str, Any] = {}
     parse_failures = 0
-    for spec_file in specs_path.glob("*.yaml"):
+    for spec_file in _spec_files(specs_path):
         try:
             manifest = load_manifest(str(spec_file))
         except ManifestLoadError as exc:
+            if not _declares_itself_a_manifest(spec_file):
+                # Foreign YAML sharing the directory, not a broken manifest.
+                log.debug("manifest_file_ignored", spec_file=str(spec_file))
+                continue
             parse_failures += 1
             log.warning(
                 "manifest_parse_failed",

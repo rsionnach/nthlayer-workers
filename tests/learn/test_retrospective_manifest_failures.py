@@ -208,3 +208,116 @@ class TestCliSurfacesParseFailures:
         self._run_cli(db, incident_id, str(specs))
 
         assert "Manifest parse failures" not in capsys.readouterr().out
+
+
+class TestCountCountsOnlyManifests:
+    """R5 pass 3. ``load_manifest`` raises ``ManifestLoadError`` for *any*
+    YAML it cannot parse as a manifest, including files that never claimed to
+    be one — a ``kustomization.yaml``, a Prometheus rules file. Counting those
+    would fire the CLI's "computed over a subset" caveat on every run over a
+    mixed directory, and a caveat that always fires stops being read.
+
+    So the count is of files that *declare themselves* manifests (v1/v2
+    apiVersion+kind, or the legacy ``service:`` shape) and failed anyway,
+    plus YAML too malformed to make that determination.
+    """
+
+    def test_foreign_yaml_is_not_counted(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "kustomization.yaml").write_text(
+            "resources:\n  - deployment.yaml\n"
+        )
+
+        loaded_specs = _load_manifests_from_specs(str(specs))
+
+        assert loaded_specs.parse_failures == 0
+        assert set(loaded_specs.manifests) == {"svc-good"}
+
+    def test_foreign_yaml_does_not_log_a_parse_failure(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "kustomization.yaml").write_text(
+            "resources:\n  - deployment.yaml\n"
+        )
+
+        with structlog.testing.capture_logs() as logs:
+            _load_manifests_from_specs(str(specs))
+
+        assert [e for e in logs if e["event"] == "manifest_parse_failed"] == []
+
+    def test_declared_manifest_that_fails_is_still_counted(self, tmp_path: Path):
+        """The bead's case: a file that says `kind: ServiceManifest` and then
+        does not parse is exactly what the count exists for.
+        """
+        specs = _write_specs(tmp_path / "specs", broken=1)
+
+        assert _load_manifests_from_specs(str(specs)).parse_failures == 1
+
+    def test_unparseable_yaml_is_counted(self, tmp_path: Path):
+        """Too malformed to tell whether it claimed to be a manifest. Counting
+        it is the conservative read — a YAML syntax error inside a specs dir is
+        a deployment error either way.
+        """
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "torn.yaml").write_text(": : : [unclosed\n")
+
+        assert _load_manifests_from_specs(str(specs)).parse_failures == 1
+
+
+class TestSpecsDirShapes:
+    """R5 pass 3: directory-level edge cases."""
+
+    def test_yml_extension_manifests_are_loaded(self, tmp_path: Path):
+        """A `.yml` manifest used to be invisible to the glob — dropped from
+        the financial figure with `parse_failures == 0`, which is the same
+        silent-subset failure this bead fixes, reached by file extension
+        instead of by parse error. `observe/slo/spec_loader.py` has always
+        accepted both suffixes.
+        """
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "svc-yml.yml").write_text(
+            GOOD_MANIFEST.replace("svc-good", "svc-yml")
+        )
+
+        loaded_specs = _load_manifests_from_specs(str(specs))
+
+        assert set(loaded_specs.manifests) == {"svc-good", "svc-yml"}
+        assert loaded_specs.parse_failures == 0
+
+    def test_empty_specs_dir(self, tmp_path: Path):
+        empty = tmp_path / "empty"
+        empty.mkdir()
+
+        loaded_specs = _load_manifests_from_specs(str(empty))
+
+        assert loaded_specs.manifests == {}
+        assert loaded_specs.parse_failures == 0
+
+    def test_broken_overlay_counts_while_base_still_loads(self, tmp_path: Path):
+        """Per-file semantics, pinned: a service whose base manifest parsed is
+        still present even though one of its files failed. The count is a
+        coverage-doubt signal, not a miss-count.
+        """
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "svc-good-overlay.yaml").write_text(BROKEN_MANIFEST)
+
+        loaded_specs = _load_manifests_from_specs(str(specs))
+
+        assert loaded_specs.parse_failures == 1
+        assert "svc-good" in loaded_specs.manifests
+
+    def test_every_manifest_broken_yields_no_financial_figure(
+        self, tmp_path: Path, incident_db, capsys
+    ):
+        """The worst case, end to end: nothing parsed, so there is no financial
+        line at all — and the caveat is the only thing telling the reader why.
+        """
+        specs = tmp_path / "specs"
+        specs.mkdir()
+        (specs / "svc-broken.yaml").write_text(BROKEN_MANIFEST)
+        db, incident_id = incident_db
+
+        TestCliSurfacesParseFailures._run_cli(db, incident_id, str(specs))
+
+        out = capsys.readouterr().out
+        assert "Financial impact" not in out
+        assert "Manifest parse failures: 1" in out
