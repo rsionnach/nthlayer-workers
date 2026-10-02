@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 import structlog
 from nthlayer_common.manifest import ManifestCollisionWarning
+from nthlayer_common.manifest.scan import scan_manifest_files
 from nthlayer_common.verdicts.core import create
 from nthlayer_common.verdicts.models import Verdict
 from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
@@ -407,9 +408,22 @@ class TestSameServiceInBothSuffixes:
         assert loaded_specs.parse_failures == 0
         assert set(loaded_specs.manifests) == {"svc-good"}
 
-        # The scan reports the drop, naming the file that lost.
+        # WHICH file lost, from the scan's structured record. Not a substring of
+        # the warning text: that message names BOTH files — "<dropped> was not
+        # loaded: it shares the stem '<stem>' with <kept.name>" — so
+        # `"svc-good.yml" in message` is green under INVERTED precedence too,
+        # matching via the kept name. [correctness IMPORTANT 1]
+        scan = scan_manifest_files(specs)
+        assert [(c.kept.name, c.dropped.name) for c in scan.suffix_collisions] == [
+            ("svc-good.yaml", "svc-good.yml")
+        ]
+
+        # The drop reaches an operator, and the message leads with the LOSER.
+        # Anchored at position rather than by containment, for the reason above.
         assert len(collisions) == 1
-        assert "svc-good.yml" in str(collisions[0].message)
+        assert str(collisions[0].message).startswith(
+            f"{specs / 'svc-good.yml'} was not loaded:"
+        )
 
         # ...and this module's own branch is no longer what did it.
         assert [e for e in logs if e["event"] == "manifest_duplicate_skipped"] == []
