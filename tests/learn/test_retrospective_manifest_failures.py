@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 import structlog
+from nthlayer_common.manifest import ManifestCollisionWarning
 from nthlayer_common.verdicts.core import create
 from nthlayer_common.verdicts.models import Verdict
 from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
@@ -377,14 +378,65 @@ class TestEmptyAndAmbiguousFiles:
 
 
 class TestSameServiceInBothSuffixes:
-    """R5 pass 3 iteration 2: now that both suffixes are visible, a service
-    present as ``svc.yaml`` and ``svc.yml`` hits the duplicate branch. Sorted
-    iteration makes the winner deterministic instead of filesystem-ordered.
+    """The same-stem case moved UPSTREAM in nthlayer-common 3.0.0 (opensrm-xvwt).
+
+    Before 3.0.0 ``iter_manifest_files`` yielded both ``svc-good.yaml`` and
+    ``svc-good.yml``, so the pair reached this module and the service-name
+    duplicate branch skipped the second. 3.0.0 drops it at the scan instead and
+    raises ``ManifestCollisionWarning``, so this module never sees the second
+    file and ``manifest_duplicate_skipped`` does NOT fire for a same-stem pair.
+
+    The OUTCOME this class has always pinned is unchanged — one service loaded,
+    nothing counted as a parse failure — so those assertions are kept verbatim.
+    What moved is the layer carrying the operator's trace, so the log assertion
+    is replaced by one on the warning that now carries it rather than deleted:
+    deleting it would leave the silent-drop invariant unasserted at every layer,
+    which is the failure this whole module exists to prevent.
     """
 
     def test_yaml_wins_and_nothing_is_counted_as_a_failure(self, tmp_path: Path):
         specs = _write_specs(tmp_path / "specs")
         (specs / "svc-good.yml").write_text(GOOD_MANIFEST)
+
+        with (
+            pytest.warns(ManifestCollisionWarning) as collisions,
+            structlog.testing.capture_logs() as logs,
+        ):
+            loaded_specs = _load_manifests_from_specs(str(specs))
+
+        assert loaded_specs.parse_failures == 0
+        assert set(loaded_specs.manifests) == {"svc-good"}
+
+        # The scan reports the drop, naming the file that lost.
+        assert len(collisions) == 1
+        assert "svc-good.yml" in str(collisions[0].message)
+
+        # ...and this module's own branch is no longer what did it.
+        assert [e for e in logs if e["event"] == "manifest_duplicate_skipped"] == []
+
+
+class TestDuplicateServiceAcrossDifferentStems:
+    """The service-name duplicate branch, still live after 3.0.0.
+
+    ``_load_manifests_from_specs`` keys on ``manifest.name``, not on the file
+    stem, so two DIFFERENT stems declaring the same service still collide here.
+    After 3.0.0 this is the ONLY way to reach that branch, and it had exactly one
+    test — the same-stem one above — which 3.0.0 took away. The branch went
+    live-but-uncovered, so this class exists rather than the assertion simply
+    being dropped.
+
+    ``zz-same-service.yaml`` is named to sort AFTER ``svc-good.yaml``, so the
+    winner is deterministic and is the one _write_specs wrote. Measured, because
+    the obvious name gets it backwards: ``svc-good-copy.yaml`` sorts BEFORE
+    ``svc-good.yaml`` ('-' is 0x2D, '.' is 0x2E), which would make the surviving
+    manifest the fixture's copy and this test assert the wrong file was skipped.
+    """
+
+    def test_second_file_declaring_the_same_service_is_skipped_and_logged(
+        self, tmp_path: Path
+    ):
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "zz-same-service.yaml").write_text(GOOD_MANIFEST)
 
         with structlog.testing.capture_logs() as logs:
             loaded_specs = _load_manifests_from_specs(str(specs))
@@ -393,7 +445,8 @@ class TestSameServiceInBothSuffixes:
         assert set(loaded_specs.manifests) == {"svc-good"}
         duplicates = [e for e in logs if e["event"] == "manifest_duplicate_skipped"]
         assert len(duplicates) == 1
-        assert duplicates[0]["spec_file"].endswith("svc-good.yml")
+        assert duplicates[0]["service"] == "svc-good"
+        assert duplicates[0]["spec_file"].endswith("zz-same-service.yaml")
 
 
 class TestNearMissManifests:

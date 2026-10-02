@@ -9,19 +9,29 @@ description = "NthLayer workers — Tier 2 background computation (observe, meas
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    # >=2.1.2, NOT >=2.1.0 or 2.1.1. 2.1.0 introduced foreign_yaml_reason with an
-    # INERT body-recovery step: it tested spec.slos as a list, but v1 writes
-    # a mapping and v2 has no spec.slos at all, so a header-stripped manifest
-    # was dropped with parse_failures == 0 — the exact silent drop this
-    # package uses the gate to prevent. Fixed across 2.1.1 and 2.1.2;
-    # 2.1.1 still counted every Backstage catalog-info.yaml as a broken
-    # manifest, which 2.1.2 corrected.
+    # >=3.0.0, NOT >=2.1.2. 3.0.0 moves SLO target conversion to the INBOUND
+    # manifest boundary (opensrm-ocvu), so a v2 objective target of 0.999 now
+    # parses to 99.9 where it used to parse to 0.999. The measure adapter
+    # compares SLODefinition.target against a measured value directly, so 2.x
+    # and 3.x differ by 100x on the v2 path — the floor must admit neither
+    # convention but the one this code is written against. 3.0.0 also makes
+    # iter_manifest_files return one manifest per stem (opensrm-xvwt), which
+    # retires this package's own same-stem duplicate handling; the remaining
+    # service-name duplicate branch in learn/retrospective.py is still live and
+    # is covered by TestDuplicateServiceAcrossDifferentStems.
+    # Full list: nthlayer-common/docs/upgrading-3.0.md.
+    #
+    # The historical 2.1.2 floor was about foreign_yaml_reason's inert
+    # body-recovery step, inherited and still satisfied.
     #
     # CI resolves nthlayer-common from a sibling checkout, so it would not
     # notice a bad resolve. tests/observe/test_slo_spec_loader.py's
     # TestSharedGateResolvesCorrectly exists for that: it uses the shapes the
-    # PARSERS produce and fails against 2.1.0.
-    "nthlayer-common>=2.1.2,<3.0.0",
+    # PARSERS produce and fails against 2.1.0. NOTE: unlike the other four
+    # siblings, this package has no test_dependency_declarations.py and no
+    # EXPECTED_MAJORS guard, so nothing here fails when this range drifts from
+    # the version under test — only .claude/bin/eco-doctor.sh catches it.
+    "nthlayer-common>=3.0.0,<4.0.0",
     "httpx>=0.27",
     "pyyaml>=6.0",
     "structlog>=24.1.0",

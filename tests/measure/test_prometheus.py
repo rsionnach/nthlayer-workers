@@ -627,6 +627,51 @@ class TestQueryAndBreachLogicAreAMatchedPair:
         0-100 target against a 0-1 ratio that is always a breach, then
         hysteresis turns it into a real one. The exact inverse of the bug
         this bead fixed.
+
+        The target is ``0.05``, a Ratio, where this fixture used to say ``5.0``.
+        5.0 was never legal — opensrm v2 types the field as Ratio [0, 1] — but
+        nthlayer-common 2.x accepted it and complemented it to -400.0, so the
+        fixture was written from what the parser took rather than from what the
+        spec requires. 3.0.0 rejects it at the boundary, which turned this test
+        red with an IndexError on an empty slos list. The subject here is
+        dispatch-on-type, which 0.05 exercises identically;
+        test_a_percentage_judgment_target_is_a_counted_parse_failure pins the
+        rejection itself.
+        """
+        (tmp_path / "svc.yaml").write_text(
+            "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
+            "metadata: {name: svc, labels: {tier: critical}}\n"
+            "spec:\n  owner: {group: 'group:default/t'}\n"
+            "  service: {name: svc, type: ai-gate}\n"
+            "  judgment_slo:\n    - metadata: {name: reversal-guard}\n"
+            "      spec:\n        service: svc\n"
+            "        judgment_type: reversal_rate\n"
+            "        target: {maximum_reversal_rate: 0.05}\n"
+        )
+
+        slo = load_specs(tmp_path).slos[0]
+
+        assert slo.slo_name == "reversal-guard"
+        assert slo.judgment_type == "reversal_rate", (
+            "the breach check must dispatch on judgment_type; the NAME is "
+            "author-chosen and independent of it in v2"
+        )
+
+    def test_a_percentage_judgment_target_is_a_counted_parse_failure(self, tmp_path):
+        """A percentage where v2 types a Ratio is now rejected, and COUNTED.
+
+        nthlayer-common 2.x took ``maximum_reversal_rate: 5.0`` and complemented
+        it to -400.0; the load-time validator skips targets <= 0, so nothing
+        flagged it and this adapter compared a measured ratio against -400.0 —
+        never a breach, for an SLO whose whole purpose is to breach. 3.0.0 raises
+        at the inbound boundary instead (nthlayer-common/docs/upgrading-3.0.md
+        item 2).
+
+        Asserted through ``parse_failures`` rather than the log text, per this
+        repo's structured-data rule: the number is what downstream reads, and it
+        is the difference between a manifest that is known-broken and one that is
+        indistinguishable from declaring no SLOs. An exception would be wrong
+        here too — one bad file must not take the directory down.
         """
         (tmp_path / "svc.yaml").write_text(
             "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
@@ -639,13 +684,10 @@ class TestQueryAndBreachLogicAreAMatchedPair:
             "        target: {maximum_reversal_rate: 5.0}\n"
         )
 
-        slo = load_specs(tmp_path).slos[0]
+        loaded = load_specs(tmp_path)
 
-        assert slo.slo_name == "reversal-guard"
-        assert slo.judgment_type == "reversal_rate", (
-            "the breach check must dispatch on judgment_type; the NAME is "
-            "author-chosen and independent of it in v2"
-        )
+        assert loaded.slos == []
+        assert loaded.parse_failures == 1
 
     def test_a_judgment_type_with_no_builder_gets_the_recording_rule_query(self, tmp_path):
         """The same rule as
