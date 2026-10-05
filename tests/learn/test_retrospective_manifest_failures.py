@@ -438,11 +438,26 @@ class TestDuplicateServiceAcrossDifferentStems:
     live-but-uncovered, so this class exists rather than the assertion simply
     being dropped.
 
-    ``zz-same-service.yaml`` is named to sort AFTER ``svc-good.yaml``, so the
-    winner is deterministic and is the one _write_specs wrote. Measured, because
-    the obvious name gets it backwards: ``svc-good-copy.yaml`` sorts BEFORE
-    ``svc-good.yaml`` ('-' is 0x2D, '.' is 0x2E), which would make the surviving
-    manifest the fixture's copy and this test assert the wrong file was skipped.
+    The winner is deterministic because the order is DOCUMENTED API, not an
+    accident worth re-deriving: ``scan_manifest_files`` returns ``sorted(files)``
+    (nthlayer-common manifest/scan.py) and ``iter_manifest_files`` is specified
+    as sorted, one per stem. ``zz-same-service.yaml`` is named to sort after
+    ``svc-good.yaml`` under that guarantee, so the survivor is the one
+    _write_specs wrote.
+
+    Note on WHICH sort, because an earlier version of this docstring conflated
+    two different things. Grouping is by STEM; ordering is by the whole PATH, so
+    ``sorted()`` compares ``svc-good.yaml`` against the full name of its rival,
+    not its stem. Measured, since the obvious fixture name inverts under one and
+    not the other:
+
+        full-path sort : ['svc-good-copy.yaml', 'svc-good.yaml']   <- copy wins
+        stem-only sort : ['svc-good.yaml', 'svc-good-copy.yaml']   <- opposite
+
+    So ``svc-good-copy.yaml`` would have made the survivor the fixture's copy and
+    this test assert the wrong file was skipped — but only because paths compare
+    whole ('-' is 0x2D, '.' is 0x2E). ``zz-same-service.yaml`` sorts identically
+    either way, which is why it is the safe choice.
     """
 
     def test_second_file_declaring_the_same_service_is_skipped_and_logged(
