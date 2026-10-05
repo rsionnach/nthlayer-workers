@@ -9,19 +9,23 @@ description = "NthLayer workers — Tier 2 background computation (observe, meas
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    # >=3.0.0, NOT >=2.1.2. 3.0.0 moves SLO target conversion to the INBOUND
-    # manifest boundary (opensrm-ocvu), so a v2 objective target of 0.999 now
-    # parses to 99.9 where it used to parse to 0.999. The measure adapter
-    # compares SLODefinition.target against a measured value directly, so the
-    # two conventions disagree on the v2 path — exactly 100x for classical
-    # targets, while judgment maxima both complement AND scale (0.05 -> 95.0).
-    # The floor must admit only the convention this code is written against.
-    # 3.0.0 also makes
-    # iter_manifest_files return one manifest per stem (opensrm-xvwt), which
-    # retires this package's own same-stem duplicate handling; the remaining
-    # service-name duplicate branch in learn/retrospective.py is still live and
-    # is covered by TestDuplicateServiceAcrossDifferentStems.
-    # Full list: nthlayer-common/docs/upgrading-3.0.md.
+    # >=3.0.0, NOT >=2.1.2. Two breaks in 3.0.0 reach this package; full list
+    # in nthlayer-common/docs/upgrading-3.0.md.
+    #
+    # 1. Target conversion moved to the INBOUND manifest boundary
+    #    (opensrm-ocvu), so a v2 objective target of 0.999 now parses to 99.9
+    #    where it used to parse to 0.999. The measure adapter compares
+    #    SLODefinition.target against a measured value directly, so the two
+    #    conventions disagree on the v2 path — exactly 100x for classical
+    #    targets, while judgment maxima both complement AND scale
+    #    (0.05 -> 95.0).
+    #
+    # 2. iter_manifest_files returns one manifest per stem (opensrm-xvwt),
+    #    which retires this package's own same-stem duplicate handling. The
+    #    remaining service-name duplicate branch in learn/retrospective.py is
+    #    still live and is covered by TestDuplicateServiceAcrossDifferentStems.
+    #
+    # So the floor must admit only the convention this code is written against.
     #
     # The historical 2.1.2 floor is inherited and still satisfied: 2.1.0's
     # foreign_yaml_reason had an INERT body-recovery step (it tested spec.slos

@@ -586,7 +586,6 @@ class TestLoadSpecsUnderstandsBothFormats:
         assert [s.service for s in loaded.slos] == []
         assert loaded.parse_failures == 1
 
-
     def test_a_percentage_judgment_target_is_a_counted_parse_failure(self, tmp_path):
         """A percentage where v2 types a Ratio is now rejected, and COUNTED.
 
