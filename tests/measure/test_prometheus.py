@@ -924,6 +924,65 @@ async def test_latency_target_is_read_in_its_declared_unit(tmp_path, verdict_sto
 
 @pytest.mark.xfail(
     strict=True,
+    reason="A calibration SLO cannot breach at any value. opensrm-ocvu left the "
+    "three error magnitudes in DECLARED space pending decision 3c "
+    "(opensrm-l33e), but _JUDGMENT_QUERY_KINDS sends calibration to the "
+    "judgment_rate branch, which compares an SLI FLOOR. Flips to a pass — and "
+    "so fails strictly — the day 3c lands, which is the signal to revisit the "
+    "query_kind here rather than assume the fix was complete.",
+)
+@pytest.mark.asyncio
+async def test_a_miscalibrated_service_breaches(tmp_path, verdict_store):
+    """Pins a live silent failure, not a decision made in this repo.
+
+    `maximum_brier_score: 0.05` parses to target=0.05 because
+    converts_to_sli_floor("maximum_brier_score") is False — before AND after
+    3.0.0. The judgment_rate branch then computes `(1 - current) * 100 < 0.05`,
+    which needs current > 0.9995. Measured against common 3.0.0:
+
+        reversal_rate target=95.0   error 0.50 -> breach True
+        calibration   target=0.05   error 0.50 -> breach False
+                                    error 0.99 -> breach False
+
+    A Brier score of 0.99 is a model whose confidence is almost exactly
+    inverted, and it reads clean. This is the never-breaches class opensrm-ocvu
+    fixed for the five rate fields and did not reach for these three.
+
+    NOT a regression from 3.0.0 or from opensrm-ir5m: pre-3.0.0 no judgment
+    target converted at all, so reversal_rate was also 0.05 and also never
+    breached. 3.0.0 fixed half. What is new is that LoadedSpecs.slos now holds
+    two conventions at once.
+
+    Asserted through evaluate_slos rather than the query builder because the
+    builder is already tested and is not where this goes wrong — nothing in
+    tests/measure/ had ever LOADED and EVALUATED a calibration SLO, which is
+    why a shipped SLO type that cannot fire survived every prior pass.
+    """
+    (tmp_path / "svc.yaml").write_text(
+        "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
+        "metadata: {name: svc, labels: {tier: critical}}\n"
+        "spec:\n  owner: {group: 'group:default/t'}\n"
+        "  service: {name: svc, type: ai-gate}\n"
+        "  judgment_slo:\n    - metadata: {name: cal}\n"
+        "      spec:\n        service: svc\n"
+        "        judgment_type: calibration\n"
+        "        target: {maximum_brier_score: 0.05}\n"
+    )
+    slo = next(s for s in load_specs(tmp_path).slos if s.slo_name == "cal")
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.return_value = 0.99  # Brier 0.99 — near-inverted confidence
+        results = await evaluate_slos("http://prom", [slo], verdict_store)
+
+    assert results[0].raw_breach is True, (
+        "a Brier score of 0.99 against a 0.05 ceiling must breach"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
     reason="opensrm-vrpa: feedback_latency is in opensrm's v1 schema.json "
     "but not in nthlayer-common's JUDGMENT_SLO_TYPES, so parser/v1.py never "
     "sets judgment_type for it. Flips to a pass — and so fails strictly — "
