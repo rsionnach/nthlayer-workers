@@ -39,10 +39,14 @@ dependencies = [
     # CI resolves nthlayer-common from a sibling checkout, so it would not
     # notice a bad resolve. tests/observe/test_slo_spec_loader.py's
     # TestSharedGateResolvesCorrectly exists for that: it uses the shapes the
-    # PARSERS produce and fails against 2.1.0. NOTE: unlike the other four
-    # siblings, this package has no test_dependency_declarations.py and no
-    # EXPECTED_MAJORS guard, so nothing here fails when this range drifts from
-    # the version under test — only .claude/bin/eco-doctor.sh catches it.
+    # PARSERS produce and fails against 2.1.0.
+    #
+    # tests/test_dependency_declarations.py guards THIS declaration as of
+    # [opensrm-ir5m] — ported from nthlayer-core once a mutation showed the
+    # range could be reverted to >=2.1.2,<3.0.0 with all 1958 tests still
+    # green. Still missing, and tracked as opensrm-p62o: the EXPECTED_MAJORS
+    # half, which reads the BUILT wheel's own metadata in the release
+    # container, where deps come from PyPI instead of the sibling checkout.
     "nthlayer-common>=3.0.0,<4.0.0",
     "httpx>=0.27",
     "pyyaml>=6.0",

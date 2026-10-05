@@ -25,7 +25,8 @@ range and the tested version had diverged.
 
 The guarded set is DISCOVERED from project.dependencies, never hand-listed. A
 hand-maintained roster can fall behind pyproject, and a roster that empties
-turns every parametrised assertion below into `1 skipped, exit 0` — the same
+turns every parametrised assertion below into `3 skipped, exit 0` (one per
+parametrised test; measured) — the same
 class of bug this file exists to catch, one coordinate over.
 test_at_least_one_sibling_is_guarded is the non-vacuity floor.
 """
@@ -194,6 +195,38 @@ def test_declared_floor_is_the_version_under_test(name):
         f"for this repo, THEN bump the floor to {installed} — or pin the "
         f"sibling back to {floors[0]}. Widening the published range to make "
         f"this pass is how the bug got here."
+    )
+
+
+@pytest.mark.parametrize("name", SIBLINGS)
+def test_ceiling_excludes_the_next_major(name):
+    """An upper bound that EXISTS is not the same as one that bounds.
+
+    test_declared_range_has_an_upper_bound accepts any bounding operator, and
+    EXPECTED_MAJORS pins the INSTALLED major, so `<4.0.0` and `<9.0.0` pass
+    every other check in this file identically while declaring support for
+    five majors nothing has run. Measured against the live range:
+
+        next-major probe 4.0.0 vs `<4.0.0` -> excluded (correct)
+        next-major probe 4.0.0 vs `<9.0.0` -> ADMITTED (the hole)
+
+    Pure specifier arithmetic, so no unreleased version need exist — the same
+    technique as UNBOUNDED_PROBE above. This is nthlayer-core CLAUDE.md hard
+    rule 10's "not a future major" stated as an assertion rather than prose
+    [opensrm-ir5m, from the opensrm-p62o review].
+
+    It deliberately does NOT assert anything about the range's upper edge
+    WITHIN the current major: `<3.5.0` would pass here, and whether a declared
+    range may stop short of the next major is a policy question rule 10 does
+    not answer. Left to opensrm-p62o rather than decided here.
+    """
+    specifier = _siblings()[name].specifier
+    next_major = Version(f"{Version(version(name)).major + 1}.0.0")
+
+    assert next_major not in specifier, (
+        f"'{name}{specifier}' admits {next_major}, a major this repo has never "
+        f"run. A ceiling that does not exclude the next major declares "
+        f"compatibility untested — the shape of opensrm-p3bm, one major up."
     )
 
 

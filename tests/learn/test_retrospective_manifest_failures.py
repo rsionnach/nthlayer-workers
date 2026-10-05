@@ -464,13 +464,26 @@ class TestDuplicateServiceAcrossDifferentStems:
         self, tmp_path: Path
     ):
         specs = _write_specs(tmp_path / "specs")
-        (specs / "zz-same-service.yaml").write_text(GOOD_MANIFEST)
+        # tier differs so the SURVIVOR is observable. With both files
+        # byte-identical, deleting the branch's `continue` (first-wins ->
+        # last-wins) left this test green: the log fires either way and the
+        # winner could not be told apart [provenance IMPORTANT 2].
+        (specs / "zz-same-service.yaml").write_text(
+            GOOD_MANIFEST.replace("tier: critical", "tier: high")
+        )
 
         with structlog.testing.capture_logs() as logs:
             loaded_specs = _load_manifests_from_specs(str(specs))
 
         assert loaded_specs.parse_failures == 0
         assert set(loaded_specs.manifests) == {"svc-good"}
+
+        # FIRST file sorted wins, i.e. the one _write_specs wrote.
+        assert loaded_specs.manifests["svc-good"].tier == "critical", (
+            "the surviving manifest must be svc-good.yaml's, not the later "
+            "file's — otherwise the skip branch is not what decided"
+        )
+
         duplicates = [e for e in logs if e["event"] == "manifest_duplicate_skipped"]
         assert len(duplicates) == 1
         assert duplicates[0]["service"] == "svc-good"
