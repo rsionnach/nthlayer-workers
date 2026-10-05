@@ -922,8 +922,73 @@ async def test_latency_target_is_read_in_its_declared_unit(tmp_path, verdict_sto
     )
 
 
+# Shared by the pair below: the non-xfail test pins that this manifest is loaded
+# and evaluated, the xfail pins that it cannot breach. One body so they cannot
+# drift into testing different things.
+_CALIBRATION_MANIFEST = (
+    "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
+    "metadata: {name: svc, labels: {tier: critical}}\n"
+    "spec:\n  owner: {group: 'group:default/t'}\n"
+    "  service: {name: svc, type: ai-gate}\n"
+    "  judgment_slo:\n    - metadata: {name: cal}\n"
+    "      spec:\n        service: svc\n"
+    "        judgment_type: calibration\n"
+    "        target: {maximum_brier_score: 0.05}\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_a_calibration_slo_is_loaded_and_evaluated(tmp_path, verdict_store):
+    """Not xfailed, and it exists to constrain the xfail below.
+
+    `strict=True` without `raises=` accepts ANY exception as the expected
+    failure, so an xfail can sit green for a reason that has nothing to do with
+    the bug it claims to pin — and then never flip when the bug is fixed.
+    Measured: with the 3c fix simulated AND `-W error`, the xfail below reported
+    `1 xfailed` rather than flipping, because load_specs' TargetConventionWarning
+    became an exception before the assert was reached.
+
+    This test pins the part the xfail must be able to take for granted: the SLO
+    loads, is dispatched, and is actually evaluated with the value we fed it. If
+    calibration stops being evaluated at all, this goes red here instead of
+    quietly keeping the xfail company.
+    """
+    (tmp_path / "svc.yaml").write_text(_CALIBRATION_MANIFEST)
+
+    # Asserted, not suppressed: this warning is the only trace a declared-space
+    # target leaves in production, and it is what makes deferring the breach fix
+    # to 3c defensible rather than silent. If it stops firing, the deferral loses
+    # its justification and someone should know.
+    # TargetConventionWarning is deliberately NOT re-exported from
+    # nthlayer_common.manifest (its hard rule 1 keeps target_validation's
+    # symbols package-internal), so this asserts the CATEGORY BY NAME rather
+    # than importing a non-public symbol or matching on prose.
+    with pytest.warns(UserWarning) as warned:
+        slos = load_specs(tmp_path).slos
+
+    assert "TargetConventionWarning" in {w.category.__name__ for w in warned}
+
+    assert [s.slo_name for s in slos] == ["cal"]
+    assert slos[0].judgment_type == "calibration"
+    assert slos[0].target == pytest.approx(0.05), (
+        "maximum_brier_score is not converted to an SLI floor (opensrm-l33e); "
+        "if this becomes 95.0, decision 3c has landed"
+    )
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.return_value = 0.99
+        results = await evaluate_slos("http://prom", slos, verdict_store)
+
+    assert len(results) == 1
+    assert results[0].current_value == pytest.approx(0.99)
+
+
+@pytest.mark.filterwarnings("default::UserWarning")
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason="A calibration SLO cannot breach at any value. opensrm-ocvu left the "
     "three error magnitudes in DECLARED space pending decision 3c "
     "(opensrm-l33e), but _JUDGMENT_QUERY_KINDS sends calibration to the "
@@ -958,16 +1023,7 @@ async def test_a_miscalibrated_service_breaches(tmp_path, verdict_store):
     tests/measure/ had ever LOADED and EVALUATED a calibration SLO, which is
     why a shipped SLO type that cannot fire survived every prior pass.
     """
-    (tmp_path / "svc.yaml").write_text(
-        "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
-        "metadata: {name: svc, labels: {tier: critical}}\n"
-        "spec:\n  owner: {group: 'group:default/t'}\n"
-        "  service: {name: svc, type: ai-gate}\n"
-        "  judgment_slo:\n    - metadata: {name: cal}\n"
-        "      spec:\n        service: svc\n"
-        "        judgment_type: calibration\n"
-        "        target: {maximum_brier_score: 0.05}\n"
-    )
+    (tmp_path / "svc.yaml").write_text(_CALIBRATION_MANIFEST)
     slo = next(s for s in load_specs(tmp_path).slos if s.slo_name == "cal")
 
     with patch(
