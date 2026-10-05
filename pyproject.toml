@@ -12,17 +12,23 @@ dependencies = [
     # >=3.0.0, NOT >=2.1.2. 3.0.0 moves SLO target conversion to the INBOUND
     # manifest boundary (opensrm-ocvu), so a v2 objective target of 0.999 now
     # parses to 99.9 where it used to parse to 0.999. The measure adapter
-    # compares SLODefinition.target against a measured value directly, so 2.x
-    # and 3.x differ by 100x on the v2 path — the floor must admit neither
-    # convention but the one this code is written against. 3.0.0 also makes
+    # compares SLODefinition.target against a measured value directly, so the
+    # two conventions disagree on the v2 path — exactly 100x for classical
+    # targets, while judgment maxima both complement AND scale (0.05 -> 95.0).
+    # The floor must admit only the convention this code is written against.
+    # 3.0.0 also makes
     # iter_manifest_files return one manifest per stem (opensrm-xvwt), which
     # retires this package's own same-stem duplicate handling; the remaining
     # service-name duplicate branch in learn/retrospective.py is still live and
     # is covered by TestDuplicateServiceAcrossDifferentStems.
     # Full list: nthlayer-common/docs/upgrading-3.0.md.
     #
-    # The historical 2.1.2 floor was about foreign_yaml_reason's inert
-    # body-recovery step, inherited and still satisfied.
+    # The historical 2.1.2 floor is inherited and still satisfied: 2.1.0's
+    # foreign_yaml_reason had an INERT body-recovery step (it tested spec.slos
+    # as a list, but v1 writes a mapping and v2 has no such key), fixed across
+    # 2.1.1 and 2.1.2 — and what made it 2.1.2 specifically rather than 2.1.1
+    # is that 2.1.1 still counted every Backstage catalog-info.yaml as a broken
+    # manifest.
     #
     # CI resolves nthlayer-common from a sibling checkout, so it would not
     # notice a bad resolve. tests/observe/test_slo_spec_loader.py's

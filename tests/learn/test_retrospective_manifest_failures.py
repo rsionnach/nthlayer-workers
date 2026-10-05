@@ -23,8 +23,7 @@ from pathlib import Path
 
 import pytest
 import structlog
-from nthlayer_common.manifest import ManifestCollisionWarning
-from nthlayer_common.manifest.scan import scan_manifest_files
+from nthlayer_common.manifest import ManifestCollisionWarning, scan_manifest_files
 from nthlayer_common.verdicts.core import create
 from nthlayer_common.verdicts.models import Verdict
 from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
@@ -378,7 +377,7 @@ class TestEmptyAndAmbiguousFiles:
         assert _load_manifests_from_specs(str(specs)).parse_failures == 1
 
 
-class TestSameServiceInBothSuffixes:
+class TestSameStemInBothSuffixes:
     """The same-stem case moved UPSTREAM in nthlayer-common 3.0.0 (opensrm-xvwt).
 
     Before 3.0.0 ``iter_manifest_files`` yielded both ``svc-good.yaml`` and
