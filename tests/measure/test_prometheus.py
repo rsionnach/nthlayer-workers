@@ -994,7 +994,9 @@ async def test_a_calibration_slo_is_loaded_and_evaluated(tmp_path, verdict_store
     "(opensrm-l33e), but _JUDGMENT_QUERY_KINDS sends calibration to the "
     "judgment_rate branch, which compares an SLI FLOOR. Flips to a pass — and "
     "so fails strictly — the day 3c lands, which is the signal to revisit the "
-    "query_kind here rather than assume the fix was complete.",
+    "query_kind here rather than assume the fix was complete. Tracked as "
+    "opensrm-g32d, which also covers segments/stability — those are INVERTED "
+    "rather than merely never-firing, and are the more urgent half.",
 )
 @pytest.mark.asyncio
 async def test_a_miscalibrated_service_breaches(tmp_path, verdict_store):
