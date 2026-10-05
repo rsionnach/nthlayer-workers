@@ -956,9 +956,22 @@ async def test_a_calibration_slo_is_loaded_and_evaluated(tmp_path, verdict_store
     (tmp_path / "svc.yaml").write_text(_CALIBRATION_MANIFEST)
 
     # Asserted, not suppressed: this warning is the only trace a declared-space
-    # target leaves in production, and it is what makes deferring the breach fix
-    # to 3c defensible rather than silent. If it stops firing, the deferral loses
-    # its justification and someone should know.
+    # target leaves in production, so if it stops firing the breach bug becomes
+    # fully silent and someone should know.
+    #
+    # It is NOT a mitigation, and an earlier version of this comment overstated
+    # it as one. Its remediation text says "write '5.0'" (target * 100), and for
+    # maximum_brier_score that is wrong: opensrm v2's schema bounds the field
+    # inline to [0, 1] with the comment "not a Ratio semantically", and 0.05 is
+    # what the spec's own 08-calibration.yaml example uses. Measured — nothing
+    # enforces that inline bound, because the field is absent from
+    # TARGET_FIELD_IS_CEILING so _check_declared_ratio never sees it:
+    #
+    #   maximum_brier_score: 0.05  -> 1 slo, 0 failures, warns "write '5.0'"
+    #   maximum_brier_score: 5.0   -> 1 slo, 0 failures, NO warning at all
+    #
+    # So following the advice silently produces a schema-invalid manifest and a
+    # target of 5.0. Tracked on opensrm-g32d.
     # TargetConventionWarning is deliberately NOT re-exported from
     # nthlayer_common.manifest (its hard rule 1 keeps target_validation's
     # symbols package-internal), so this asserts the CATEGORY BY NAME rather
@@ -985,7 +998,7 @@ async def test_a_calibration_slo_is_loaded_and_evaluated(tmp_path, verdict_store
     assert results[0].current_value == pytest.approx(0.99)
 
 
-@pytest.mark.filterwarnings("default::UserWarning")
+@pytest.mark.filterwarnings("default:.*looks like a ratio:UserWarning")
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
