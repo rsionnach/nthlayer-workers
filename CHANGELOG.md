@@ -6,6 +6,27 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [2.0.1](https://github.com/rsionnach/nthlayer-workers/compare/v2.0.0...v2.0.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **deps:** admit nthlayer-common 3.0.0, and absorb what it breaks here ([46f769a](https://github.com/rsionnach/nthlayer-workers/commit/46f769a6d452f14f42d569392deac6e012aa2f7e))
+* **deps:** admit nthlayer-common 3.0.0, and absorb what it breaks here ([4c4c9a8](https://github.com/rsionnach/nthlayer-workers/commit/4c4c9a8e15f556fd52b5417d012f497f8ebd13ff))
+
+
+### Code Refactoring
+
+* **tests:** one import path, honest comments, test in the right class ([44c5bb0](https://github.com/rsionnach/nthlayer-workers/commit/44c5bb06bf34a9bb5fa805791baa36c13f470ffb))
+
+
+### Documentation
+
+* **deps:** label the two breaks instead of numbering them ([1453c1c](https://github.com/rsionnach/nthlayer-workers/commit/1453c1c906a66061154fdd79acdd584cde65c32f))
+* **deps:** number the two breaks, and drop a reflow artifact ([c13d743](https://github.com/rsionnach/nthlayer-workers/commit/c13d743b872b165f1b05e34c680d765646606e58))
+* **test:** cite the filed follow-up bead, not just the decision ([6585baa](https://github.com/rsionnach/nthlayer-workers/commit/6585baa012afe698fa01e392bdb5c8d4ea161928))
+* **test:** stop writing literal counts, and name the guard that exists ([d019813](https://github.com/rsionnach/nthlayer-workers/commit/d019813ae3e97317132c43313b2b7b5c03c0152f))
+
 ## [2.0.0](https://github.com/rsionnach/nthlayer-workers/compare/v1.7.1...v2.0.0) (2026-08-28)
 
 
