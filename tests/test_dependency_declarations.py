@@ -25,8 +25,7 @@ range and the tested version had diverged.
 
 The guarded set is DISCOVERED from project.dependencies, never hand-listed. A
 hand-maintained roster can fall behind pyproject, and a roster that empties
-turns every parametrised assertion below into `3 skipped, exit 0` (one per
-parametrised test; measured) — the same
+turns every parametrised assertion below into skips with exit 0 — the same
 class of bug this file exists to catch, one coordinate over.
 test_at_least_one_sibling_is_guarded is the non-vacuity floor.
 """
@@ -105,8 +104,14 @@ SIBLINGS = sorted(_siblings())
 def test_at_least_one_sibling_is_guarded():
     """Non-vacuity floor for every parametrised test here.
 
-    An empty parametrise list reports `1 skipped` and exits 0 (measured), so
-    without this the file could go quiet instead of red.
+    An empty parametrise list SKIPS and exits 0, so without this the file could
+    go quiet instead of red.
+
+    No literal skip count here on purpose. This docstring said `1 skipped` and
+    the module docstring said `3`, both marked "(measured)", while the real
+    figure was 4 — it is simply the number of SIBLINGS-parametrised tests, so it
+    goes stale every time one is added, and it drifted three times inside a
+    single review of this file. The count is not the point; going quiet is.
     """
     assert SIBLINGS, (
         f"no dependency under '{SIBLING_PREFIX}' or named '{FRONT_DOOR}' "
@@ -202,16 +207,27 @@ def test_declared_floor_is_the_version_under_test(name):
 def test_ceiling_excludes_the_next_major(name):
     """An upper bound that EXISTS is not the same as one that bounds.
 
-    test_declared_range_has_an_upper_bound accepts any bounding operator, and
-    EXPECTED_MAJORS pins the INSTALLED major, so `<4.0.0` and `<9.0.0` pass
-    every other check in this file identically while declaring support for
-    five majors nothing has run. Measured against the live range:
+    test_declared_range_has_an_upper_bound accepts any bounding operator, so
+    `<4.0.0` and `<9.0.0` pass every other check in this file identically while
+    declaring support for five majors nothing has run. (In the four siblings
+    that have a test_resolved_dependencies.py — under tests/smoke/ in core,
+    bench and override-adapter, tests/release-smoke/ in generate — their
+    EXPECTED_MAJORS does not close this either: it pins the INSTALLED major.
+    There is no EXPECTED_MAJORS in THIS repo at all; that half is
+    opensrm-p62o.) Measured
+    against the live range:
 
         next-major probe 4.0.0 vs `<4.0.0` -> excluded (correct)
         next-major probe 4.0.0 vs `<9.0.0` -> ADMITTED (the hole)
 
     Pure specifier arithmetic, so no unreleased version need exist — the same
-    technique as UNBOUNDED_PROBE above. This is nthlayer-core CLAUDE.md hard
+    technique as UNBOUNDED_PROBE above, and it inherits that constant's
+    EPOCH-BLINDNESS, which is stated here rather than left implied: for an
+    installed `1!3.0.0` the probe is `4.0.0`, which even a completely unbounded
+    `>=1!3.0.0` already excludes, so this assertion would pass vacuously. Left
+    alone for the same reason UNBOUNDED_PROBE is — no sibling has ever used an
+    epoch — and test_declared_range_has_an_upper_bound still catches an outright
+    missing ceiling in that case. This is nthlayer-core CLAUDE.md hard
     rule 10's "not a future major" stated as an assertion rather than prose
     [opensrm-ir5m, from the opensrm-p62o review].
 
