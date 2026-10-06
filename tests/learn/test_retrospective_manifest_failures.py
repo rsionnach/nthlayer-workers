@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 import structlog
+from nthlayer_common.manifest import ManifestCollisionWarning, scan_manifest_files
 from nthlayer_common.verdicts.core import create
 from nthlayer_common.verdicts.models import Verdict
 from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
@@ -376,24 +377,117 @@ class TestEmptyAndAmbiguousFiles:
         assert _load_manifests_from_specs(str(specs)).parse_failures == 1
 
 
-class TestSameServiceInBothSuffixes:
-    """R5 pass 3 iteration 2: now that both suffixes are visible, a service
-    present as ``svc.yaml`` and ``svc.yml`` hits the duplicate branch. Sorted
-    iteration makes the winner deterministic instead of filesystem-ordered.
+class TestSameStemInBothSuffixes:
+    """The same-stem case moved UPSTREAM in nthlayer-common 3.0.0 (opensrm-xvwt).
+
+    Before 3.0.0 ``iter_manifest_files`` yielded both ``svc-good.yaml`` and
+    ``svc-good.yml``, so the pair reached this module and the service-name
+    duplicate branch skipped the second. 3.0.0 drops it at the scan instead and
+    raises ``ManifestCollisionWarning``, so this module never sees the second
+    file and ``manifest_duplicate_skipped`` does NOT fire for a same-stem pair.
+
+    The OUTCOME this class has always pinned is unchanged — one service loaded,
+    nothing counted as a parse failure — so those assertions are kept verbatim.
+    What moved is the layer carrying the operator's trace, so the log assertion
+    is replaced by one on the warning that now carries it rather than deleted:
+    deleting it would leave the silent-drop invariant unasserted at every layer,
+    which is the failure this whole module exists to prevent.
     """
 
     def test_yaml_wins_and_nothing_is_counted_as_a_failure(self, tmp_path: Path):
         specs = _write_specs(tmp_path / "specs")
         (specs / "svc-good.yml").write_text(GOOD_MANIFEST)
 
+        with (
+            pytest.warns(ManifestCollisionWarning) as collisions,
+            structlog.testing.capture_logs() as logs,
+        ):
+            loaded_specs = _load_manifests_from_specs(str(specs))
+
+        assert loaded_specs.parse_failures == 0
+        assert set(loaded_specs.manifests) == {"svc-good"}
+
+        # WHICH file lost, from the scan's structured record. Not a substring of
+        # the warning text: that message names BOTH files — "<dropped> was not
+        # loaded: it shares the stem '<stem>' with <kept.name>" — so
+        # `"svc-good.yml" in message` is green under INVERTED precedence too,
+        # matching via the kept name. [correctness IMPORTANT 1]
+        scan = scan_manifest_files(specs)
+        assert [(c.kept.name, c.dropped.name) for c in scan.suffix_collisions] == [
+            ("svc-good.yaml", "svc-good.yml")
+        ]
+
+        # The drop reaches an operator, and the message leads with the LOSER.
+        # Anchored at position rather than by containment, for the reason above.
+        assert len(collisions) == 1
+        assert str(collisions[0].message).startswith(
+            f"{specs / 'svc-good.yml'} was not loaded:"
+        )
+
+        # ...and this module's own branch is no longer what did it.
+        assert [e for e in logs if e["event"] == "manifest_duplicate_skipped"] == []
+
+
+class TestDuplicateServiceAcrossDifferentStems:
+    """The service-name duplicate branch, still live after 3.0.0.
+
+    ``_load_manifests_from_specs`` keys on ``manifest.name``, not on the file
+    stem, so two DIFFERENT stems declaring the same service still collide here.
+    After 3.0.0 this is the ONLY way to reach that branch, and it had exactly one
+    test — the same-stem one above — which 3.0.0 took away. The branch went
+    live-but-uncovered, so this class exists rather than the assertion simply
+    being dropped.
+
+    The winner is deterministic because the order is DOCUMENTED API, not an
+    accident worth re-deriving: ``scan_manifest_files`` returns ``sorted(files)``
+    (nthlayer-common manifest/scan.py) and ``iter_manifest_files`` is specified
+    as sorted, one per stem. ``zz-same-service.yaml`` is named to sort after
+    ``svc-good.yaml`` under that guarantee, so the survivor is the one
+    _write_specs wrote.
+
+    Note on WHICH sort, because an earlier version of this docstring conflated
+    two different things. Grouping is by STEM; ordering is by the whole PATH, so
+    ``sorted()`` compares ``svc-good.yaml`` against the full name of its rival,
+    not its stem. Measured, since the obvious fixture name inverts under one and
+    not the other:
+
+        full-path sort : ['svc-good-copy.yaml', 'svc-good.yaml']   <- copy wins
+        stem-only sort : ['svc-good.yaml', 'svc-good-copy.yaml']   <- opposite
+
+    So ``svc-good-copy.yaml`` would have made the survivor the fixture's copy and
+    this test assert the wrong file was skipped — but only because paths compare
+    whole ('-' is 0x2D, '.' is 0x2E). ``zz-same-service.yaml`` sorts identically
+    either way, which is why it is the safe choice.
+    """
+
+    def test_second_file_declaring_the_same_service_is_skipped_and_logged(
+        self, tmp_path: Path
+    ):
+        specs = _write_specs(tmp_path / "specs")
+        # tier differs so the SURVIVOR is observable. With both files
+        # byte-identical, deleting the branch's `continue` (first-wins ->
+        # last-wins) left this test green: the log fires either way and the
+        # winner could not be told apart [provenance IMPORTANT 2].
+        (specs / "zz-same-service.yaml").write_text(
+            GOOD_MANIFEST.replace("tier: critical", "tier: high")
+        )
+
         with structlog.testing.capture_logs() as logs:
             loaded_specs = _load_manifests_from_specs(str(specs))
 
         assert loaded_specs.parse_failures == 0
         assert set(loaded_specs.manifests) == {"svc-good"}
+
+        # FIRST file sorted wins, i.e. the one _write_specs wrote.
+        assert loaded_specs.manifests["svc-good"].tier == "critical", (
+            "the surviving manifest must be svc-good.yaml's, not the later "
+            "file's — otherwise the skip branch is not what decided"
+        )
+
         duplicates = [e for e in logs if e["event"] == "manifest_duplicate_skipped"]
         assert len(duplicates) == 1
-        assert duplicates[0]["spec_file"].endswith("svc-good.yml")
+        assert duplicates[0]["service"] == "svc-good"
+        assert duplicates[0]["spec_file"].endswith("zz-same-service.yaml")
 
 
 class TestNearMissManifests:

@@ -9,19 +9,45 @@ description = "NthLayer workers — Tier 2 background computation (observe, meas
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    # >=2.1.2, NOT >=2.1.0 or 2.1.1. 2.1.0 introduced foreign_yaml_reason with an
-    # INERT body-recovery step: it tested spec.slos as a list, but v1 writes
-    # a mapping and v2 has no spec.slos at all, so a header-stripped manifest
-    # was dropped with parse_failures == 0 — the exact silent drop this
-    # package uses the gate to prevent. Fixed across 2.1.1 and 2.1.2;
-    # 2.1.1 still counted every Backstage catalog-info.yaml as a broken
-    # manifest, which 2.1.2 corrected.
+    # >=3.0.0, NOT >=2.1.2. Two of the six breaks documented in
+    # nthlayer-common/docs/upgrading-3.0.md reach this package. Labelled rather
+    # than numbered, because that doc numbers its items 1-6 globally and its
+    # item 2 is a different break from either of these.
+    #
+    # BREAK A (that doc's item 1) — target conversion moved to the INBOUND
+    #   manifest boundary (opensrm-ocvu), so a v2 objective target of 0.999 now
+    #   parses to 99.9 where it used to parse to 0.999. The measure adapter
+    #   compares SLODefinition.target against a measured value directly, so the
+    #   two conventions disagree on the v2 path — exactly 100x for classical
+    #   targets, while judgment maxima both complement AND scale (0.05 -> 95.0).
+    #
+    # BREAK B (that doc's item 6) — iter_manifest_files returns one manifest per
+    #   stem (opensrm-xvwt), which retires this package's own same-stem
+    #   duplicate handling. The remaining service-name duplicate branch in
+    #   learn/retrospective.py is still live and is covered by
+    #   TestDuplicateServiceAcrossDifferentStems.
+    #
+    # So the floor must admit only the convention this code is written against.
+    #
+    # The historical 2.1.2 floor is inherited and still satisfied: 2.1.0's
+    # foreign_yaml_reason had an INERT body-recovery step (it tested spec.slos
+    # as a list, but v1 writes a mapping and v2 has no such key), fixed across
+    # 2.1.1 and 2.1.2 — and what made it 2.1.2 specifically rather than 2.1.1
+    # is that 2.1.1 still counted every Backstage catalog-info.yaml as a broken
+    # manifest.
     #
     # CI resolves nthlayer-common from a sibling checkout, so it would not
     # notice a bad resolve. tests/observe/test_slo_spec_loader.py's
     # TestSharedGateResolvesCorrectly exists for that: it uses the shapes the
     # PARSERS produce and fails against 2.1.0.
-    "nthlayer-common>=2.1.2,<3.0.0",
+    #
+    # tests/test_dependency_declarations.py guards THIS declaration as of
+    # [opensrm-ir5m] — ported from nthlayer-core once a mutation showed the
+    # range could be reverted to >=2.1.2,<3.0.0 with all 1958 tests still
+    # green. Still missing, and tracked as opensrm-p62o: the EXPECTED_MAJORS
+    # half, which reads the BUILT wheel's own metadata in the release
+    # container, where deps come from PyPI instead of the sibling checkout.
+    "nthlayer-common>=3.0.0,<4.0.0",
     "httpx>=0.27",
     "pyyaml>=6.0",
     "structlog>=24.1.0",

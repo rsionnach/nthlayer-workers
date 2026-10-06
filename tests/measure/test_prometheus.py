@@ -586,6 +586,38 @@ class TestLoadSpecsUnderstandsBothFormats:
         assert [s.service for s in loaded.slos] == []
         assert loaded.parse_failures == 1
 
+    def test_a_percentage_judgment_target_is_a_counted_parse_failure(self, tmp_path):
+        """A percentage where v2 types a Ratio is now rejected, and COUNTED.
+
+        nthlayer-common 2.x took ``maximum_reversal_rate: 5.0`` and complemented
+        it to -400.0; the load-time validator skips targets <= 0, so nothing
+        flagged it and this adapter compared a measured ratio against -400.0 —
+        never a breach, for an SLO whose whole purpose is to breach. 3.0.0 raises
+        at the inbound boundary instead (nthlayer-common/docs/upgrading-3.0.md
+        item 2).
+
+        Asserted through ``parse_failures`` rather than the log text, per this
+        repo's structured-data rule: the number is what downstream reads, and it
+        is the difference between a manifest that is known-broken and one that is
+        indistinguishable from declaring no SLOs. An exception would be wrong
+        here too — one bad file must not take the directory down.
+        """
+        (tmp_path / "svc.yaml").write_text(
+            "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
+            "metadata: {name: svc, labels: {tier: critical}}\n"
+            "spec:\n  owner: {group: 'group:default/t'}\n"
+            "  service: {name: svc, type: ai-gate}\n"
+            "  judgment_slo:\n    - metadata: {name: reversal-guard}\n"
+            "      spec:\n        service: svc\n"
+            "        judgment_type: reversal_rate\n"
+            "        target: {maximum_reversal_rate: 5.0}\n"
+        )
+
+        loaded = load_specs(tmp_path)
+
+        assert loaded.slos == []
+        assert loaded.parse_failures == 1
+
 
 class TestQueryAndBreachLogicAreAMatchedPair:
     """opensrm-fxln R5 correctness — the adapter's breach branches are
@@ -627,6 +659,16 @@ class TestQueryAndBreachLogicAreAMatchedPair:
         0-100 target against a 0-1 ratio that is always a breach, then
         hysteresis turns it into a real one. The exact inverse of the bug
         this bead fixed.
+
+        The target is ``0.05``, a Ratio, where this fixture used to say ``5.0``.
+        5.0 was never legal — opensrm v2 types the field as Ratio [0, 1] — but
+        nthlayer-common 2.x accepted it and complemented it to -400.0, so the
+        fixture was written from what the parser took rather than from what the
+        spec requires. 3.0.0 rejects it at the boundary, which turned this test
+        red with an IndexError on an empty slos list. The subject here is
+        dispatch-on-type, which 0.05 exercises identically;
+        test_a_percentage_judgment_target_is_a_counted_parse_failure pins the
+        rejection itself.
         """
         (tmp_path / "svc.yaml").write_text(
             "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
@@ -636,7 +678,7 @@ class TestQueryAndBreachLogicAreAMatchedPair:
             "  judgment_slo:\n    - metadata: {name: reversal-guard}\n"
             "      spec:\n        service: svc\n"
             "        judgment_type: reversal_rate\n"
-            "        target: {maximum_reversal_rate: 5.0}\n"
+            "        target: {maximum_reversal_rate: 0.05}\n"
         )
 
         slo = load_specs(tmp_path).slos[0]
@@ -877,6 +919,136 @@ async def test_latency_target_is_read_in_its_declared_unit(tmp_path, verdict_sto
 
     assert results[0].raw_breach is False, (
         "a 2s target read as 2ms makes every response a breach"
+    )
+
+
+# Shared by the pair below: the non-xfail test pins that this manifest is loaded
+# and evaluated, the xfail pins that it cannot breach. One body so they cannot
+# drift into testing different things.
+_CALIBRATION_MANIFEST = (
+    "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
+    "metadata: {name: svc, labels: {tier: critical}}\n"
+    "spec:\n  owner: {group: 'group:default/t'}\n"
+    "  service: {name: svc, type: ai-gate}\n"
+    "  judgment_slo:\n    - metadata: {name: cal}\n"
+    "      spec:\n        service: svc\n"
+    "        judgment_type: calibration\n"
+    "        target: {maximum_brier_score: 0.05}\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_a_calibration_slo_is_loaded_and_evaluated(tmp_path, verdict_store):
+    """Not xfailed, and it exists to constrain the xfail below.
+
+    `strict=True` without `raises=` accepts ANY exception as the expected
+    failure, so an xfail can sit green for a reason that has nothing to do with
+    the bug it claims to pin — and then never flip when the bug is fixed.
+    Measured: with the 3c fix simulated AND `-W error`, the xfail below reported
+    `1 xfailed` rather than flipping, because load_specs' TargetConventionWarning
+    became an exception before the assert was reached.
+
+    This test pins the part the xfail must be able to take for granted: the SLO
+    loads, is dispatched, and is actually evaluated with the value we fed it. If
+    calibration stops being evaluated at all, this goes red here instead of
+    quietly keeping the xfail company.
+    """
+    (tmp_path / "svc.yaml").write_text(_CALIBRATION_MANIFEST)
+
+    # Asserted, not suppressed: this warning is the only trace a declared-space
+    # target leaves in production, so if it stops firing the breach bug becomes
+    # fully silent and someone should know.
+    #
+    # It is NOT a mitigation, and an earlier version of this comment overstated
+    # it as one. Its remediation text says "write '5.0'" (target * 100), and for
+    # maximum_brier_score that is wrong: opensrm v2's schema bounds the field
+    # inline to [0, 1] with the comment "not a Ratio semantically", and 0.05 is
+    # what the spec's own 08-calibration.yaml example uses. Measured — nothing
+    # enforces that inline bound, because the field is absent from
+    # TARGET_FIELD_IS_CEILING so _check_declared_ratio never sees it:
+    #
+    #   maximum_brier_score: 0.05  -> 1 slo, 0 failures, warns "write '5.0'"
+    #   maximum_brier_score: 5.0   -> 1 slo, 0 failures, NO warning at all
+    #
+    # So following the advice silently produces a schema-invalid manifest and a
+    # target of 5.0. Tracked on opensrm-g32d.
+    # TargetConventionWarning is deliberately NOT re-exported from
+    # nthlayer_common.manifest (its hard rule 1 keeps target_validation's
+    # symbols package-internal), so this asserts the CATEGORY BY NAME rather
+    # than importing a non-public symbol or matching on prose.
+    with pytest.warns(UserWarning) as warned:
+        slos = load_specs(tmp_path).slos
+
+    assert "TargetConventionWarning" in {w.category.__name__ for w in warned}
+
+    assert [s.slo_name for s in slos] == ["cal"]
+    assert slos[0].judgment_type == "calibration"
+    assert slos[0].target == pytest.approx(0.05), (
+        "maximum_brier_score is not converted to an SLI floor (opensrm-l33e); "
+        "if this becomes 95.0, decision 3c has landed"
+    )
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.return_value = 0.99
+        results = await evaluate_slos("http://prom", slos, verdict_store)
+
+    assert len(results) == 1
+    assert results[0].current_value == pytest.approx(0.99)
+
+
+@pytest.mark.filterwarnings("default:.*looks like a ratio:UserWarning")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="A calibration SLO cannot breach at any value. opensrm-ocvu left the "
+    "three error magnitudes in DECLARED space pending decision 3c "
+    "(opensrm-l33e), but _JUDGMENT_QUERY_KINDS sends calibration to the "
+    "judgment_rate branch, which compares an SLI FLOOR. Flips to a pass — and "
+    "so fails strictly — the day 3c lands, which is the signal to revisit the "
+    "query_kind here rather than assume the fix was complete. Tracked as "
+    "opensrm-g32d, which also covers segments/stability — those are INVERTED "
+    "rather than merely never-firing, and are the more urgent half.",
+)
+@pytest.mark.asyncio
+async def test_a_miscalibrated_service_breaches(tmp_path, verdict_store):
+    """Pins a live silent failure, not a decision made in this repo.
+
+    `maximum_brier_score: 0.05` parses to target=0.05 because
+    converts_to_sli_floor("maximum_brier_score") is False — before AND after
+    3.0.0. The judgment_rate branch then computes `(1 - current) * 100 < 0.05`,
+    which needs current > 0.9995. Measured against common 3.0.0:
+
+        reversal_rate target=95.0   error 0.50 -> breach True
+        calibration   target=0.05   error 0.50 -> breach False
+                                    error 0.99 -> breach False
+
+    A Brier score of 0.99 is a model whose confidence is almost exactly
+    inverted, and it reads clean. This is the never-breaches class opensrm-ocvu
+    fixed for the five rate fields and did not reach for these three.
+
+    NOT a regression from 3.0.0 or from opensrm-ir5m: pre-3.0.0 no judgment
+    target converted at all, so reversal_rate was also 0.05 and also never
+    breached. 3.0.0 fixed half. What is new is that LoadedSpecs.slos now holds
+    two conventions at once.
+
+    Asserted through evaluate_slos rather than the query builder because the
+    builder is already tested and is not where this goes wrong — nothing in
+    tests/measure/ had ever LOADED and EVALUATED a calibration SLO, which is
+    why a shipped SLO type that cannot fire survived every prior pass.
+    """
+    (tmp_path / "svc.yaml").write_text(_CALIBRATION_MANIFEST)
+    slo = next(s for s in load_specs(tmp_path).slos if s.slo_name == "cal")
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.return_value = 0.99  # Brier 0.99 — near-inverted confidence
+        results = await evaluate_slos("http://prom", [slo], verdict_store)
+
+    assert results[0].raw_breach is True, (
+        "a Brier score of 0.99 against a 0.05 ceiling must breach"
     )
 
 
