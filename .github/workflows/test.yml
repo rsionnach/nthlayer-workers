@@ -27,12 +27,12 @@ jobs:
       # uv source (`path = "../nthlayer-common"`). Check out both repos
       # as siblings so the path resolves the same way it does locally.
       - name: Checkout nthlayer-workers
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: nthlayer-workers
 
       - name: Checkout nthlayer-common (sibling)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: rsionnach/nthlayer-common
           path: nthlayer-common
