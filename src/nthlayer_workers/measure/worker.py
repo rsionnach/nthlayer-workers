@@ -396,12 +396,6 @@ def classify_severity(
     """
     if judgment_type in _BUDGET_CONSUMPTION_TYPES:
         return _classify_budget_consumption(target, current_value)
-    if judgment_type == "stability":
-        return "high"  # any stability breach is high; sustained tracking is v2
-    if judgment_type == "segments":
-        return _classify_variance(target, current_value)
-    if judgment_type == "calibration":
-        return _classify_calibration(target, current_value)
     # Unknown type → "high" for safety
     return "high"
 
@@ -424,38 +418,5 @@ def _classify_budget_consumption(target: float, current_value: float) -> str:
     if consumption < 200:
         return "low"
     if consumption < 500:
-        return "high"
-    return "critical"
-
-
-def _classify_variance(target: float, current_value: float) -> str:
-    """Classify segments breach by variance ratio.
-
-    Precondition: current_value < target (caller verified breach).
-    Inputs are in 0-100 percentage convention; the ratio is unitless so
-    the computation is identical in both conventions.
-    <2x = low, 2-5x = high, >5x = critical.
-    """
-    if target <= 0:
-        return "high"
-    ratio = (target - current_value) / target  # positive when breaching
-    if ratio < 2:
-        return "low"
-    if ratio < 5:
-        return "high"
-    return "critical"
-
-
-def _classify_calibration(target: float, current_value: float) -> str:
-    """Classify calibration breach by delta in percentage points.
-
-    Inputs are in 0-100 percentage convention; thresholds scaled
-    accordingly (10x the prior ratio thresholds).
-    <10pp = low, 10-30pp = high, >30pp = critical.
-    """
-    delta = abs(current_value - target)
-    if delta < 10:
-        return "low"
-    if delta < 30:
         return "high"
     return "critical"

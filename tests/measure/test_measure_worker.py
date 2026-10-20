@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from nthlayer_common.api_client import APIResult
 
 from nthlayer_workers.measure.worker import (
@@ -463,20 +464,11 @@ class TestClassifySeverity:
         # target=98.5, value=90.0 → 567% → critical
         assert classify_severity("reversal_rate", 98.5, 90.0) == "critical"
 
-    def test_stability_is_high(self):
-        assert classify_severity("stability", 100.0, 0.0) == "high"
-
-    def test_calibration_low(self):
-        # delta = |55-50| = 5pp → low (<10pp)
-        assert classify_severity("calibration", 50.0, 55.0) == "low"
-
-    def test_calibration_high(self):
-        # delta = |70-50| = 20pp → high (10-30pp)
-        assert classify_severity("calibration", 50.0, 70.0) == "high"
-
-    def test_calibration_critical(self):
-        # delta = |90-50| = 40pp → critical (>30pp)
-        assert classify_severity("calibration", 50.0, 90.0) == "critical"
+    @pytest.mark.parametrize("t", ["stability", "segments", "calibration"])
+    def test_error_magnitudes_are_not_slo_severity_types(self, t):
+        # Thresholds have their own fixed severity (high) in the threshold phase;
+        # classify_severity only knows the five judgment SLO types.
+        assert classify_severity(t, 0.05, 0.5) == "high"  # the unknown-type fallback
 
     def test_budget_consumption_target_one_hundred_is_critical(self):
         # target=100 means zero error budget — any miss is critical
