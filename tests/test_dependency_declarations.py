@@ -295,3 +295,30 @@ def test_bounding_operators_match_packaging_behaviour(spec, bounded):
 
     assert predicate is bounded
     assert (UNBOUNDED_PROBE in specifier) is not bounded
+
+
+@pytest.mark.parametrize("name", SIBLINGS)
+def test_declared_ceiling_is_exactly_the_next_major(name):
+    """The ceiling must exclude the first release of the NEXT major, and nothing more.
+
+    test_declared_range_has_an_upper_bound only asks that SOME bound exists, so
+    `<N+2.0.0` while N.x is under test passes it (measured: suite stays green) and
+    admits all of major N+1, which nothing here has run. Mirror image of the floor
+    test: the floor admits nothing below the tested version, this admits nothing
+    above its major. Like the floor, it must be bumped deliberately when the
+    sibling's major advances.
+    """
+    specifier = _siblings()[name].specifier
+    installed = Version(version(name))
+
+    ceilings = [s.version for s in specifier if s.operator == "<"]
+    assert len(ceilings) == 1, (
+        f"'{name}{specifier}' declares {len(ceilings)} '<' bounds; this guard "
+        f"reads exactly one"
+    )
+    expected = Version(f"{installed.major + 1}.0.0")
+    assert Version(ceilings[0]) == expected, (
+        f"{name} ceiling is declared '<{ceilings[0]}' but the installed version "
+        f"is {installed}, so the ceiling must be '<{expected}'. A wider ceiling "
+        f"publishes a major nothing here has run."
+    )

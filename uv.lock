@@ -874,7 +874,7 @@ wheels = [
 
 [[package]]
 name = "nthlayer-common"
-version = "3.0.0"
+version = "5.2.0"
 source = { editable = "../nthlayer-common" }
 dependencies = [
     { name = "anthropic" },
@@ -896,14 +896,14 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.40" },
-    { name = "cachetools", specifier = ">=5.3.0,<7.0.0" },
+    { name = "cachetools", specifier = ">=5.3.0,<8.0.0" },
     { name = "circuitbreaker", specifier = ">=2.0.0,<3.0.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "instructor", specifier = ">=1.5" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.21" },
     { name = "openai", specifier = ">=1.50" },
     { name = "opentelemetry-api", specifier = ">=1.28" },
-    { name = "pagerduty", specifier = ">=6.0.0,<7.0.0" },
+    { name = "pagerduty", specifier = ">=6.0.0,<8.0.0" },
     { name = "prometheus-client", specifier = ">=0.21" },
     { name = "pydantic", specifier = ">=2.7.0,<3.0.0" },
     { name = "pygments", specifier = ">=2.20.0" },
@@ -918,7 +918,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "nthlayer-workers"
-version = "2.0.0"
+version = "2.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

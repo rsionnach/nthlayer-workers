@@ -47,7 +47,11 @@ dependencies = [
     # green. Still missing, and tracked as opensrm-p62o: the EXPECTED_MAJORS
     # half, which reads the BUILT wheel's own metadata in the release
     # container, where deps come from PyPI instead of the sibling checkout.
-    "nthlayer-common>=3.0.0,<4.0.0",
+    # WHY 5.2.0 (opensrm-g32d): judgment thresholds are evaluated with
+    # nthlayer-common's evaluate_threshold (CORE §5.5.6) and read from core 3.0's
+    # /manifests via threshold_from_v2_entry; error magnitudes are no longer
+    # SLOs (decision 3c, common 4.0/5.0). See nthlayer-common/docs/upgrading-5.0.md.
+    "nthlayer-common>=5.2.0,<6.0.0",
     "httpx>=0.27",
     "pyyaml>=6.0",
     "structlog>=24.1.0",
