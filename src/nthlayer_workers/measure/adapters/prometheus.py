@@ -96,7 +96,7 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
 
     Going through the parser also removes two reimplementations that had
     drifted: a four-name judgment-type list that disagreed with
-    JUDGMENT_SLO_TYPES, and a target normalisation that duplicated the
+    the judgment SLO types, and a target normalisation that duplicated the
     0-100 convention nthlayer-common owns.
     """
     slos: list[SLODefinition] = []
@@ -155,7 +155,7 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
     name = slo.name
     if slo.judgment_type:
         # Keyed by judgment_type, not name: _JUDGMENT_SLO_QUERIES is a map of
-        # judgment KINDS. Only 2 of the 8 JUDGMENT_SLO_TYPES have a builder;
+        # judgment KINDS. Only 2 of the 5 V2_JUDGMENT_SLO_TYPES have a builder;
         # the rest fall through to the recording-rule convention below rather
         # than yielding an empty query, which Prometheus 400s and which then
         # reads as no-data (opensrm-fxln).
@@ -401,8 +401,8 @@ async def evaluate_slos(
 
             # Dispatch on the kind of number the query returns, decided by
             # _query_for when it built the query. Never on the SLO's name or
-            # type: in v2 metadata.name is author-chosen, and 6 of the 8
-            # JUDGMENT_SLO_TYPES have no builder, so both are the wrong
+            # type: in v2 metadata.name is author-chosen, and 3 of the 5
+            # V2_JUDGMENT_SLO_TYPES have no builder, so both are the wrong
             # question to ask about a value's units (opensrm-fxln).
             if slo.query_kind == "judgment_rate":
                 # Prometheus returns a 0.0-1.0 RATE; the target is a 0-100

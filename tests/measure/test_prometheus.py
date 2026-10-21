@@ -122,7 +122,7 @@ def test_judgment_query_builder_high_confidence_failure():
 
 
 def test_unbuilt_judgment_type_falls_back_to_recording_rule():
-    # Six of the eight JUDGMENT_SLO_TYPES have no builder above. They must
+    # Three of the five V2_JUDGMENT_SLO_TYPES have no builder above. They must
     # reach the recording-rule convention, NOT the empty string the deleted
     # wrapper returned: Prometheus 400s on an empty query, and
     # query_prometheus reads that failure as no-data and skips the SLO —
@@ -787,11 +787,11 @@ async def test_judgment_hysteresis_reaches_threshold_over_real_verdicts(verdict_
 async def test_recording_rule_fallback_is_not_inverted(verdict_store):
     """A builder-less judgment type gets an SLI query, so it must not invert.
 
-    Six of the eight JUDGMENT_SLO_TYPES fall through to `slo:{name}:ratio`,
+    Three of the five V2_JUDGMENT_SLO_TYPES fall through to `slo:{name}:ratio`,
     which is a GOOD-ratio SLI by convention, not an overrides/decisions rate.
     Inverting it read a healthy 0.99 as 1.0% and breached every window, while
     a genuinely bad 0.01 read as 99% healthy — verdicts exactly backwards for
-    half the taxonomy.
+    most of the taxonomy.
     """
     healthy = SLODefinition(
         service="svc", slo_name="seg", slo_type="judgment",
