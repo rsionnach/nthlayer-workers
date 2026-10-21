@@ -34,6 +34,7 @@ from nthlayer_common.providers import PrometheusProvider
 from nthlayer_workers.measure.thresholds.phase import (
     DEFAULT_THRESHOLD_HEARTBEAT_SECONDS,
     DEFAULT_THRESHOLD_INTERVAL_SECONDS,
+    THRESHOLD_BREACH_SEVERITY,
     retire_thresholds,
     run_threshold_phase,
 )
@@ -203,6 +204,7 @@ class MeasureModule:
                 return_exceptions=True,
             )
 
+            # Phase 1b: threshold phase (own cadence).
             threshold_breaches = await self._maybe_run_threshold_phase(manifests, provider)
             if threshold_breaches:
                 logger.info("threshold_breaches", count=len(threshold_breaches))
@@ -400,7 +402,7 @@ class MeasureModule:
                 current_status[key] = "breach"
                 new_breaches.append(key)
                 breach_verdict_ids[key] = breach_id
-                self._breach_severities[key] = "high"
+                self._breach_severities[key] = THRESHOLD_BREACH_SEVERITY
                 governed_threshold_keys.append(key)
         self._threshold_governed.update(governed_threshold_keys)
         return governed_threshold_keys
