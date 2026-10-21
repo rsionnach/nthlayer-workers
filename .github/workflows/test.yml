@@ -37,6 +37,15 @@ jobs:
           repository: rsionnach/nthlayer-common
           path: nthlayer-common
 
+      # The served-shape test reads the spec's examples from ../opensrm
+      # (opensrm-g32d). Floats on opensrm main, like nthlayer-common's CI:
+      # a spec commit can turn this red with no change here.
+      - name: Checkout opensrm (sibling, for spec examples)
+        uses: actions/checkout@v7
+        with:
+          repository: rsionnach/opensrm
+          path: opensrm
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 

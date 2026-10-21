@@ -12,8 +12,12 @@ autonomy levels, and a cursor for time-based polling.
 from __future__ import annotations
 
 import asyncio
+import math
+import os
+import time
 import uuid
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import structlog
@@ -21,7 +25,41 @@ from nthlayer_common.api_client import CoreAPIClient
 from nthlayer_common.cloudevents import wrap_assessment, wrap_verdict
 from nthlayer_common.providers import PrometheusProvider
 
+from nthlayer_workers.measure.thresholds.phase import (
+    DEFAULT_THRESHOLD_HEARTBEAT_SECONDS,
+    DEFAULT_THRESHOLD_INTERVAL_SECONDS,
+    retire_thresholds,
+    run_threshold_phase,
+)
+from nthlayer_workers.measure.thresholds.state import REARM_INTERVALS, as_timestamp
+
 logger = structlog.get_logger()
+
+
+def _env_flag_default_on(name: str) -> bool:
+    """A default-on operator switch: only off / false / 0 (any case) disable it."""
+    return os.environ.get(name, "").strip().lower() not in ("off", "false", "0")
+
+
+# Upper bound for the threshold timing settings (7 days). Zero is rejected:
+# a zero interval would evaluate every cycle and collapse re-arm hysteresis.
+_MAX_TIMING_SECONDS = 7 * 86400.0
+
+
+def _env_seconds(name: str, default: float) -> float:
+    """Seconds from the environment, in (0, 7d]. Unset: the default. Not a
+    number, non-finite, zero, negative or over 7d: the default, with a warning."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if not (math.isfinite(value) and 0 < value <= _MAX_TIMING_SECONDS):
+        logger.warning("measure_env_invalid", name=name, value=raw, default=default)
+        return default
+    return value
 
 
 @dataclass
@@ -40,6 +78,22 @@ class MeasureModule:
     client: CoreAPIClient
     prometheus_url: str
     eval_concurrency: int = 5
+    # Operator settings, read once at construction: changing one needs a restart.
+    retention_check: bool = field(
+        default_factory=lambda: _env_flag_default_on("MEASURE_RETENTION_CHECK")
+    )
+    threshold_interval_seconds: float = field(
+        default_factory=lambda: _env_seconds(
+            "MEASURE_THRESHOLD_INTERVAL", DEFAULT_THRESHOLD_INTERVAL_SECONDS
+        )
+    )
+    threshold_heartbeat_seconds: float = field(
+        default_factory=lambda: _env_seconds(
+            "MEASURE_THRESHOLD_HEARTBEAT", DEFAULT_THRESHOLD_HEARTBEAT_SECONDS
+        )
+    )
+    # Wall-clock seconds; injectable so tests control the threshold cadence.
+    clock: Callable[[], float] = time.time
 
     def __post_init__(self):
         self._eval_concurrency = self.eval_concurrency
@@ -47,6 +101,12 @@ class MeasureModule:
         self._breach_decisions: dict[str, dict] = {}    # slo_key → {decided, decided_at, ...}
         self._autonomy_levels: dict[str, str] = {}      # service → level
         self._breach_severities: dict[str, str] = {}    # slo_key → "low"|"high"|"critical"
+        # Judgment thresholds (opensrm-g32d): per-key state, persisted.
+        self._threshold_state: dict[str, dict] = {}
+        # Once-per-change log memory; in-memory only, so a restart logs each
+        # problem once more.
+        self._threshold_problems: set[str] = set()
+        self._threshold_last_run: float | None = None
 
     @property
     def name(self) -> str:
@@ -59,6 +119,15 @@ class MeasureModule:
         self._breach_decisions = state.get("breach_decisions", {})
         self._autonomy_levels = state.get("autonomy_levels", {})
         self._breach_severities = state.get("breach_severities", {})
+        # Restored component_state is untrusted; KeyState.from_dict handles
+        # wrong-typed fields, so only the entry shape is checked here.
+        raw = state.get("threshold_state")
+        self._threshold_state = (
+            {k: v for k, v in raw.items()
+             if isinstance(k, str) and isinstance(v, dict) and isinstance(v.get("service"), str)}
+            if isinstance(raw, dict) else {}
+        )
+        self._threshold_last_run = as_timestamp(state.get("threshold_last_run"))
 
     async def process_cycle(self) -> None:
         # Fetch manifests with judgment SLOs
@@ -100,6 +169,39 @@ class MeasureModule:
                 *(eval_one(svc, slo) for svc, slo in slos_to_eval),
                 return_exceptions=True,
             )
+
+            # Threshold phase (opensrm-g32d), on its own cadence: it runs when
+            # threshold_interval_seconds have passed since it last ran (or it
+            # never has, or the clock went back). Open threshold breaches still
+            # reach governance every cycle, from _threshold_state (Task 12).
+            # It must never stop Phases 2-3: on failure, log and go on with no
+            # threshold breaches this cycle.
+            threshold_breaches: list[tuple[str, str, str]] = []
+            now = self.clock()
+            last = self._threshold_last_run
+            if last is None or now < last or now - last >= self.threshold_interval_seconds:
+                self._threshold_last_run = now
+                try:
+                    threshold_breaches = await run_threshold_phase(
+                        client=self.client, provider=provider, manifests=manifests,
+                        state=self._threshold_state, seen_problems=self._threshold_problems,
+                        eval_concurrency=self._eval_concurrency,
+                        retention_check=self.retention_check, now=now,
+                        rearm_seconds=REARM_INTERVALS * self.threshold_interval_seconds,
+                        heartbeat_seconds=self.threshold_heartbeat_seconds,
+                    )
+                except Exception as exc:
+                    logger.warning("threshold_phase_failed", error=f"{type(exc).__name__}: {exc}")
+            else:
+                # Not a threshold run: still retire removed entries, since
+                # /manifests is fresh every cycle.
+                try:
+                    retire_thresholds(manifests=manifests, state=self._threshold_state,
+                                      seen_problems=self._threshold_problems)
+                except Exception as exc:
+                    logger.warning("threshold_retire_failed", error=f"{type(exc).__name__}: {exc}")
+            if threshold_breaches:
+                logger.info("threshold_breaches", count=len(threshold_breaches))
 
             # Phase 2: Detect breach transitions + classify severity
             new_breaches = _detect_transitions(current_status, self._slo_status)
@@ -324,6 +426,8 @@ class MeasureModule:
             "breach_decisions": self._breach_decisions,
             "autonomy_levels": self._autonomy_levels,
             "breach_severities": self._breach_severities,
+            "threshold_state": self._threshold_state,
+            "threshold_last_run": self._threshold_last_run,
         }
 
 
