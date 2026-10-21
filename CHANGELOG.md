@@ -6,6 +6,51 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [3.0.0](https://github.com/rsionnach/nthlayer-workers/compare/v2.0.1...v3.0.0) (2026-10-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* nthlayer-common 4.0/5.0 moved judgment error magnitudes out of SLOs; a v2 manifest declaring calibration, segments or stability under judgment_slo now fails to load in the CLI path. Declare them under spec.judgment_threshold. See nthlayer-common/docs/upgrading-5.0.md.
+
+### Features
+
+* **measure:** breach summaries print values to 12 significant digits (opensrm-g32d) ([8ee2b57](https://github.com/rsionnach/nthlayer-workers/commit/8ee2b57bc4c97e5202e54d10b7c5f9f2677fd839))
+* **measure:** carry threshold state across sibling re-keys; bound the threshold phase (opensrm-g32d) ([7fae68f](https://github.com/rsionnach/nthlayer-workers/commit/7fae68f82a0db8dfc2048bc849c036671505d948))
+* **measure:** escape control characters in breach summary segment names (opensrm-g32d) ([5248410](https://github.com/rsionnach/nthlayer-workers/commit/5248410a085ef779de75c712a2544a9709da896b))
+* **measure:** evaluate judgment thresholds each cycle (opensrm-g32d) ([3f9d2c2](https://github.com/rsionnach/nthlayer-workers/commit/3f9d2c2ce263d01a3c615e55e744b0e53e579a7b))
+* **measure:** harden the threshold sampler's quantile and response handling (opensrm-g32d) ([f2f041c](https://github.com/rsionnach/nthlayer-workers/commit/f2f041ccd893ff1caee072c5361e85f9aad8df39))
+* **measure:** keep threshold state for entries that fail to parse; pin assessment re-emission (opensrm-g32d) ([0bba6f8](https://github.com/rsionnach/nthlayer-workers/commit/0bba6f803b7e0fd711a5faf0462b7de8d693371a))
+* **measure:** MEASURE_THRESHOLD_AUTONOMY lets threshold breaches reduce autonomy (opensrm-g32d) ([11e2626](https://github.com/rsionnach/nthlayer-workers/commit/11e2626efe819ae1d64d9ea9deec9de7e2c56337))
+* **measure:** Prometheus sampler for judgment thresholds (opensrm-g32d) ([75f9532](https://github.com/rsionnach/nthlayer-workers/commit/75f9532fb604e64b990ed1f51fc3df0b4c40494f))
+* **measure:** refresh stored threshold identity every cycle; rotate evaluation order (opensrm-g32d) ([d3fb3ee](https://github.com/rsionnach/nthlayer-workers/commit/d3fb3eef860bf8bb211a142b1acadc3e38d1a905))
+* **measure:** restored threshold state never raises; reject unknown statuses (opensrm-g32d) ([b5fe1fa](https://github.com/rsionnach/nthlayer-workers/commit/b5fe1fa4e1e59c55a5d7da4f72bec5cb3e529b37))
+* **measure:** stable threshold keys, versioned threshold state, readable breach verdicts (opensrm-g32d) ([19aa6c4](https://github.com/rsionnach/nthlayer-workers/commit/19aa6c4f80b893911b92f60dddf5b2e4b9571bf1))
+* **measure:** threshold governance holds until re-arm; pin autonomy verdict lineage (opensrm-g32d) ([ba3af4e](https://github.com/rsionnach/nthlayer-workers/commit/ba3af4e62dcd990c8330ca9dd68ebd334d4c8e98))
+* **measure:** threshold identity key and duration re-arm state (opensrm-g32d) ([a0f738d](https://github.com/rsionnach/nthlayer-workers/commit/a0f738df3f1873a863cdc860170ee5eba7a833c1))
+
+
+### Bug Fixes
+
+* **measure:** error magnitudes never reach SLO breach code (opensrm-g32d) ([fddec18](https://github.com/rsionnach/nthlayer-workers/commit/fddec185bf6172ae765cfce878690e008e9c2370))
+
+
+### Dependencies
+
+* require nthlayer-common 5.2.0 (opensrm-g32d) ([f9c840f](https://github.com/rsionnach/nthlayer-workers/commit/f9c840fc5b6e5d8de42c4e754ce305d4044ebfbc))
+
+
+### Code Refactoring
+
+* **measure:** label phase 1b and use the threshold severity constant (opensrm-g32d) ([3628352](https://github.com/rsionnach/nthlayer-workers/commit/3628352d0628d46b0722eca52c98d5ea6fa8a018))
+* **measure:** name the threshold steps in process_cycle and correct their docs (opensrm-g32d) ([2c8678c](https://github.com/rsionnach/nthlayer-workers/commit/2c8678c3e34f06275cd346c19f76942e6d24f229))
+
+
+### Documentation
+
+* judgment thresholds, upgrade notes and hard rule 7 (opensrm-g32d) ([53ecc14](https://github.com/rsionnach/nthlayer-workers/commit/53ecc143ae4fc60681becf5b2558b6fa8f7a6a3d))
+* **measure:** judgment SLO type counts after decision 3c (opensrm-g32d) ([74a451b](https://github.com/rsionnach/nthlayer-workers/commit/74a451b387a558540595f01d45826f0a7dceaf84))
+
 ## [2.0.1](https://github.com/rsionnach/nthlayer-workers/compare/v2.0.0...v2.0.1) (2026-10-06)
 
 
