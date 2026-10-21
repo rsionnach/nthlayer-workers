@@ -84,7 +84,7 @@ def test_a_field_added_with_a_value_changes_the_key(monkeypatch):
 
 @pytest.mark.parametrize("field, value", [
     ("bins", 10),
-    ("bins", 0),
+    ("bins", 2),   # smallest bins the parser accepts (thresholds.py: bins >= 2)
     ("window", "30d"),
     ("probe", ProbeConfig(frozen_input_set="s3://p", frequency="daily")),
     ("segment_dimension", "region"),
