@@ -34,7 +34,7 @@ def threshold_key(service: str, t: JudgmentThreshold) -> str:
         "confidence_threshold": m.confidence_threshold,
         "outcome_signal": [signal.source, signal.window] if signal else None,
         "segment_dimension": m.segment_dimension,
-        "segment_values": sorted(m.segment_values),
+        "segment_values": sorted(set(m.segment_values)),
         "probe": [m.probe.frozen_input_set, m.probe.frequency] if m.probe else None,
         "window": m.window,
         "bins": m.bins,
@@ -53,9 +53,13 @@ def bounds_digest(t: JudgmentThreshold) -> str:
 
 def as_timestamp(v: Any) -> float | None:
     """A finite int/float (not bool), else None."""
-    if type(v) in (int, float) and math.isfinite(v):
-        return float(v)
-    return None
+    if type(v) not in (int, float):
+        return None
+    try:
+        f = float(v)
+    except OverflowError:  # an int too large for a float
+        return None
+    return f if math.isfinite(f) else None
 
 
 @dataclass
@@ -95,6 +99,8 @@ def advance(state: KeyState, status: str, now: float, rearm_seconds: float) -> t
     evaluations. not_evaluable neither starts, extends nor ends a run; a
     breach ends it. A run that starts in the future (the clock went back)
     restarts now, so a backward clock delays re-arming but cannot stop it."""
+    if status not in ("within", "breach", "not_evaluable"):
+        raise ValueError(f"unknown threshold status: {status!r}")
     if status == "not_evaluable":
         return state, False
     if status == "within":

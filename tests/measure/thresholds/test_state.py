@@ -167,8 +167,23 @@ def test_state_round_trip():
     ({"last_evaluable": "within", "armed": False, "within_since": float("nan")}, KeyState("within", False, None)),
     ({"last_evaluable": "within", "armed": False, "within_since": 12, "service": "svc"},
      KeyState("within", False, 12.0)),
+    # An int too large for a float is not a timestamp; it must not raise.
+    ({"last_evaluable": "within", "armed": False, "within_since": 10**400}, KeyState("within", False, None)),
+    ({"last_evaluable": "within", "armed": False, "within_since": -(10**400)}, KeyState("within", False, None)),
+    # A non-negative int is a valid count however large.
+    ({"last_evaluable": "within", "armed": False, "within_since": 5, "within_count": 10**400},
+     KeyState("within", False, 5.0, 10**400)),
     # State written before within_since existed.
     ({"last_evaluable": "within", "armed": False, "within_streak": 2}, KeyState("within", False, None)),
 ])
 def test_from_dict_tolerates_a_corrupt_or_old_restored_state(raw, expected):
     assert KeyState.from_dict(raw) == expected
+
+
+def test_unknown_status_is_rejected():
+    with pytest.raises(ValueError, match="bogus"):
+        advance(KeyState(), "bogus", 0.0, REARM)
+
+
+def test_duplicate_segment_values_do_not_change_the_key():
+    assert threshold_key("svc", _seg(["eu", "eu"])) == threshold_key("svc", _seg(["eu"]))
