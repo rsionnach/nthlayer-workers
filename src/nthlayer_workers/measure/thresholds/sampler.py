@@ -32,6 +32,8 @@ from nthlayer_common.manifest import (
 # shorter than the window cannot see it: that is insufficient_window. Unknown
 # retention (Prometheus not scraping itself) measures what it can.
 _RETENTION_QUERY = "min(prometheus_tsdb_lowest_timestamp_seconds)"
+# Scrape and block-boundary jitter: a retention configured as exactly 30d must
+# not flap to insufficient_window.
 _RETENTION_SLACK_SECONDS = 3600.0
 
 
@@ -84,6 +86,8 @@ def _quantile(q: float, buckets: list[tuple[float, float]]) -> float | AtLeast |
     None when there is nothing to measure: no +Inf bucket, no finite bucket,
     or no observations. Duplicate ``le`` values are summed and the counts made
     monotonic, as Prometheus does."""
+    if math.isnan(q) or not 0.0 <= q <= 1.0:
+        return None
     merged: dict[float, float] = {}
     for le, count in buckets:
         merged[le] = merged.get(le, 0.0) + count
@@ -106,11 +110,12 @@ def _quantile(q: float, buckets: list[tuple[float, float]]) -> float | AtLeast |
         return AtLeast(top) if math.isfinite(top) else None
     upper, count = cumulative[b]
     if b == 0 and upper <= 0:
-        return upper
+        return upper if math.isfinite(upper) else None
     lower, below = cumulative[b - 1] if b > 0 else (0.0, 0.0)
     if count - below <= 0:  # q=0 over an empty first bucket (Prometheus: NaN)
         return None
-    return lower + (upper - lower) * (rank - below) / (count - below)
+    value = lower + (upper - lower) * (rank - below) / (count - below)
+    return value if math.isfinite(value) else None  # a -Inf lower bound
 
 
 async def _query(provider: Any, query: str) -> Any:
@@ -213,6 +218,9 @@ async def sample(
             retention = await fetch_retention(provider)
         now = _time.time() if now is None else now
         window = duration_seconds(FEEDBACK_LATENCY_WINDOW)
+        # An empty TSDB reports an int64-max sentinel: later than now, so unknown.
+        if not isinstance(retention, Missing) and not (math.isfinite(retention) and retention <= now):
+            retention = Missing("no_data", "retention unknown")
         if not isinstance(retention, Missing) and now - retention < window - _RETENTION_SLACK_SECONDS:
             short = Missing("insufficient_window",
                             f"Prometheus retention starts {(now - retention) / 86400:.1f}d ago")

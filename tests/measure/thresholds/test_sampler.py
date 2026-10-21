@@ -279,3 +279,57 @@ async def test_unsourced_types_are_no_data_source(t, bounds, measurement):
     else:
         assert {v.reason for v in s.bounds.values()} == {"no_data_source"}
     p.query.assert_not_awaited()
+
+
+@pytest.mark.parametrize("q", [1.5, -0.1, math.nan])
+def test_quantile_out_of_range_is_none(q):
+    assert _quantile(q, [(10, 5), (INF, 10)]) is None
+
+
+@pytest.mark.parametrize("buckets", [
+    [(-INF, 5), (INF, 10)],                 # first bucket le=-Inf, rank inside it
+    [(-INF, 1), (10, 5), (INF, 10)],        # interpolating from a -Inf lower bound
+])
+def test_quantile_never_returns_non_finite(buckets):
+    for q in (0.05, 0.5, 0.9):
+        v = _quantile(q, buckets)
+        assert v is None or math.isfinite(v if not isinstance(v, AtLeast) else v.value)
+
+
+def test_quantile_neg_inf_lower_bound_is_none():
+    assert _quantile(0.5, [(-INF, 1), (10, 5), (INF, 10)]) is None
+    assert _quantile(0.05, [(-INF, 5), (INF, 10)]) is None
+
+
+@pytest.mark.parametrize("retention", [9.223372036854776e15, NOW + 1, math.inf])
+async def test_future_or_sentinel_retention_is_unknown_and_measures(retention):
+    p = _provider([_retention(retention), (_BUCKETS, _buckets(("10", 5), ("100", 10), ("+Inf", 10)))])
+    s = await sample(p, "svc", _lat(), now=NOW)
+    assert s.bounds == {"maximum_p50": 10.0, "maximum_p90": 82.0}
+
+
+@pytest.mark.parametrize("resp", [None, "garbage", [], {"data": {"result": "x"}}, {"data": None}])
+async def test_malformed_gauge_response_is_no_data(resp):
+    p = _provider([(_ANY, resp)])
+    s = await sample(p, "svc", _cal(maximum_brier_score=0.1), now=NOW)
+    assert s.bounds["maximum_brier_score"].reason == "no_data"
+
+
+@pytest.mark.parametrize("resp", [None, "garbage", {"data": {"result": "x"}}])
+async def test_malformed_histogram_response_is_no_data(resp):
+    p = _provider([_OLD, (_BUCKETS, resp)])
+    s = await sample(p, "svc", _lat(), now=NOW)
+    assert all(v.reason == "no_data" for v in s.bounds.values())
+
+
+async def test_bucket_with_unparseable_le_is_ignored_not_fatal():
+    p = _provider([_OLD, (_BUCKETS, _buckets(("abc", 99), ("10", 5), ("100", 10), ("+Inf", 10)))])
+    s = await sample(p, "svc", _lat(), now=NOW)
+    assert s.bounds == {"maximum_p50": 10.0, "maximum_p90": 82.0}
+
+
+@pytest.mark.parametrize("value", ["+Inf", "-Inf"])
+async def test_infinite_gauge_is_no_data(value):
+    p = _provider([(_ANY, _vector(value))])
+    s = await sample(p, "svc", _cal(maximum_brier_score=0.1), now=NOW)
+    assert s.bounds["maximum_brier_score"].reason == "no_data"
