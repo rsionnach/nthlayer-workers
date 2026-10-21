@@ -574,3 +574,51 @@ def test_threshold_timing_env(monkeypatch, name, default, raw, expected):
     field = {"MEASURE_THRESHOLD_INTERVAL": m.threshold_interval_seconds,
              "MEASURE_THRESHOLD_HEARTBEAT": m.threshold_heartbeat_seconds}[name]
     assert field == (default if expected is None else expected)
+
+
+# --- Review fixes: unparseable entries keep state; failed emission retries --
+
+# Fails threshold_from_v2_entry: a bound value must be a number.
+_CAL_BROKEN = dict(_CAL, bounds={"maximum_expected_calibration_error": "bad"})
+
+
+async def test_an_entry_that_stops_parsing_keeps_its_open_breach():
+    m, prov, a, v = _module([0.2, 0.2], [
+        _manifests(("svc", [_CAL])),
+        _manifests(("svc", [_CAL_BROKEN])),   # same entry, now unparseable
+        _manifests(("svc", [_CAL])),          # parses again
+    ])
+    key = threshold_key("svc", threshold_from_v2_entry(_CAL))
+    await _cycles(m, prov, 1)
+    after_breach = dict(m._threshold_state[key])
+    assert after_breach["last_evaluable"] == "breach" and after_breach["armed"] is False
+    await _cycles(m, prov, 1)
+    assert m._threshold_state[key] == after_breach   # not retired, untouched
+    await _cycles(m, prov, 1)
+    assert len(_breaches(v)) == 1                    # no duplicate on re-parse
+
+
+def test_retire_thresholds_keeps_state_of_a_service_with_an_unparseable_entry():
+    from nthlayer_workers.measure.thresholds.phase import retire_thresholds
+
+    key = threshold_key("svc", threshold_from_v2_entry(_CAL))
+    entry = {"last_evaluable": "breach", "armed": False, "within_since": None,
+             "within_count": 0, "service": "svc"}
+    state = {key: dict(entry)}
+    retire_thresholds(manifests=[{"name": "svc", "judgment_thresholds": [_CAL_BROKEN]}],
+                      state=state, seen_problems=set())
+    assert state == {key: entry}
+    # Control: a clean manifest without the entry does retire it.
+    retire_thresholds(manifests=[{"name": "svc", "judgment_thresholds": []}],
+                      state=state, seen_problems=set())
+    assert state == {}
+
+
+async def test_a_rejected_assessment_is_not_recorded_as_emitted():
+    m, prov, a, v = _module([0.01, 0.01], _manifests(("svc", [_CAL])),
+                            threshold_heartbeat_seconds=3600.0)
+    answers = [APIResult(ok=False, status_code=503), APIResult(ok=True, status_code=201, data={})]
+    m.client.submit_assessment = AsyncMock(side_effect=lambda env: answers.pop(0))
+    await _cycles(m, prov, 2)  # within both times, same signature, inside the heartbeat
+    assert m.client.submit_assessment.await_count == 2
+    assert v == []

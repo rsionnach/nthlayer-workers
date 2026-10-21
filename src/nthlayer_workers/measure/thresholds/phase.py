@@ -75,11 +75,18 @@ def _canonical(t: JudgmentThreshold) -> dict:
 def _entries(manifests: list[dict], seen_problems: set[str]) -> tuple[set[str], list[_Entry]]:
     """Parse and key every served threshold: (services present, entries).
 
+    "Present" means fully present, i.e. safe to retire against: a service
+    with any entry that fails to parse is left out, so every existing key of
+    it is kept (an open breach must not retire and re-raise because one
+    entry was briefly malformed). Cost: a removed-and-broken entry lingers
+    until the manifest parses cleanly or the service disappears.
+
     Identical entries are kept once. A threshold_key shared by several
     distinct entries of a service (same identity, other bound values) is
     suffixed for EVERY such entry with ~bounds_digest, so a key depends on
     the entry, never on its position: reordering moves no state."""
     present: set[str] = set()
+    partial: set[str] = set()  # services with an entry that failed to parse
     by_base: dict[str, list[tuple[dict, str, JudgmentThreshold]]] = {}  # base -> distinct entries
     for i, m in enumerate(manifests):
         service = m.get("name") if isinstance(m, dict) else None
@@ -103,6 +110,7 @@ def _entries(manifests: list[dict], seen_problems: set[str]) -> tuple[set[str], 
             except OpenSRMV2ParseError as exc:
                 _log_once(seen_problems, f"parse:{service}:{item!r}", "threshold_parse_failed",
                           service=service, where=where, error=str(exc))
+                partial.add(service)
                 continue
             base = threshold_key(service, t)
             canonical = _canonical(t)
@@ -126,7 +134,7 @@ def _entries(manifests: list[dict], seen_problems: set[str]) -> tuple[set[str], 
                 continue
             used.add(key)
             entries.append((key, service, t))
-    return present, entries
+    return present - partial, entries
 
 
 async def _evaluate(

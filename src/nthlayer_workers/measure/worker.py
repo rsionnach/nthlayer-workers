@@ -180,6 +180,8 @@ class MeasureModule:
             now = self.clock()
             last = self._threshold_last_run
             if last is None or now < last or now - last >= self.threshold_interval_seconds:
+                # Advanced before the run, so even a phase that raises outright
+                # retries after one interval, not every cycle (no log flood).
                 self._threshold_last_run = now
                 try:
                     threshold_breaches = await run_threshold_phase(
