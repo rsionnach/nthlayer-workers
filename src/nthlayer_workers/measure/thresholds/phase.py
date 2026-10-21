@@ -88,7 +88,11 @@ def breach_readout(service: str, outcome: ThresholdOutcome) -> tuple[list[dict[s
     summary = f"{outcome.type} threshold breach on {service}"
     if rows:  # always, for an outcome whose status is breach
         row, reason = rows[0]
-        name = row["bound"] + (f" (segment {row['segment']})" if "segment" in row else "")
+        # Segment names are author-chosen: escape control characters so the
+        # summary stays one line.
+        name = row["bound"] + (
+            f" (segment {row['segment'].encode('unicode_escape').decode('ascii')})"
+            if "segment" in row else "")
         # A breach row always has a measured value (_decide sets it).
         # 12 significant digits: a value just over its limit must not print as
         # the limit (6-digit %g did), nor a long duration in exponent form.

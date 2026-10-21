@@ -806,3 +806,14 @@ def test_a_long_duration_reads_in_plain_seconds():
     t = _spec_threshold("feedback_latency")
     outcome = evaluate_threshold(t, Samples(bounds={"maximum_p50": 1234567.0, "maximum_p90": 1.0}))
     assert breach_readout("svc", outcome)[1].endswith("maximum_p50 1234567s > 1h")
+
+
+def test_a_segment_name_with_a_newline_keeps_the_summary_on_one_line():
+    # Shape from the spec's all-five-types.yaml segments entry; the parser
+    # does not reject control characters in segment values.
+    t = threshold_from_v2_entry({
+        "type": "segments", "metric": "escalation", "segment_dimension": "tier",
+        "segment_values": ["a\nb"], "bounds": {"maximum_variance_from_overall": 0.05}})
+    outcome = evaluate_threshold(t, Samples(overall=0.1, segments={"a\nb": 0.3}))
+    summary = breach_readout("svc", outcome)[1]
+    assert "\n" not in summary and "(segment a\\nb)" in summary
