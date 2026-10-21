@@ -121,16 +121,8 @@ def test_judgment_query_builder_high_confidence_failure():
     assert 'confidence_bucket="high"' in q
 
 
-def test_judgment_query_builder_calibration_window_agnostic():
-    # Calibration is a gauge: window argument is intentionally ignored.
-    q5 = _JUDGMENT_SLO_QUERIES["calibration"]("svc", "5m")
-    q1h = _JUDGMENT_SLO_QUERIES["calibration"]("svc", "1h")
-    assert q5 == q1h
-    assert q5 == 'gen_ai_calibration_error{service="svc"}'
-
-
 def test_unbuilt_judgment_type_falls_back_to_recording_rule():
-    # Four of the eight JUDGMENT_SLO_TYPES have no builder above. They must
+    # Three of the five V2_JUDGMENT_SLO_TYPES have no builder above. They must
     # reach the recording-rule convention, NOT the empty string the deleted
     # wrapper returned: Prometheus 400s on an empty query, and
     # query_prometheus reads that failure as no-data and skips the SLO —
@@ -795,11 +787,11 @@ async def test_judgment_hysteresis_reaches_threshold_over_real_verdicts(verdict_
 async def test_recording_rule_fallback_is_not_inverted(verdict_store):
     """A builder-less judgment type gets an SLI query, so it must not invert.
 
-    Four of the eight JUDGMENT_SLO_TYPES fall through to `slo:{name}:ratio`,
+    Three of the five V2_JUDGMENT_SLO_TYPES fall through to `slo:{name}:ratio`,
     which is a GOOD-ratio SLI by convention, not an overrides/decisions rate.
     Inverting it read a healthy 0.99 as 1.0% and breached every window, while
     a genuinely bad 0.01 read as 99% healthy — verdicts exactly backwards for
-    half the taxonomy.
+    most of the taxonomy.
     """
     healthy = SLODefinition(
         service="svc", slo_name="seg", slo_type="judgment",
@@ -922,9 +914,8 @@ async def test_latency_target_is_read_in_its_declared_unit(tmp_path, verdict_sto
     )
 
 
-# Shared by the pair below: the non-xfail test pins that this manifest is loaded
-# and evaluated, the xfail pins that it cannot breach. One body so they cannot
-# drift into testing different things.
+# A v2 manifest that still declares calibration under judgment_slo. Error
+# magnitudes are thresholds now (decision 3c), so this pins a load failure.
 _CALIBRATION_MANIFEST = (
     "apiVersion: opensrm.nthlayer.io/v2\nkind: ServiceManifest\n"
     "metadata: {name: svc, labels: {tier: critical}}\n"
@@ -937,147 +928,25 @@ _CALIBRATION_MANIFEST = (
 )
 
 
-@pytest.mark.asyncio
-async def test_a_calibration_slo_is_loaded_and_evaluated(tmp_path, verdict_store):
-    """Not xfailed, and it exists to constrain the xfail below.
-
-    `strict=True` without `raises=` accepts ANY exception as the expected
-    failure, so an xfail can sit green for a reason that has nothing to do with
-    the bug it claims to pin — and then never flip when the bug is fixed.
-    Measured: with the 3c fix simulated AND `-W error`, the xfail below reported
-    `1 xfailed` rather than flipping, because load_specs' TargetConventionWarning
-    became an exception before the assert was reached.
-
-    This test pins the part the xfail must be able to take for granted: the SLO
-    loads, is dispatched, and is actually evaluated with the value we fed it. If
-    calibration stops being evaluated at all, this goes red here instead of
-    quietly keeping the xfail company.
-    """
-    (tmp_path / "svc.yaml").write_text(_CALIBRATION_MANIFEST)
-
-    # Asserted, not suppressed: this warning is the only trace a declared-space
-    # target leaves in production, so if it stops firing the breach bug becomes
-    # fully silent and someone should know.
-    #
-    # It is NOT a mitigation, and an earlier version of this comment overstated
-    # it as one. Its remediation text says "write '5.0'" (target * 100), and for
-    # maximum_brier_score that is wrong: opensrm v2's schema bounds the field
-    # inline to [0, 1] with the comment "not a Ratio semantically", and 0.05 is
-    # what the spec's own 08-calibration.yaml example uses. Measured — nothing
-    # enforces that inline bound, because the field is absent from
-    # TARGET_FIELD_IS_CEILING so _check_declared_ratio never sees it:
-    #
-    #   maximum_brier_score: 0.05  -> 1 slo, 0 failures, warns "write '5.0'"
-    #   maximum_brier_score: 5.0   -> 1 slo, 0 failures, NO warning at all
-    #
-    # So following the advice silently produces a schema-invalid manifest and a
-    # target of 5.0. Tracked on opensrm-g32d.
-    # TargetConventionWarning is deliberately NOT re-exported from
-    # nthlayer_common.manifest (its hard rule 1 keeps target_validation's
-    # symbols package-internal), so this asserts the CATEGORY BY NAME rather
-    # than importing a non-public symbol or matching on prose.
-    with pytest.warns(UserWarning) as warned:
-        slos = load_specs(tmp_path).slos
-
-    assert "TargetConventionWarning" in {w.category.__name__ for w in warned}
-
-    assert [s.slo_name for s in slos] == ["cal"]
-    assert slos[0].judgment_type == "calibration"
-    assert slos[0].target == pytest.approx(0.05), (
-        "maximum_brier_score is not converted to an SLI floor (opensrm-l33e); "
-        "if this becomes 95.0, decision 3c has landed"
+def test_error_magnitudes_have_no_slo_query():
+    from nthlayer_workers.measure.adapters.prometheus import (
+        _JUDGMENT_QUERY_KINDS,
+        _JUDGMENT_SLO_QUERIES,
     )
 
-    with patch(
-        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
-    ) as mock_query:
-        mock_query.return_value = 0.99
-        results = await evaluate_slos("http://prom", slos, verdict_store)
-
-    assert len(results) == 1
-    assert results[0].current_value == pytest.approx(0.99)
+    for t in ("calibration", "feedback_latency", "segments", "stability", "audit_backlog"):
+        assert t not in _JUDGMENT_SLO_QUERIES, t
+        assert t not in _JUDGMENT_QUERY_KINDS, t
 
 
-@pytest.mark.filterwarnings("default:.*looks like a ratio:UserWarning")
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="A calibration SLO cannot breach at any value. opensrm-ocvu left the "
-    "three error magnitudes in DECLARED space pending decision 3c "
-    "(opensrm-l33e), but _JUDGMENT_QUERY_KINDS sends calibration to the "
-    "judgment_rate branch, which compares an SLI FLOOR. Flips to a pass — and "
-    "so fails strictly — the day 3c lands, which is the signal to revisit the "
-    "query_kind here rather than assume the fix was complete. Tracked as "
-    "opensrm-g32d, which also covers segments/stability — those are INVERTED "
-    "rather than merely never-firing, and are the more urgent half.",
-)
-@pytest.mark.asyncio
-async def test_a_miscalibrated_service_breaches(tmp_path, verdict_store):
-    """Pins a live silent failure, not a decision made in this repo.
-
-    `maximum_brier_score: 0.05` parses to target=0.05 because
-    converts_to_sli_floor("maximum_brier_score") is False — before AND after
-    3.0.0. The judgment_rate branch then computes `(1 - current) * 100 < 0.05`,
-    which needs current > 0.9995. Measured against common 3.0.0:
-
-        reversal_rate target=95.0   error 0.50 -> breach True
-        calibration   target=0.05   error 0.50 -> breach False
-                                    error 0.99 -> breach False
-
-    A Brier score of 0.99 is a model whose confidence is almost exactly
-    inverted, and it reads clean. This is the never-breaches class opensrm-ocvu
-    fixed for the five rate fields and did not reach for these three.
-
-    NOT a regression from 3.0.0 or from opensrm-ir5m: pre-3.0.0 no judgment
-    target converted at all, so reversal_rate was also 0.05 and also never
-    breached. 3.0.0 fixed half. What is new is that LoadedSpecs.slos now holds
-    two conventions at once.
-
-    Asserted through evaluate_slos rather than the query builder because the
-    builder is already tested and is not where this goes wrong — nothing in
-    tests/measure/ had ever LOADED and EVALUATED a calibration SLO, which is
-    why a shipped SLO type that cannot fire survived every prior pass.
-    """
-    (tmp_path / "svc.yaml").write_text(_CALIBRATION_MANIFEST)
-    slo = next(s for s in load_specs(tmp_path).slos if s.slo_name == "cal")
-
-    with patch(
-        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
-    ) as mock_query:
-        mock_query.return_value = 0.99  # Brier 0.99 — near-inverted confidence
-        results = await evaluate_slos("http://prom", [slo], verdict_store)
-
-    assert results[0].raw_breach is True, (
-        "a Brier score of 0.99 against a 0.05 ceiling must breach"
-    )
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="opensrm-vrpa: feedback_latency is in opensrm's v1 schema.json "
-    "but not in nthlayer-common's JUDGMENT_SLO_TYPES, so parser/v1.py never "
-    "sets judgment_type for it. Flips to a pass — and so fails strictly — "
-    "the day the vocabularies are reconciled, which is the signal to "
-    "reconnect the builder here.",
-)
-def test_feedback_latency_cannot_reach_its_own_branch(tmp_path):
-    """Pins a schema-vs-parser divergence, not a decision made in this repo.
-
-    Until it is fixed, a v1 `slos.feedback_latency` is evaluated by the
-    "ratio" rule — `current_value * 100 < target` against a seconds gauge,
-    so 0.5s reads as 50. The builder and judgment_duration branch that would
-    read it correctly exist and cannot be selected.
-    """
-    (tmp_path / "svc.yaml").write_text(
-        "apiVersion: srm/v1\nkind: ServiceReliabilityManifest\n"
-        "metadata: {name: svc, team: t, tier: critical}\n"
-        "spec:\n  type: ai-gate\n  slos:\n"
-        "    feedback_latency: {target: 300, unit: s, window: 7d}\n"
-    )
-    slo = next(
-        s for s in load_specs(tmp_path).slos if s.slo_name == "feedback_latency"
-    )
-    assert slo.query_kind == "judgment_duration"
+def test_a_calibration_judgment_slo_is_a_load_failure(tmp_path):
+    """Error magnitudes are thresholds now (decision 3c): a v2 manifest that
+    still declares calibration under judgment_slo fails to load, so it can
+    never reach SLO breach code."""
+    (tmp_path / "m.yaml").write_text(_CALIBRATION_MANIFEST)
+    loaded = load_specs(tmp_path)
+    assert loaded.slos == []
+    assert loaded.parse_failures == 1
 
 
 @pytest.mark.parametrize(

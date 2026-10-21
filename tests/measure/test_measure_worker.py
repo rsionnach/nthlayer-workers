@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from nthlayer_common.api_client import APIResult
+from nthlayer_common.manifest import V2_JUDGMENT_SLO_TYPES
 
 from nthlayer_workers.measure.worker import (
     MeasureModule,
@@ -463,20 +465,22 @@ class TestClassifySeverity:
         # target=98.5, value=90.0 → 567% → critical
         assert classify_severity("reversal_rate", 98.5, 90.0) == "critical"
 
-    def test_stability_is_high(self):
-        assert classify_severity("stability", 100.0, 0.0) == "high"
+    @pytest.mark.parametrize("t", ["stability", "segments", "calibration"])
+    def test_error_magnitudes_are_not_slo_severity_types(self, t):
+        # Thresholds have their own fixed severity (high) in the threshold phase;
+        # classify_severity only knows the five judgment SLO types.
+        assert classify_severity(t, 0.05, 0.5) == "high"  # the unknown-type fallback
 
-    def test_calibration_low(self):
-        # delta = |55-50| = 5pp → low (<10pp)
-        assert classify_severity("calibration", 50.0, 55.0) == "low"
+    @pytest.mark.parametrize("t", sorted(V2_JUDGMENT_SLO_TYPES))
+    def test_every_judgment_slo_type_uses_budget_consumption(self, t):
+        # Every judgment SLO type (nthlayer-common's V2_JUDGMENT_SLO_TYPES) is
+        # classified by budget consumption: 33% here -> low, where the
+        # unknown-type fallback would say high.
+        assert classify_severity(t, 98.5, 98.0) == "low"
 
-    def test_calibration_high(self):
-        # delta = |70-50| = 20pp → high (10-30pp)
-        assert classify_severity("calibration", 50.0, 70.0) == "high"
-
-    def test_calibration_critical(self):
-        # delta = |90-50| = 40pp → critical (>30pp)
-        assert classify_severity("calibration", 50.0, 90.0) == "critical"
+    def test_the_budget_consumption_types_are_the_judgment_slo_types(self):
+        assert sorted(V2_JUDGMENT_SLO_TYPES) == [
+            "audit_sampling", "escalation", "high_confidence_failure", "outcomes", "reversal_rate"]
 
     def test_budget_consumption_target_one_hundred_is_critical(self):
         # target=100 means zero error budget — any miss is critical

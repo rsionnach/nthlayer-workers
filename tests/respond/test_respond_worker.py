@@ -5,7 +5,10 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
+from nthlayer_common.manifest import Samples, evaluate_threshold, threshold_from_v2_entry
 
+from nthlayer_workers.measure.thresholds.phase import breach_readout
+from nthlayer_workers.measure.thresholds.state import threshold_key
 from nthlayer_workers.respond.config import RespondConfig
 from nthlayer_workers.respond.types import (
     IncidentContext,
@@ -921,6 +924,56 @@ async def test_breach_path_creates_case(fake_client, config):
     assert case["service"] == "fraud-detect"
     assert "reversal_rate" in case["briefing"]
     assert "0.08" in case["briefing"]
+
+
+def _threshold_breach_data():
+    """The data of a threshold quality_breach as measure's phase builds it."""
+    t = threshold_from_v2_entry({"type": "calibration", "measurement": {"bins": 10, "window": "30d"},
+                                 "bounds": {"maximum_expected_calibration_error": 0.05}})
+    outcome = evaluate_threshold(t, Samples(bounds={"maximum_expected_calibration_error": 0.12}))
+    breaching_bounds, summary = breach_readout("fraud-detect", outcome)
+    return {"threshold_key": threshold_key("fraud-detect", t), "threshold_type": "calibration",
+            "severity": "high", "outcome": outcome.to_dict(),
+            "breaching_bounds": breaching_bounds, "summary": summary}
+
+
+async def _case_for_breach(fake_client, config, data):
+    breach = _breach(breach_id="vrd-breach-only")
+    breach["data"] = data
+    fake_client.get_assessments = AsyncMock(return_value=_ok_result([]))
+    fake_client.get_verdicts = AsyncMock(return_value=_ok_result([breach]))
+    fake_client.get_manifest = AsyncMock(
+        return_value=_ok_result({"name": "fraud-detect", "tier": "critical"})
+    )
+    fake_client.create_case = AsyncMock(return_value=_ok_result({"id": "case-y", "priority": "P1"}))
+    module = RespondModule(client=fake_client, config=config)
+    await module._ingest_triggers()
+    fake_client.create_case.assert_awaited_once()
+    return fake_client.create_case.await_args.args[0]
+
+
+async def test_slo_breach_briefing_is_unchanged(fake_client, config):
+    case = await _case_for_breach(fake_client, config,
+                                  {"slo_name": "reversal_rate", "current_value": 0.08, "target": 0.015})
+    assert case["briefing"] == "reversal_rate breach on fraud-detect: 0.08 vs target 0.015"
+
+
+async def test_threshold_breach_briefing_is_its_summary(fake_client, config):
+    case = await _case_for_breach(fake_client, config, _threshold_breach_data())
+    assert case["briefing"] == (
+        "calibration threshold breach on fraud-detect: maximum_expected_calibration_error 0.12 > 0.05")
+    assert case["underlying_verdict"] == "vrd-breach-only"
+
+
+@pytest.mark.parametrize("summary", ["absent", None, "", 7])
+async def test_threshold_breach_without_a_summary_names_type_and_service(fake_client, config, summary):
+    data = _threshold_breach_data()
+    if summary == "absent":
+        del data["summary"]
+    else:
+        data["summary"] = summary
+    case = await _case_for_breach(fake_client, config, data)
+    assert case["briefing"] == "calibration threshold breach on fraud-detect"
 
 
 async def test_case_create_failure_does_not_crash_cycle(fake_client, config):

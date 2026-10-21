@@ -1,19 +1,29 @@
-"""Measure worker module — three-type output from judgment SLO evaluation.
+"""Measure worker module — judgment SLO and judgment threshold evaluation.
 
-Single MeasureModule producing three output types per process_cycle():
+Single MeasureModule; output types per process_cycle():
 1. judgment_slo_evaluation assessments (continuous, every cycle)
-2. quality_breach verdicts (on HEALTHY→BREACH transition only)
-3. autonomy_change verdicts (on governance reduction, once per breach)
+2. judgment_threshold_evaluation assessments (threshold phase, on its own
+   MEASURE_THRESHOLD_INTERVAL cadence, opensrm-g32d)
+3. quality_breach verdicts (SLO HEALTHY→BREACH transition; threshold breach
+   on firing, always severity "high")
+4. autonomy_change verdicts (on governance reduction, once per breach)
+
+Threshold breaches reach governance only with MEASURE_THRESHOLD_AUTONOMY on.
 
 State tracks per-SLO status, per-breach autonomy decisions, per-agent
-autonomy levels, and a cursor for time-based polling.
+autonomy levels, per-threshold-key hysteresis state, and the threshold
+phase's last run time.
 """
 
 from __future__ import annotations
 
 import asyncio
+import math
+import os
+import time
 import uuid
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import structlog
@@ -21,17 +31,70 @@ from nthlayer_common.api_client import CoreAPIClient
 from nthlayer_common.cloudevents import wrap_assessment, wrap_verdict
 from nthlayer_common.providers import PrometheusProvider
 
+from nthlayer_workers.measure.thresholds.phase import (
+    DEFAULT_THRESHOLD_HEARTBEAT_SECONDS,
+    DEFAULT_THRESHOLD_INTERVAL_SECONDS,
+    THRESHOLD_BREACH_SEVERITY,
+    THRESHOLD_PHASE_TIMEOUT_SECONDS,
+    retire_thresholds,
+    run_threshold_phase,
+)
+from nthlayer_workers.measure.thresholds.state import REARM_INTERVALS, KeyState, as_timestamp
+
 logger = structlog.get_logger()
+
+
+def _env_flag_default_on(name: str) -> bool:
+    """A default-on operator switch: only off / false / 0 (any case) disable it."""
+    return os.environ.get(name, "").strip().lower() not in ("off", "false", "0")
+
+
+def _env_flag(name: str) -> bool:
+    """A default-off operator switch: 1 / true / yes / on (any case) enable it."""
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# Upper bound for the threshold timing settings (7 days). Zero is rejected:
+# a zero interval would evaluate every cycle and collapse re-arm hysteresis.
+_MAX_TIMING_SECONDS = 7 * 86400.0
+
+# Layout of the persisted threshold_state / threshold_governed. Bump it when
+# that layout (or threshold_key) changes incompatibly: restore_state discards
+# threshold state of any version it does not know.
+THRESHOLD_STATE_VERSION = 1
+
+
+def _env_seconds(name: str, default: float) -> float:
+    """Seconds from the environment, in (0, 7d]. Unset: the default. Not a
+    number, non-finite, zero, negative or over 7d: the default, with a warning."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if not (math.isfinite(value) and 0 < value <= _MAX_TIMING_SECONDS):
+        logger.warning("measure_env_invalid", name=name, value=raw, default=default)
+        return default
+    return value
 
 
 @dataclass
 class MeasureModule:
     """Judgment SLO evaluation with breach detection and autonomy governance.
 
-    Three phases per cycle:
+    Per cycle:
     1. Evaluate judgment SLOs → judgment_slo_evaluation assessments
-    2. Detect breach transitions → quality_breach verdicts
-    3. Governance on new breaches → autonomy_change verdicts (once per breach)
+    1b. Threshold phase, only when threshold_interval_seconds have passed
+        (otherwise just retire removed entries) → judgment_threshold_evaluation
+        assessments and, on a firing breach, quality_breach verdicts (high)
+    2. Detect SLO breach transitions → quality_breach verdicts
+    2b. With threshold_autonomy (MEASURE_THRESHOLD_AUTONOMY, default off):
+        inject new threshold breaches (as "high") and re-inject open,
+        already-governed ones so they count like open SLO breaches
+    3. Governance on new breaches → autonomy_change verdicts (once per breach);
+       then release threshold keys that re-armed or retired
 
     Note: _evaluate_governance is a v1.5 stub (always returns "reduced").
     P3-C.3 replaces it with an Instructor-backed LLM evaluation.
@@ -40,6 +103,27 @@ class MeasureModule:
     client: CoreAPIClient
     prometheus_url: str
     eval_concurrency: int = 5
+    # Operator settings, read once at construction: changing one needs a restart.
+    retention_check: bool = field(
+        default_factory=lambda: _env_flag_default_on("MEASURE_RETENTION_CHECK")
+    )
+    threshold_interval_seconds: float = field(
+        default_factory=lambda: _env_seconds(
+            "MEASURE_THRESHOLD_INTERVAL", DEFAULT_THRESHOLD_INTERVAL_SECONDS
+        )
+    )
+    threshold_heartbeat_seconds: float = field(
+        default_factory=lambda: _env_seconds(
+            "MEASURE_THRESHOLD_HEARTBEAT", DEFAULT_THRESHOLD_HEARTBEAT_SECONDS
+        )
+    )
+    # Default off: when on, judgment-threshold breaches feed the autonomy
+    # ratchet (Phase 3) as "high" breaches.
+    threshold_autonomy: bool = field(
+        default_factory=lambda: _env_flag("MEASURE_THRESHOLD_AUTONOMY")
+    )
+    # Wall-clock seconds; injectable so tests control the threshold cadence.
+    clock: Callable[[], float] = time.time
 
     def __post_init__(self):
         self._eval_concurrency = self.eval_concurrency
@@ -47,6 +131,18 @@ class MeasureModule:
         self._breach_decisions: dict[str, dict] = {}    # slo_key → {decided, decided_at, ...}
         self._autonomy_levels: dict[str, str] = {}      # service → level
         self._breach_severities: dict[str, str] = {}    # slo_key → "low"|"high"|"critical"
+        # Judgment thresholds (opensrm-g32d): per-key state, persisted.
+        self._threshold_state: dict[str, dict] = {}
+        # Once-per-change log memory; in-memory only, so a restart logs each
+        # problem once more.
+        self._threshold_problems: set[str] = set()
+        self._threshold_last_run: float | None = None
+        # Governance keys (_breach_decisions / _breach_severities) that are
+        # threshold keys, so threshold cleanup never touches SLO keys.
+        self._threshold_governed: set[str] = set()
+        # Rotates where each threshold run starts (tail starvation under the
+        # time budget). In-memory only: after a restart it starts at 0.
+        self._threshold_rotation = 0
 
     @property
     def name(self) -> str:
@@ -59,6 +155,30 @@ class MeasureModule:
         self._breach_decisions = state.get("breach_decisions", {})
         self._autonomy_levels = state.get("autonomy_levels", {})
         self._breach_severities = state.get("breach_severities", {})
+        self._threshold_last_run = as_timestamp(state.get("threshold_last_run"))
+        # Absent: written before the marker existed, which is version 1. Any
+        # other version is a layout this release cannot read: start threshold
+        # state afresh (an open breach may re-raise, the safe direction).
+        version = state.get("threshold_state_version", THRESHOLD_STATE_VERSION)
+        if type(version) is not int or version != THRESHOLD_STATE_VERSION:
+            logger.warning("threshold_state_version_unknown", version=version)
+            self._threshold_state, self._threshold_governed = {}, set()
+            return
+        # Restored component_state is untrusted; KeyState.from_dict handles
+        # wrong-typed fields, so only the entry shape is checked here.
+        raw = state.get("threshold_state")
+        self._threshold_state = (
+            {k: v for k, v in raw.items()
+             if isinstance(k, str) and isinstance(v, dict) and isinstance(v.get("service"), str)}
+            if isinstance(raw, dict) else {}
+        )
+        # Only keys with restored threshold state: an SLO key smuggled in here
+        # must never let threshold cleanup wipe that SLO's decision.
+        raw_governed = state.get("threshold_governed")
+        self._threshold_governed = (
+            {k for k in raw_governed if isinstance(k, str) and k in self._threshold_state}
+            if isinstance(raw_governed, list) else set()
+        )
 
     async def process_cycle(self) -> None:
         # Fetch manifests with judgment SLOs
@@ -101,6 +221,13 @@ class MeasureModule:
                 return_exceptions=True,
             )
 
+            # Phase 1b: threshold phase (own cadence).
+            threshold_breaches = await self._maybe_run_threshold_phase(manifests, provider)
+            if threshold_breaches:
+                logger.info("threshold_breaches", count=len(threshold_breaches),
+                            keys=[key for key, _, _ in threshold_breaches],
+                            services=sorted({svc for _, svc, _ in threshold_breaches}))
+
             # Phase 2: Detect breach transitions + classify severity
             new_breaches = _detect_transitions(current_status, self._slo_status)
             breach_verdict_ids: dict[str, str] = {}
@@ -138,6 +265,11 @@ class MeasureModule:
                 await self.client.submit_verdict(
                     wrap_verdict(breach_verdict, component="measure")
                 )
+
+            # Phase 2b: threshold breaches into governance (toggle-gated).
+            governed_threshold_keys = self._inject_threshold_breaches(
+                threshold_breaches, current_status, new_breaches, breach_verdict_ids
+            )
 
             # Phase 3: Governance — severity-based, fully deterministic (no LLM in v1.5)
             # Process per-service: count breaching SLOs, determine action
@@ -184,7 +316,10 @@ class MeasureModule:
                             "previous_level": current_level,
                             "new_level": new_level,
                             "breaching_slo_count": len(breaching_keys),
-                            "reason": f"Autonomy reduced: {len(breaching_keys)} SLO(s) breaching",
+                            "reason": (
+                                f"Autonomy reduced: {len(breaching_keys)} "
+                                "SLO/threshold breach(es)"
+                            ),
                         },
                     }
                     await self.client.submit_verdict(
@@ -198,6 +333,13 @@ class MeasureModule:
                     del self._breach_decisions[slo_key]
                     self._breach_severities.pop(slo_key, None)
 
+            self._release_threshold_governance()
+
+            # Threshold keys are re-injected from _threshold_state each cycle;
+            # keep _slo_status SLO-only.
+            for key in governed_threshold_keys:
+                current_status.pop(key, None)
+
             # Carry forward status for SLOs that failed to evaluate this cycle
             # (Prometheus transient failure). Prevents false transitions on recovery.
             for key, status in self._slo_status.items():
@@ -209,6 +351,125 @@ class MeasureModule:
 
         finally:
             await provider.aclose()
+
+    async def _maybe_run_threshold_phase(
+        self, manifests: list[dict], provider: PrometheusProvider
+    ) -> list[tuple[str, str, str]]:
+        """Threshold phase (opensrm-g32d), on its own cadence: it runs when
+        threshold_interval_seconds have passed since it last ran (or it never
+        has, or the clock went back); otherwise only removed entries retire.
+        Returns this run's new breaches as (key, service, breach_verdict_id).
+        Open threshold breaches still reach governance every cycle, from
+        _threshold_state. It must never stop Phases 2-3: on failure, log and
+        go on; a run is bounded by THRESHOLD_PHASE_TIMEOUT_SECONDS, and on a
+        timeout the breaches core already accepted (their state has
+        advanced) still go to governance. State carried across a sibling
+        re-key renames its governance entries too, on run and not-run
+        cycles alike."""
+        threshold_breaches: list[tuple[str, str, str]] = []
+        renamed: dict[str, str] = {}
+        unreached: set[str] = set()
+        now = self.clock()
+        last = self._threshold_last_run
+        if last is None or now < last or now - last >= self.threshold_interval_seconds:
+            # Advanced before the run, so even a phase that raises outright
+            # retries after one interval, not every cycle (no log flood).
+            self._threshold_last_run = now
+            rotation = self._threshold_rotation
+            self._threshold_rotation += 1
+            try:
+                await asyncio.wait_for(
+                    run_threshold_phase(
+                        client=self.client, provider=provider, manifests=manifests,
+                        state=self._threshold_state, seen_problems=self._threshold_problems,
+                        eval_concurrency=self._eval_concurrency,
+                        retention_check=self.retention_check, now=now,
+                        rearm_seconds=REARM_INTERVALS * self.threshold_interval_seconds,
+                        heartbeat_seconds=self.threshold_heartbeat_seconds,
+                        renamed=renamed, breaches_out=threshold_breaches,
+                        unreached=unreached, rotation=rotation,
+                    ),
+                    THRESHOLD_PHASE_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                logger.warning("threshold_phase_timeout", timeout=THRESHOLD_PHASE_TIMEOUT_SECONDS,
+                               accepted_breaches=len(threshold_breaches),
+                               unreached=len(unreached))
+            except Exception as exc:
+                logger.warning("threshold_phase_failed", error=f"{type(exc).__name__}: {exc}")
+        else:
+            # Not a threshold run: still retire removed entries, since
+            # /manifests is fresh every cycle.
+            try:
+                retire_thresholds(manifests=manifests, state=self._threshold_state,
+                                  seen_problems=self._threshold_problems, renamed=renamed)
+            except Exception as exc:
+                logger.warning("threshold_retire_failed", error=f"{type(exc).__name__}: {exc}")
+        # Before Phase 3 and _release_threshold_governance, which would
+        # otherwise see the old key as retired and drop its decision.
+        self._rename_threshold_governance(renamed)
+        return list(threshold_breaches)
+
+    def _rename_threshold_governance(self, renamed: dict[str, str]) -> None:
+        """Move governance entries of re-keyed threshold state to the new key,
+        so an open breach keeps its decision (no second autonomy step).
+        Only keys in _threshold_governed: _breach_decisions also holds SLO
+        keys."""
+        for old, new in renamed.items():
+            if old not in self._threshold_governed:
+                continue
+            for store in (self._breach_decisions, self._breach_severities):
+                if old in store:
+                    store[new] = store.pop(old)
+            self._threshold_governed.discard(old)
+            self._threshold_governed.add(new)
+
+    def _inject_threshold_breaches(
+        self,
+        threshold_breaches: list[tuple[str, str, str]],
+        current_status: dict[str, str],
+        new_breaches: list[str],
+        breach_verdict_ids: dict[str, str],
+    ) -> list[str]:
+        """Phase 2b: with threshold_autonomy on, put threshold breaches into
+        Phase 3's inputs (mutating the passed locals). Returns the threshold
+        keys injected, which the caller pops from current_status before it
+        becomes _slo_status."""
+        governed_threshold_keys: list[str] = []
+        # Turning the toggle off leaves governed keys' decisions in place (Phase 3
+        # never reads them while off). Turning it back on re-injects breaches that
+        # were governed before it went off; a breach that opened while it was off
+        # does not count (it never had a governance decision).
+        if self.threshold_autonomy:
+            # Open threshold breaches count toward governance every cycle,
+            # exactly as an open SLO breach stays in current_status - so a
+            # later SLO breach sees "multiple breaches" (spec: same rules).
+            # Open means disarmed: hysteresis, not one within evaluation,
+            # defines recovery, so a flapping breach keeps counting.
+            for key, st in self._threshold_state.items():
+                if not KeyState.from_dict(st).armed and self._breach_decisions.get(key):
+                    current_status[key] = "breach"
+                    governed_threshold_keys.append(key)
+            # New threshold breaches this cycle enter as new high breaches.
+            for key, _svc, breach_id in threshold_breaches:
+                current_status[key] = "breach"
+                new_breaches.append(key)
+                breach_verdict_ids[key] = breach_id
+                self._breach_severities[key] = THRESHOLD_BREACH_SEVERITY
+                governed_threshold_keys.append(key)
+        self._threshold_governed.update(governed_threshold_keys)
+        return governed_threshold_keys
+
+    def _release_threshold_governance(self) -> None:
+        """Threshold keys leave governance when retired or re-armed (the
+        hysteresis's recovery). Iterates _threshold_governed only:
+        _breach_decisions also holds SLO keys. The ratchet stays one-way."""
+        for key in list(self._threshold_governed):
+            st = self._threshold_state.get(key)
+            if st is None or KeyState.from_dict(st).armed:   # retired or re-armed
+                self._breach_decisions.pop(key, None)
+                self._breach_severities.pop(key, None)
+                self._threshold_governed.discard(key)
 
     async def _evaluate_slo(
         self,
@@ -324,6 +585,10 @@ class MeasureModule:
             "breach_decisions": self._breach_decisions,
             "autonomy_levels": self._autonomy_levels,
             "breach_severities": self._breach_severities,
+            "threshold_state": self._threshold_state,
+            "threshold_last_run": self._threshold_last_run,
+            "threshold_governed": sorted(self._threshold_governed),
+            "threshold_state_version": THRESHOLD_STATE_VERSION,
         }
 
 
@@ -396,12 +661,6 @@ def classify_severity(
     """
     if judgment_type in _BUDGET_CONSUMPTION_TYPES:
         return _classify_budget_consumption(target, current_value)
-    if judgment_type == "stability":
-        return "high"  # any stability breach is high; sustained tracking is v2
-    if judgment_type == "segments":
-        return _classify_variance(target, current_value)
-    if judgment_type == "calibration":
-        return _classify_calibration(target, current_value)
     # Unknown type → "high" for safety
     return "high"
 
@@ -424,38 +683,5 @@ def _classify_budget_consumption(target: float, current_value: float) -> str:
     if consumption < 200:
         return "low"
     if consumption < 500:
-        return "high"
-    return "critical"
-
-
-def _classify_variance(target: float, current_value: float) -> str:
-    """Classify segments breach by variance ratio.
-
-    Precondition: current_value < target (caller verified breach).
-    Inputs are in 0-100 percentage convention; the ratio is unitless so
-    the computation is identical in both conventions.
-    <2x = low, 2-5x = high, >5x = critical.
-    """
-    if target <= 0:
-        return "high"
-    ratio = (target - current_value) / target  # positive when breaching
-    if ratio < 2:
-        return "low"
-    if ratio < 5:
-        return "high"
-    return "critical"
-
-
-def _classify_calibration(target: float, current_value: float) -> str:
-    """Classify calibration breach by delta in percentage points.
-
-    Inputs are in 0-100 percentage convention; thresholds scaled
-    accordingly (10x the prior ratio thresholds).
-    <10pp = low, 10-30pp = high, >30pp = critical.
-    """
-    delta = abs(current_value - target)
-    if delta < 10:
-        return "low"
-    if delta < 30:
         return "high"
     return "critical"

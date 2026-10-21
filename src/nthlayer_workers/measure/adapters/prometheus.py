@@ -96,7 +96,7 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
 
     Going through the parser also removes two reimplementations that had
     drifted: a four-name judgment-type list that disagreed with
-    JUDGMENT_SLO_TYPES, and a target normalisation that duplicated the
+    the judgment SLO types, and a target normalisation that duplicated the
     0-100 convention nthlayer-common owns.
     """
     slos: list[SLODefinition] = []
@@ -155,7 +155,7 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
     name = slo.name
     if slo.judgment_type:
         # Keyed by judgment_type, not name: _JUDGMENT_SLO_QUERIES is a map of
-        # judgment KINDS. Only 4 of the 8 JUDGMENT_SLO_TYPES have a builder;
+        # judgment KINDS. Only 2 of the 5 V2_JUDGMENT_SLO_TYPES have a builder;
         # the rest fall through to the recording-rule convention below rather
         # than yielding an empty query, which Prometheus 400s and which then
         # reads as no-data (opensrm-fxln).
@@ -176,8 +176,7 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
 
 # PromQL builders keyed by judgment TYPE (spec.judgment_type), not by the
 # SLO's name — in v2 the two are independent. Lambdas take (service,
-# window); `_window` on calibration/feedback_latency indicates those
-# queries are window-agnostic (the raw metric is already a gauge).
+# window).
 _JUDGMENT_SLO_QUERIES = {
     "reversal_rate": lambda service, window: (
         f'sum(increase(gen_ai_overrides_total{{service="{service}"}}[{window}]))'
@@ -189,8 +188,6 @@ _JUDGMENT_SLO_QUERIES = {
         f' / '
         f'sum(increase(gen_ai_decisions_total{{service="{service}",confidence_bucket="high"}}[{window}]))'
     ),
-    "calibration": lambda service, _window: f'gen_ai_calibration_error{{service="{service}"}}',
-    "feedback_latency": lambda service, _window: f'gen_ai_feedback_latency_seconds{{service="{service}"}}',
 }
 
 
@@ -201,17 +198,6 @@ _JUDGMENT_SLO_QUERIES = {
 _JUDGMENT_QUERY_KINDS = {
     "reversal_rate": "judgment_rate",
     "high_confidence_failure": "judgment_rate",
-    "calibration": "judgment_rate",
-    # Unreachable today: feedback_latency is in opensrm's v1 schema.json and
-    # in its CHANGELOG, but NOT in nthlayer-common's JUDGMENT_SLO_TYPES, and
-    # parser/v1.py sets judgment_type only on membership. So a manifest
-    # declaring it parses with judgment_type=None and lands on "ratio",
-    # which multiplies a seconds gauge by 100. Kept rather than deleted
-    # because the divergence is the bug (opensrm-vrpa) and this is the
-    # correct handling once it is fixed;
-    # test_feedback_latency_cannot_reach_its_own_branch is a strict xfail
-    # that fails the day it becomes reachable.
-    "feedback_latency": "judgment_duration",
 }
 
 
@@ -415,8 +401,8 @@ async def evaluate_slos(
 
             # Dispatch on the kind of number the query returns, decided by
             # _query_for when it built the query. Never on the SLO's name or
-            # type: in v2 metadata.name is author-chosen, and 4 of the 8
-            # JUDGMENT_SLO_TYPES have no builder, so both are the wrong
+            # type: in v2 metadata.name is author-chosen, and 3 of the 5
+            # V2_JUDGMENT_SLO_TYPES have no builder, so both are the wrong
             # question to ask about a value's units (opensrm-fxln).
             if slo.query_kind == "judgment_rate":
                 # Prometheus returns a 0.0-1.0 RATE; the target is a 0-100
@@ -429,9 +415,6 @@ async def evaluate_slos(
                 # overrides/decisions ratio, not to judgment SLOs at large.
                 sli_pct = (1.0 - current_value) * 100
                 raw_breach = sli_pct < slo.target
-            elif slo.query_kind == "judgment_duration":
-                # Seconds, and lower is better: no scaling, no inversion.
-                raw_breach = current_value > slo.target
             elif slo.query_kind == "error_budget":
                 # slo:error_budget:ratio is signed — negative is overspent.
                 # The target is not consulted; it is baked into the rule.
