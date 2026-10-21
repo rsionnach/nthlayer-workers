@@ -31,7 +31,7 @@ from nthlayer_workers.measure.thresholds.phase import (
     retire_thresholds,
     run_threshold_phase,
 )
-from nthlayer_workers.measure.thresholds.state import REARM_INTERVALS, as_timestamp
+from nthlayer_workers.measure.thresholds.state import REARM_INTERVALS, KeyState, as_timestamp
 
 logger = structlog.get_logger()
 
@@ -141,9 +141,12 @@ class MeasureModule:
             if isinstance(raw, dict) else {}
         )
         self._threshold_last_run = as_timestamp(state.get("threshold_last_run"))
+        # Only keys with restored threshold state: an SLO key smuggled in here
+        # must never let threshold cleanup wipe that SLO's decision.
         raw_governed = state.get("threshold_governed")
         self._threshold_governed = (
-            {k for k in raw_governed if isinstance(k, str)} if isinstance(raw_governed, list) else set()
+            {k for k in raw_governed if isinstance(k, str) and k in self._threshold_state}
+            if isinstance(raw_governed, list) else set()
         )
 
     async def process_cycle(self) -> None:
@@ -261,12 +264,15 @@ class MeasureModule:
                 )
 
             governed_threshold_keys: list[str] = []
+            # Toggle off: governed keys keep decisions (Phase 3 never reads them); on again re-injects, no re-fire.
             if self.threshold_autonomy:
                 # Open threshold breaches count toward governance every cycle,
                 # exactly as an open SLO breach stays in current_status - so a
                 # later SLO breach sees "multiple breaches" (spec: same rules).
+                # Open means disarmed: hysteresis, not one within evaluation,
+                # defines recovery, so a flapping breach keeps counting.
                 for key, st in self._threshold_state.items():
-                    if st.get("last_evaluable") == "breach" and self._breach_decisions.get(key):
+                    if not KeyState.from_dict(st).armed and self._breach_decisions.get(key):
                         current_status[key] = "breach"
                         governed_threshold_keys.append(key)
                 # New threshold breaches this cycle enter as new high breaches.
@@ -337,11 +343,12 @@ class MeasureModule:
                     del self._breach_decisions[slo_key]
                     self._breach_severities.pop(slo_key, None)
 
-            # Threshold keys leave governance when retired or recovered.
-            # Iterates _threshold_governed only: _breach_decisions also holds SLO keys.
+            # Threshold keys leave governance when retired or re-armed (the
+            # hysteresis's recovery). Iterates _threshold_governed only:
+            # _breach_decisions also holds SLO keys.
             for key in list(self._threshold_governed):
                 st = self._threshold_state.get(key)
-                if st is None or st.get("last_evaluable") == "within":   # retired or recovered
+                if st is None or KeyState.from_dict(st).armed:   # retired or re-armed
                     self._breach_decisions.pop(key, None)
                     self._breach_severities.pop(key, None)
                     self._threshold_governed.discard(key)

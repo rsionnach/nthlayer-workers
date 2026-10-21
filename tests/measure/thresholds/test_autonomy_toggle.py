@@ -84,6 +84,10 @@ async def test_on_feeds_the_ratchet_as_a_high_breach(monkeypatch, env):
     changes = [v for v in verdicts if v["type"] == "autonomy_change"]
     assert len(changes) == 1
     assert m._autonomy_levels["svc"] == "limited_autonomous"  # high single breach: 2 steps
+    # Lineage: the autonomy_change names the threshold's quality_breach verdict.
+    breaches = [v for v in verdicts if v["type"] == "quality_breach"]
+    assert len(breaches) == 1
+    assert changes[0]["parent_ids"] == [breaches[0]["id"]]
 
 
 async def test_enabling_later_does_not_ratchet_an_open_breach(monkeypatch):
@@ -148,10 +152,16 @@ async def test_retired_threshold_leaves_no_governance_memory(monkeypatch):
 @pytest.mark.parametrize("raw,expected", [
     (None, set()), ("svc:calibration:abc", set()), ({"k": 1}, set()),
     (["svc:calibration:abc", 7], {"svc:calibration:abc"}),
+    # Only keys with restored threshold state are kept.
+    (["svc:calibration:abc", "svc:calibration:gone", "svc:rr"], {"svc:calibration:abc"}),
 ])
 async def test_corrupt_threshold_governed_is_coerced(monkeypatch, raw, expected):
     m, prov, verdicts = _setup(monkeypatch, "1")
-    await m.restore_state({"slo_status": {}, "threshold_governed": raw})
+    await m.restore_state({
+        "slo_status": {}, "threshold_governed": raw,
+        "threshold_state": {"svc:calibration:abc": {
+            "service": "svc", "last_evaluable": "breach", "armed": False}},
+    })
     assert m._threshold_governed == expected
     await _cycle(m, prov)  # and the cycle still runs
 
@@ -163,20 +173,98 @@ async def test_threshold_keys_never_enter_slo_status(monkeypatch):
     await _cycle(m, prov)                     # new threshold breach
     m.clock.t += 60
     await _cycle(m, prov)                     # open breach re-injected
+    m.clock.t += 900
+    await _cycle(m, prov)                     # threshold run, still open: re-injected again
     assert m._breach_decisions and m._threshold_governed  # non-vacuous: it was governed
+    assert len([v for v in verdicts if v["type"] == "autonomy_change"]) == 1
     assert not any(":calibration:" in k for k in m._slo_status)
     assert not any(":calibration:" in k for k in (await m.get_state())["slo_status"])
 
 
-async def test_recovered_threshold_leaves_governance_but_keeps_the_ratchet(monkeypatch):
+_WITHIN = {"data": {"result": [{"value": [0, "0.01"]}]}}
+_BREACH = {"data": {"result": [{"value": [0, "0.2"]}]}}
+
+
+def _threshold_decisions(m):
+    return {k for k in m._breach_decisions if ":calibration:" in k}
+
+
+async def test_threshold_governance_holds_until_rearm(monkeypatch):
+    """Hysteresis defines recovery: one within evaluation does not release a
+    governed threshold; re-arming (REARM_INTERVALS within runs spanning
+    REARM_INTERVALS intervals) does. The ratchet never moves back."""
     m, prov, verdicts = _setup(monkeypatch, "1")
     await _cycle(m, prov)
-    assert m._threshold_governed
-    prov.query = AsyncMock(return_value={"data": {"result": [{"value": [0, "0.01"]}]}})
-    m.clock.t += 900                          # a threshold run: now within bounds
+    governed = set(m._threshold_governed)
+    assert governed and _threshold_decisions(m) == governed
+    prov.query = AsyncMock(return_value=_WITHIN)
+    m.clock.t += 900                          # within once: not re-armed
     await _cycle(m, prov)
-    assert all(st["last_evaluable"] == "within" for st in m._threshold_state.values())
+    assert all(st["last_evaluable"] == "within" and not st["armed"]
+               for st in m._threshold_state.values())
+    assert m._threshold_governed == governed
+    assert _threshold_decisions(m) == governed
+    for _ in range(3):                        # 4 within runs over 2700s: re-armed
+        m.clock.t += 900
+        await _cycle(m, prov)
+    assert all(st["armed"] for st in m._threshold_state.values())
     assert m._threshold_governed == set()
-    assert not any(":calibration:" in k for k in m._breach_decisions)
+    assert _threshold_decisions(m) == set()
     assert not any(":calibration:" in k for k in m._breach_severities)
     assert m._autonomy_levels["svc"] == "limited_autonomous"  # one-way ratchet
+    assert len([v for v in verdicts if v["type"] == "autonomy_change"]) == 1
+
+
+async def test_flapping_threshold_stays_governed_and_counts(monkeypatch):
+    """breach -> within (not re-armed) -> breach: still governed, no second
+    autonomy_change, and while within it still counts toward the
+    multiple-breach floor."""
+    m, prov, verdicts = _setup(monkeypatch, "1")
+    await _cycle(m, prov)
+    governed = set(m._threshold_governed)
+    prov.query = AsyncMock(return_value=_WITHIN)
+    m.clock.t += 900
+    await _cycle(m, prov)                     # within, disarmed
+    # An SLO breach while the threshold is within-but-not-re-armed: two breaches.
+    m._autonomy_levels["svc"] = "fully_autonomous"
+    m.clock.t += 60                           # non-threshold cycle
+    m.client.get_manifests = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
+        {"name": "svc", "type": "ai-gate", "judgment_thresholds": [_CAL], "slos": [
+            {"name": "rr", "target": 98.5, "judgment_type": "reversal_rate", "window": "30d",
+             "indicator_query": "q"}]}]))
+    prov.get_sli_value = AsyncMock(return_value=0.98)
+    await _cycle(m, prov)
+    assert [v for v in verdicts if v["type"] == "autonomy_change"][-1]["data"][
+        "breaching_slo_count"] == 2
+    changes_before = len([v for v in verdicts if v["type"] == "autonomy_change"])
+    prov.query = AsyncMock(return_value=_BREACH)
+    m.clock.t += 900                          # breach again, still disarmed: no new fire
+    await _cycle(m, prov)
+    assert m._threshold_governed == governed
+    assert _threshold_decisions(m) == governed
+    assert len([v for v in verdicts if v["type"] == "autonomy_change"]) == changes_before
+    assert len([v for v in verdicts if v["type"] == "quality_breach"
+                and "threshold_key" in v["data"]]) == 1
+
+
+async def test_smuggled_slo_key_in_threshold_governed_is_dropped(monkeypatch):
+    """threshold_governed is untrusted: an SLO key in it must never let
+    threshold cleanup wipe that SLO's decision and severity."""
+    m, prov, verdicts = _setup(monkeypatch, "1")
+    m.client.get_manifests = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
+        {"name": "svc", "type": "ai-gate", "judgment_thresholds": [], "slos": [
+            {"name": "rr", "target": 98.5, "judgment_type": "reversal_rate", "window": "30d",
+             "indicator_query": "q"}]}]))
+    prov.get_sli_value = AsyncMock(return_value=0.98)
+    decision = {"decided": True, "decided_at": "2026-10-01T00:00:00+00:00",
+                "autonomy_action": "reduced"}
+    await m.restore_state({
+        "slo_status": {"svc:rr": "breach"},
+        "breach_decisions": {"svc:rr": dict(decision)},
+        "breach_severities": {"svc:rr": "low"},
+        "threshold_governed": ["svc:rr"],
+    })
+    assert m._threshold_governed == set()
+    await _cycle(m, prov)
+    assert m._breach_decisions.get("svc:rr") == decision
+    assert m._breach_severities.get("svc:rr") == "low"
