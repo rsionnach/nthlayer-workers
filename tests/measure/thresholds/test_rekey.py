@@ -279,3 +279,101 @@ async def test_a_hanging_provider_cannot_hold_the_cycle(monkeypatch):
     assert _governed(m, s1_key)
     autonomy = [x for x in v if x["type"] == "autonomy_change"]
     assert len(autonomy) == 1 and autonomy[0]["data"]["breaching_slo_count"] == 2
+
+
+# --- Stored identity refreshed every cycle (R5 edge-cases re-check) ---------
+
+async def test_bound_edited_then_sibling_added_on_non_run_cycles_keeps_the_breach(monkeypatch):
+    """probe2: A's bound is edited on a non-run cycle (key unchanged, so the
+    stored digest would go stale), then a sibling is added on another: the
+    split must still digest-match A's state."""
+    m, prov, v = _module(monkeypatch)
+    await _cycle(m, prov, [A], at=0)
+    await _cycle(m, prov, [A_EDITED], at=60)              # same bare key, new digest
+    assert m._threshold_state[BASE]["bounds_digest"] == bounds_digest(_t(A_EDITED))
+    await _cycle(m, prov, [A_EDITED, B], at=120)          # split, non-run
+    assert _open_breach(m, _sib(A_EDITED)) and _governed(m, _sib(A_EDITED))
+    await _cycle(m, prov, [A_EDITED, B], at=900)          # threshold run
+    assert _types(v) == ["quality_breach", "autonomy_change"]
+
+
+async def test_restored_state_without_identity_is_refreshed_then_migrates(monkeypatch):
+    m, prov, v = _module(monkeypatch)
+    await _cycle(m, prov, [A], at=0)
+    saved = await m.get_state()
+    for st in saved["threshold_state"].values():          # state from before the fix
+        del st["base"], st["bounds_digest"]
+    m2, prov2, v2 = _module(monkeypatch)
+    await m2.restore_state(saved)
+    await _cycle(m2, prov2, [A], at=60)                   # non-run: refreshes identity
+    await _cycle(m2, prov2, [A, B], at=120)               # split, non-run
+    assert _open_breach(m2, _sib(A)) and _governed(m2, _sib(A))
+    await _cycle(m2, prov2, [A, B], at=900)
+    assert v2 == []                                       # nothing re-raised
+
+
+# --- Rotating evaluation start (tail starvation) ----------------------------
+
+async def test_rotation_reaches_entries_behind_a_hanging_one(monkeypatch):
+    m, _, v = _module(monkeypatch, autonomy=False)
+    m.threshold_interval_seconds = 1.0
+    m._eval_concurrency = 1
+    m.client.get_manifests = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
+        {"name": f"s{i}", "type": "ai-gate", "slos": [], "judgment_thresholds": [A]} for i in range(3)]))
+    reached: list[set[str]] = []
+    m.client.submit_assessment = AsyncMock(side_effect=lambda env: (
+        reached[-1].add(env["data"]["service"]), APIResult(ok=True, status_code=201, data={}))[1])
+
+    async def query(q, time=None):
+        if 's1' in q:
+            await asyncio.Event().wait()   # s1 hangs every run
+        return {"status": "success", "data": {"result": [{"metric": {}, "value": [0, "0.01"]}]}}
+
+    prov = AsyncMock()
+    prov.query = AsyncMock(side_effect=query)
+    prov.aclose = AsyncMock()
+    with patch("nthlayer_workers.measure.worker.THRESHOLD_PHASE_TIMEOUT_SECONDS", 0.1), \
+         patch("nthlayer_workers.measure.worker.PrometheusProvider", return_value=prov):
+        for i in range(3):
+            reached.append(set())
+            m.clock.t = NOW + i
+            await asyncio.wait_for(m.process_cycle(), 5)
+    assert len({frozenset(r) for r in reached}) > 1          # runs reached different entries
+    assert set().union(*reached) == {"s0", "s2"}              # s2 is not starved
+    assert set(m._threshold_state) == {threshold_key(f"s{i}", _t(A)) for i in (0, 2)}
+
+
+@pytest.mark.parametrize("rotation", [0, 1, 2, 7])
+async def test_rotation_never_changes_keys(rotation):
+    client = AsyncMock()
+    client.submit_assessment = AsyncMock(return_value=APIResult(ok=True, status_code=201, data={}))
+    client.submit_verdict = AsyncMock(return_value=APIResult(ok=True, status_code=201, data={}))
+    prov = AsyncMock()
+    prov.query = AsyncMock(return_value={"status": "success",
+                                         "data": {"result": [{"metric": {}, "value": [0, "0.2"]}]}})
+    state: dict[str, dict] = {}
+    await run_threshold_phase(client=client, provider=prov, state=state, seen_problems=set(),
+                              now=NOW, rotation=rotation,
+                              manifests=[{"name": "svc", "judgment_thresholds": [A, B]}])
+    assert set(state) == {_sib(A), _sib(B)}
+    assert state[_sib(A)]["last_evaluable"] == "breach" and state[_sib(B)]["last_evaluable"] == "within"
+
+
+async def test_unreached_holds_the_keys_never_started_after_a_cancel():
+    client = AsyncMock()
+    client.submit_assessment = AsyncMock(return_value=APIResult(ok=True, status_code=201, data={}))
+
+    async def query(q, time=None):
+        if 's0' in q:
+            await asyncio.Event().wait()
+        return {"status": "success", "data": {"result": [{"metric": {}, "value": [0, "0.01"]}]}}
+
+    prov = AsyncMock()
+    prov.query = AsyncMock(side_effect=query)
+    unreached: set[str] = set()
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(run_threshold_phase(
+            client=client, provider=prov, state={}, seen_problems=set(), now=NOW,
+            eval_concurrency=1, unreached=unreached,
+            manifests=[{"name": f"s{i}", "judgment_thresholds": [A]} for i in range(3)]), 0.1)
+    assert unreached == {threshold_key(f"s{i}", _t(A)) for i in (1, 2)}

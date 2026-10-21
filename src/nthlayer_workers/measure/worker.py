@@ -135,6 +135,9 @@ class MeasureModule:
         # Governance keys (_breach_decisions / _breach_severities) that are
         # threshold keys, so threshold cleanup never touches SLO keys.
         self._threshold_governed: set[str] = set()
+        # Rotates where each threshold run starts (tail starvation under the
+        # time budget). In-memory only: after a restart it starts at 0.
+        self._threshold_rotation = 0
 
     @property
     def name(self) -> str:
@@ -350,12 +353,15 @@ class MeasureModule:
         cycles alike."""
         threshold_breaches: list[tuple[str, str, str]] = []
         renamed: dict[str, str] = {}
+        unreached: set[str] = set()
         now = self.clock()
         last = self._threshold_last_run
         if last is None or now < last or now - last >= self.threshold_interval_seconds:
             # Advanced before the run, so even a phase that raises outright
             # retries after one interval, not every cycle (no log flood).
             self._threshold_last_run = now
+            rotation = self._threshold_rotation
+            self._threshold_rotation += 1
             try:
                 await asyncio.wait_for(
                     run_threshold_phase(
@@ -366,12 +372,14 @@ class MeasureModule:
                         rearm_seconds=REARM_INTERVALS * self.threshold_interval_seconds,
                         heartbeat_seconds=self.threshold_heartbeat_seconds,
                         renamed=renamed, breaches_out=threshold_breaches,
+                        unreached=unreached, rotation=rotation,
                     ),
                     THRESHOLD_PHASE_TIMEOUT_SECONDS,
                 )
             except TimeoutError:
                 logger.warning("threshold_phase_timeout", timeout=THRESHOLD_PHASE_TIMEOUT_SECONDS,
-                               accepted_breaches=len(threshold_breaches))
+                               accepted_breaches=len(threshold_breaches),
+                               unreached=len(unreached))
             except Exception as exc:
                 logger.warning("threshold_phase_failed", error=f"{type(exc).__name__}: {exc}")
         else:

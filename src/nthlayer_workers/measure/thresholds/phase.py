@@ -164,7 +164,18 @@ def _migrate(state: dict[str, dict], entries: list[_Entry]) -> dict[str, str]:
     re-keyed). Anything else is ambiguous and starts fresh, the safe
     direction (it may re-raise). State without a stored base and digest
     (written before they existed) is never migrated. Runs before
-    evaluation, so a migrated key is evaluated from its carried state."""
+    evaluation, so a migrated key is evaluated from its carried state.
+
+    First, every live key that already has state gets its stored base and
+    digest refreshed from its current entry. A bound edited while the key
+    stays the same (a lone entry's key ignores bound values), on a cycle
+    that does not evaluate it, or whose evaluation keeps raising, would
+    otherwise leave a stale digest that a later split cannot match; this
+    also gives state restored from before these fields existed an identity."""
+    for key, service, t in entries:
+        v = state.get(key)
+        if isinstance(v, dict):
+            v["base"], v["bounds_digest"] = threshold_key(service, t), bounds_digest(t)
     live = {key for key, _, _ in entries}
     new: dict[tuple[str, str], list[tuple[str, str]]] = {}   # (service, base) -> [(key, digest)]
     for key, service, t in entries:
@@ -281,6 +292,8 @@ async def run_threshold_phase(
     heartbeat_seconds: float = DEFAULT_THRESHOLD_HEARTBEAT_SECONDS,
     renamed: dict[str, str] | None = None,
     breaches_out: list[tuple[str, str, str]] | None = None,
+    unreached: set[str] | None = None,
+    rotation: int = 0,
 ) -> list[tuple[str, str, str]]:
     """Evaluate every served threshold; mutate *state*; return new breaches as
     (key, service, breach_verdict_id). Caller guarantees *manifests* came from a
@@ -293,7 +306,13 @@ async def run_threshold_phase(
     worker's timeout) still sees them: *renamed* gets {old_key: new_key}
     for state carried across a re-key (before any evaluation); each breach
     whose verdict core accepted is appended to *breaches_out* at once, since
-    its state has advanced and it will never fire again."""
+    its state has advanced and it will never fire again. *unreached* is
+    filled with every key, and each is removed as its evaluation starts, so
+    after a cancellation it holds the keys never started.
+
+    Evaluation starts at entry *rotation* % len(entries) (the worker passes
+    a per-run counter), so a time budget that cuts a slow run short does not
+    always cut off the same tail. Order only: keys and state are unaffected."""
     now = time.time() if now is None else now
     present_services, entries = _entries(manifests, seen_problems)
     moved = _migrate(state, entries)
@@ -305,9 +324,15 @@ async def run_threshold_phase(
         retention = await fetch_retention(provider)
     sem = asyncio.Semaphore(eval_concurrency)
     new_breaches = breaches_out if breaches_out is not None else []
+    start = rotation % len(entries) if entries else 0
+    ordered = entries[start:] + entries[:start]
+    if unreached is not None:
+        unreached.update(key for key, _, _ in ordered)
 
     async def one(key: str, service: str, t: JudgmentThreshold) -> None:
         async with sem:
+            if unreached is not None:
+                unreached.discard(key)
             try:
                 breach = await _evaluate(client=client, provider=provider, key=key, service=service,
                                          t=t, state=state, retention=retention,
@@ -323,7 +348,9 @@ async def run_threshold_phase(
             if breach is not None:
                 new_breaches.append(breach)
 
-    await asyncio.gather(*(one(*e) for e in entries))
+    # The semaphore admits waiters first-come, so gather's order is the
+    # evaluation order.
+    await asyncio.gather(*(one(*e) for e in ordered))
     _retire(state, present_services, {key for key, _, _ in entries})
     return list(new_breaches)
 
