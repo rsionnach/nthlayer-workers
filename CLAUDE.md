@@ -59,10 +59,16 @@ verdict chain, or make module composition impossible.
 
 7. **Severity classification is deterministic. No LLM in v1.5.**
    Severity per judgment SLO type via `measure/worker.py`
-   `classify_severity()` — budget-consumption types use
-   `<200% / 200-500% / >500%` buckets; stability is binary; segments
-   variance-based; calibration delta-based. Do not add an LLM call to
-   this path "to improve accuracy" — the governance layer is
+   `classify_severity()` — the five judgment SLO types use
+   budget-consumption buckets (`<200% / 200-500% / >500%`). Judgment
+   *thresholds* (`spec.judgment_threshold`, evaluated by
+   `measure/thresholds/`) are not SLOs (decision 3c): every threshold
+   breach is `high`, with no bucketing. Threshold breaches reach the
+   autonomy ratchet (rule 8) only when `MEASURE_THRESHOLD_AUTONOMY` is on
+   (default off); `MEASURE_RETENTION_CHECK` (default on) is the measure
+   module's other switch, guarding the 30d-window retention check. Both
+   are read once at startup — see `docs/upgrading-3.0.md`. Do not add an
+   LLM call to this path "to improve accuracy" — the governance layer is
    load-bearing and must be auditable.
 
 8. **Autonomy is a one-way ratchet.** Five levels: fully_autonomous →

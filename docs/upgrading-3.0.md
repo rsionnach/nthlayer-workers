@@ -1,0 +1,72 @@
+# Upgrading to nthlayer-workers 3.0
+
+3.0.0 adds judgment-threshold evaluation to the measure module
+(opensrm-g32d). It is a major release because manifests that put threshold
+fields under `judgment_slo` no longer load, and because it needs new
+versions of its neighbours.
+
+## Breaking changes
+
+- **`nthlayer-common` 5.2.** The pin is now `>=5.2.0,<6.0.0`.
+- **`nthlayer-core` 3.0 or later.** Thresholds are read from core's
+  `/manifests` (the `judgment_thresholds` key). An older core serves none, so
+  nothing is evaluated.
+- **`calibration`, `segments` and `stability` under `judgment_slo` now fail
+  to load.** Move them to `spec.judgment_threshold`. Thresholds are not SLOs:
+  they have no target or budget.
+
+## What is new
+
+- Each threshold is evaluated on its own cadence and emitted as a
+  `judgment_threshold_evaluation` assessment (a new kind, alongside
+  `judgment_slo_evaluation`), including when it is not evaluable. Reasons:
+  `no_data_source` (segments, stability, audit_backlog have no series yet),
+  `no_data`, `insufficient_window`, `beyond_top_bucket`.
+- A breach emits a `quality_breach` verdict with severity `high`. It reaches
+  the autonomy ratchet only with `MEASURE_THRESHOLD_AUTONOMY` on.
+- A served entry that fails to parse is logged once and skipped; its
+  service's existing threshold state is kept until the manifest parses
+  cleanly.
+
+## Metric contract
+
+Series, labels and queries are in the front door's
+[metrics-contract.md](https://github.com/rsionnach/nthlayer/blob/main/docs/metrics-contract.md)
+("Judgment threshold metrics (opensrm-g32d)"). Two things to act on:
+
+- `gen_ai_feedback_latency_seconds` is now a **histogram** and shares its
+  base name with the old gauge. An exporter cannot register both: cut over
+  in one release.
+- Its buckets need a finite boundary **strictly above every declared bound**.
+  OpenTelemetry's default top boundary (10000s) is below a `1d` bound. A
+  quantile beyond the top boundary is reported as a lower bound: a breach
+  (`lower_bound`) if the boundary is at or above the bound, otherwise not
+  evaluable (`beyond_top_bucket`).
+
+## Operator settings
+
+All four are read once at startup: restart the worker to change them.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MEASURE_THRESHOLD_AUTONOMY` | off (`1`/`true`/`yes`/`on` enable) | Threshold breaches feed the autonomy ratchet. |
+| `MEASURE_RETENTION_CHECK` | on (`off`/`false`/`0` disable) | Check `prometheus_tsdb_lowest_timestamp_seconds` against the 30d window. |
+| `MEASURE_THRESHOLD_INTERVAL` | 900 s | How often thresholds are evaluated, independent of the measure cycle. |
+| `MEASURE_THRESHOLD_HEARTBEAT` | 3600 s | An unchanged assessment is re-emitted this often. |
+
+- **Autonomy.** While on, an open breach keeps counting in governance until
+  its key re-arms or is removed, not after one `within` evaluation. The
+  ratchet is one-way: recovery never raises autonomy. Turning the toggle off
+  stops threshold breaches counting; turning it back on re-injects open ones
+  without a second `autonomy_change`.
+- **Retention check.** Set it **off** behind Thanos sidecar, Mimir or Cortex:
+  there the metric describes a local TSDB, not what the query path sees, and
+  would wrongly report `insufficient_window`. It allows 1h of slack; an empty
+  TSDB counts as unknown retention and measures normally.
+- **Interval.** Re-arm after a breach takes 3 intervals of `within` AND 3
+  `within` evaluations.
+- **Heartbeat.** A changed assessment (any bound or segment status or
+  reason, or a bound's declared limit) is emitted at once. Dashboards should
+  read the latest assessment per key, not count them.
+- **Timing values** must be in (0, 604800] (7 days). Anything else (not a
+  number, zero, negative, non-finite, larger) is logged and the default used.
