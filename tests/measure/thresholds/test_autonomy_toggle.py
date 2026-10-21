@@ -99,6 +99,26 @@ async def test_enabling_later_does_not_ratchet_an_open_breach(monkeypatch):
     assert [v for v in verdicts if v["type"] == "autonomy_change"] == []
 
 
+
+async def test_breach_opened_while_off_does_not_count_once_enabled(monkeypatch):
+    """design §7 item 6: turning the toggle on does not apply the ratchet to
+    breaches already open. A breach opened while off has no governance
+    decision, so it is not re-injected: a later SLO breach is a single breach."""
+    m, prov, verdicts = _setup(monkeypatch, None)
+    await _cycle(m, prov)                     # threshold breach opens, toggle off
+    assert m._threshold_state and all(not st["armed"] for st in m._threshold_state.values())
+    m.threshold_autonomy = True
+    m.clock.t += 60                           # non-threshold cycle: only re-injection could add it
+    m.client.get_manifests = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
+        {"name": "svc", "type": "ai-gate", "judgment_thresholds": [_CAL], "slos": [
+            {"name": "rr", "target": 98.5, "judgment_type": "reversal_rate", "window": "30d",
+             "indicator_query": "q"}]}]))
+    prov.get_sli_value = AsyncMock(return_value=0.98)
+    await _cycle(m, prov)
+    changes = [v for v in verdicts if v["type"] == "autonomy_change"]
+    assert len(changes) == 1 and changes[0]["data"]["breaching_slo_count"] == 1
+    assert m._threshold_governed == set()
+
 async def test_open_threshold_breach_counts_in_later_governance(monkeypatch):
     """An open threshold breach plus a later SLO breach is a multiple-breach
     case (advisor floor), as two SLO breaches would be."""

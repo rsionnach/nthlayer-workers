@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from nthlayer_common.api_client import APIResult
+from nthlayer_common.manifest import V2_JUDGMENT_SLO_TYPES
 
 from nthlayer_workers.measure.worker import (
     MeasureModule,
@@ -469,6 +470,17 @@ class TestClassifySeverity:
         # Thresholds have their own fixed severity (high) in the threshold phase;
         # classify_severity only knows the five judgment SLO types.
         assert classify_severity(t, 0.05, 0.5) == "high"  # the unknown-type fallback
+
+    @pytest.mark.parametrize("t", sorted(V2_JUDGMENT_SLO_TYPES))
+    def test_every_judgment_slo_type_uses_budget_consumption(self, t):
+        # Every judgment SLO type (nthlayer-common's V2_JUDGMENT_SLO_TYPES) is
+        # classified by budget consumption: 33% here -> low, where the
+        # unknown-type fallback would say high.
+        assert classify_severity(t, 98.5, 98.0) == "low"
+
+    def test_the_budget_consumption_types_are_the_judgment_slo_types(self):
+        assert sorted(V2_JUDGMENT_SLO_TYPES) == [
+            "audit_sampling", "escalation", "high_confidence_failure", "outcomes", "reversal_rate"]
 
     def test_budget_consumption_target_one_hundred_is_critical(self):
         # target=100 means zero error budget — any miss is critical

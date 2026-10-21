@@ -1,5 +1,9 @@
 import pytest
-from nthlayer_common.manifest import JudgmentThreshold, ThresholdMeasurement
+from nthlayer_common.manifest import (
+    JudgmentThreshold,
+    ThresholdMeasurement,
+    threshold_from_v2_entry,
+)
 
 from nthlayer_workers.measure.thresholds.state import (
     REARM_INTERVALS,
@@ -187,3 +191,82 @@ def test_unknown_status_is_rejected():
 
 def test_duplicate_segment_values_do_not_change_the_key():
     assert threshold_key("svc", _seg(["eu", "eu"])) == threshold_key("svc", _seg(["eu"]))
+
+
+# --- Identity key: every identifying field counts (design §7 item 3) --------
+# Fixtures are v2 judgment_thresholds entries as the opensrm schema defines
+# them (spec/v2/schema.json, CORE §5.5), parsed by nthlayer-common's own
+# parser, so each pair is one a real manifest can declare. Each pair differs
+# in exactly one identifying field.
+
+def _parsed(entry):
+    return threshold_from_v2_entry(entry)
+
+
+def _segments(metric="escalation", dimension="region", window="30d", **extra):
+    entry = {"type": "segments", "metric": metric, "segment_dimension": dimension,
+             "segment_values": ["eu", "us"], "measurement": {"window": window},
+             "bounds": {"maximum_variance_from_overall": 0.05}}
+    for k, v in extra.items():
+        if k in ("source", "confidence_threshold"):
+            entry["measurement"][k] = v
+        else:
+            entry[k] = v
+    return entry
+
+
+def _calibration(bins=10, window="30d"):
+    return {"type": "calibration", "measurement": {"bins": bins, "window": window},
+            "bounds": {"maximum_expected_calibration_error": 0.05}}
+
+
+def _stability(frozen_input_set="s3://probes/a", frequency="daily"):
+    return {"type": "stability", "probe": {"frozen_input_set": frozen_input_set, "frequency": frequency},
+            "bounds": {"maximum_drift": 0.02}}
+
+
+@pytest.mark.parametrize("field,a,b", [
+    ("confidence_threshold",
+     _segments("high_confidence_failure", confidence_threshold=0.9),
+     _segments("high_confidence_failure", confidence_threshold=0.8)),
+    ("outcome_signal.source",
+     _segments("outcomes", outcome_signal={"source": "refunds", "window": "7d"}),
+     _segments("outcomes", outcome_signal={"source": "chargebacks", "window": "7d"})),
+    ("outcome_signal.window",
+     _segments("outcomes", outcome_signal={"source": "refunds", "window": "7d"}),
+     _segments("outcomes", outcome_signal={"source": "refunds", "window": "14d"})),
+    ("segment_dimension", _segments(dimension="region"), _segments(dimension="tier")),
+    ("probe.frozen_input_set", _stability(frozen_input_set="s3://probes/a"),
+     _stability(frozen_input_set="s3://probes/b")),
+    ("probe.frequency", _stability(frequency="daily"), _stability(frequency="weekly")),
+    ("segments window", _segments(window="30d"), _segments(window="7d")),
+    ("calibration window", _calibration(window="30d"), _calibration(window="7d")),
+    ("bins", _calibration(bins=10), _calibration(bins=15)),
+])
+def test_each_identifying_field_changes_the_key(field, a, b):
+    ta, tb = _parsed(a), _parsed(b)
+    assert ta.type == tb.type and ta.bounds == tb.bounds   # only `field` differs
+    assert threshold_key("svc", ta) != threshold_key("svc", tb)
+
+
+def test_bound_declaration_order_does_not_change_the_key():
+    # A mapping's key order carries no meaning in YAML/JSON: the same entry
+    # written with its bounds the other way round is the same entry.
+    ece_first = _parsed({"type": "calibration", "measurement": {"bins": 10, "window": "30d"},
+                         "bounds": {"maximum_expected_calibration_error": 0.05, "maximum_brier_score": 0.1}})
+    brier_first = _parsed({"type": "calibration", "measurement": {"bins": 10, "window": "30d"},
+                           "bounds": {"maximum_brier_score": 0.1, "maximum_expected_calibration_error": 0.05}})
+    assert list(ece_first.bounds) != list(brier_first.bounds)   # non-vacuous: orders differ
+    assert threshold_key("svc", ece_first) == threshold_key("svc", brier_first)
+
+
+def test_a_breach_ends_the_within_run():
+    # design §7: "a breach ends it". within, within, breach, within: the run
+    # restarts at the last within, so it is one evaluation old, not three.
+    st, _ = advance(KeyState(), "breach", 0.0, REARM)
+    st, _ = advance(st, "within", 900.0, REARM)
+    st, _ = advance(st, "within", 1800.0, REARM)
+    st, _ = advance(st, "breach", 2700.0, REARM)
+    assert (st.within_since, st.within_count) == (None, 0)
+    st, _ = advance(st, "within", 3600.0, REARM)
+    assert (st.within_since, st.within_count, st.armed) == (3600.0, 1, False)

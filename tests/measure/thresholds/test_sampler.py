@@ -333,3 +333,48 @@ async def test_infinite_gauge_is_no_data(value):
     p = _provider([(_ANY, _vector(value))])
     s = await sample(p, "svc", _cal(maximum_brier_score=0.1), now=NOW)
     assert s.bounds["maximum_brier_score"].reason == "no_data"
+
+
+# Prometheus promql/quantile.go bucketQuantile, worked by hand for the cases
+# the table above does not reach.
+@pytest.mark.parametrize("q,buckets,expected", [
+    # A rank in the first bucket interpolates from 0 when its le is above 0
+    # (bucketQuantile: "if b == 0 ... bucketStart = 0"): 0 + 10 * 2/4 = 5.
+    (0.5, [(10, 4), (INF, 4)], 5.0),
+    # A first bucket with le <= 0 returns its upper bound, no interpolation.
+    (0.5, [(-1, 4), (INF, 4)], -1.0),
+    (0.5, [(0, 4), (INF, 4)], 0.0),
+    # Non-monotonic counts are repaired to the running maximum before the
+    # rank is located: le=2 reads 2, not 1. rank 3 -> le=4:
+    # 2 + (4 - 2) * (3 - 2)/(4 - 2) = 3 (unrepaired it would be 2 + 2 * 2/3).
+    (0.75, [(1, 2), (2, 1), (4, 4), (INF, 4)], 3.0),
+])
+def test_quantile_first_bucket_and_monotonic_repair(q, buckets, expected):
+    assert _quantile(q, buckets) == expected
+
+
+_SLACK = 3600.0                  # metrics-contract.md: "one hour of slack"
+_WINDOW = 30 * DAY
+
+
+@pytest.mark.parametrize("age,measured", [
+    (_WINDOW, True),                     # retention configured as exactly 30d
+    (_WINDOW - _SLACK, True),            # at the edge of the slack
+    (_WINDOW - _SLACK - 1.0, False),     # just beyond it
+    (_WINDOW - 2 * _SLACK, False),
+])
+async def test_retention_check_allows_one_hour_of_slack(age, measured):
+    p = _provider([_retention(NOW - age), (_BUCKETS, _buckets(("10", 5), ("100", 10), ("+Inf", 10)))])
+    s = await sample(p, "svc", _lat(), now=NOW)
+    if measured:
+        assert s.bounds == {"maximum_p50": 10.0, "maximum_p90": 82.0}
+    else:
+        assert {v.reason for v in s.bounds.values()} == {"insufficient_window"}
+
+
+async def test_newline_in_a_label_value_is_escaped():
+    # PromQL string literals: a raw newline ends the selector; "\n" is the escape.
+    p = _provider([])
+    await sample(p, "a\nb", _cal(maximum_brier_score=0.1), now=NOW)
+    q = p.query.await_args.args[0]
+    assert 'service="a\\nb"' in q and "\n" not in q

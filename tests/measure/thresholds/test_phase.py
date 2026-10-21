@@ -7,8 +7,15 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import yaml
 from nthlayer_common.api_client import APIResult
-from nthlayer_common.manifest import threshold_from_v2_entry, threshold_to_v2_entry
+from nthlayer_common.manifest import (
+    Missing,
+    Samples,
+    evaluate_threshold,
+    threshold_from_v2_entry,
+    threshold_to_v2_entry,
+)
 
+from nthlayer_workers.measure.thresholds.phase import outcome_signature
 from nthlayer_workers.measure.thresholds.state import bounds_digest, threshold_key
 from nthlayer_workers.measure.worker import MeasureModule
 
@@ -312,6 +319,24 @@ async def test_threshold_phase_failure_does_not_stop_slo_phases():
     assert _slo_breaches(v) == ["rr"]
 
 
+async def test_a_raising_phase_waits_out_the_interval_before_retrying():
+    """design §7 Cadence: the phase runs only when the interval has passed
+    since the last run. A run that raised outright is still a run, so the
+    next cycle inside the interval does not retry it (no log flood)."""
+    m, prov, a, v = _module([], _manifests(("svc", [_CAL])), threshold_interval_seconds=900.0)
+    phase = AsyncMock(side_effect=RuntimeError("boom"))
+    with patch("nthlayer_workers.measure.worker.run_threshold_phase", phase), \
+            patch("nthlayer_workers.measure.worker.PrometheusProvider", return_value=prov):
+        m.clock.t = NOW
+        await m.process_cycle()
+        m.clock.t = NOW + 60
+        await m.process_cycle()
+        assert phase.await_count == 1
+        m.clock.t = NOW + 900
+        await m.process_cycle()
+        assert phase.await_count == 2
+
+
 @pytest.mark.parametrize("threshold_state", [
     None,
     "garbage",
@@ -447,6 +472,29 @@ async def test_measured_value_changes_alone_do_not_emit():
     await _cycles(m, prov, 3)
     assert len(_evals(a)) == 1
 
+
+
+_SEGMENTS = {"type": "segments", "metric": "escalation", "segment_dimension": "region",
+             "segment_values": ["eu", "us"], "bounds": {"maximum_variance_from_overall": 0.05}}
+
+
+@pytest.mark.parametrize("a_segments,b_segments", [
+    # Which segment is evaluable differs; type, combined status and the bound row do not.
+    ({"eu": 0.11, "us": Missing("no_data", "x")}, {"eu": Missing("no_data", "x"), "us": 0.11}),
+    # Only one segment's reason differs (the bound row takes the first segment's).
+    ({"eu": Missing("no_data", "x"), "us": Missing("no_data", "x")},
+     {"eu": Missing("no_data", "x"), "us": Missing("no_data_source", "x")}),
+])
+def test_signature_includes_per_segment_status_and_reason(a_segments, b_segments):
+    """design §7 item 5: the signature carries per-segment (segment, status,
+    reason), so a change confined to the segment rows is re-emitted."""
+    t = threshold_from_v2_entry(_SEGMENTS)
+    a = evaluate_threshold(t, Samples(overall=0.1, segments=a_segments))
+    b = evaluate_threshold(t, Samples(overall=0.1, segments=b_segments))
+    assert (a.type, a.status, a.bounds[0].status, a.bounds[0].reason) == (
+        b.type, b.status, b.bounds[0].status, b.bounds[0].reason)       # only the segments differ
+    assert a.segments != b.segments
+    assert outcome_signature(a) != outcome_signature(b)
 
 async def test_a_firing_breach_always_emits_its_parent_assessment():
     """Even with the same signature as the last emission and inside the

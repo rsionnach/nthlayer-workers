@@ -8,6 +8,7 @@ ratchet again).
 """
 
 import asyncio
+import json
 import time
 from unittest.mock import AsyncMock, patch
 
@@ -200,6 +201,22 @@ async def test_split_on_a_non_threshold_cycle_migrates_state_and_governance(monk
     assert _open_breach(m, BASE) and _governed(m, BASE)
     assert _types(v) == ["quality_breach", "autonomy_change"]
 
+
+
+async def test_governance_follows_a_split_on_the_first_cycle_after_a_restart(monkeypatch):
+    """threshold_governed is persisted: the first cycle after a restart can
+    re-key a governed breach (here on a non-run cycle) before anything
+    re-injects it, and the decision must move with its state."""
+    m, prov, v = _module(monkeypatch)
+    await _cycle(m, prov, [A], at=0)
+    assert _governed(m, BASE)
+    saved = json.loads(json.dumps(await m.get_state()))   # component_state is stored as JSON
+    m2, prov2, v2 = _module(monkeypatch)
+    await m2.restore_state(saved)
+    await _cycle(m2, prov2, [A, B], at=60)                # split, non-run
+    assert _open_breach(m2, _sib(A)) and _governed(m2, _sib(A))
+    assert BASE not in m2._breach_decisions and BASE not in m2._threshold_governed
+    assert v2 == []                                       # nothing re-raised
 
 async def test_run_threshold_phase_reports_renames():
     state = {BASE: {"last_evaluable": "breach", "armed": False, "within_since": None,
