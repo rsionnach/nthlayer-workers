@@ -1,10 +1,13 @@
 import pytest
 from nthlayer_common.manifest import (
     JudgmentThreshold,
+    OutcomeSignal,
+    ProbeConfig,
     ThresholdMeasurement,
     threshold_from_v2_entry,
 )
 
+from nthlayer_workers.measure.thresholds import state as state_module
 from nthlayer_workers.measure.thresholds.state import (
     REARM_INTERVALS,
     KeyState,
@@ -55,6 +58,48 @@ def test_metric_parameters_change_the_key():
                           ThresholdMeasurement(metric="reversal_rate", source="downstream_signal",
                                                segment_dimension="r", segment_values=["eu"], window="30d"))
     assert threshold_key("svc", a) != threshold_key("svc", b)
+
+
+@pytest.mark.parametrize("absent", [None, [], (), ""])
+def test_a_field_added_absent_leaves_every_key_unchanged(monkeypatch, absent):
+    # A field a later measurement schema adds defaults to None or empty on
+    # every existing entry: that must not re-key (and so reset) their state.
+    t = _seg(["eu"])
+    before = threshold_key("svc", t)
+    identity = state_module._identity
+    monkeypatch.setattr(state_module, "_identity",
+                        lambda service, th: {**identity(service, th), "added_later": absent})
+    assert threshold_key("svc", t) == before
+
+
+def test_a_field_added_with_a_value_changes_the_key(monkeypatch):
+    # The control for the test above: the patched _identity is what is hashed.
+    t = _seg(["eu"])
+    before = threshold_key("svc", t)
+    identity = state_module._identity
+    monkeypatch.setattr(state_module, "_identity",
+                        lambda service, th: {**identity(service, th), "added_later": "x"})
+    assert threshold_key("svc", t) != before
+
+
+@pytest.mark.parametrize("field, value", [
+    ("bins", 10),
+    ("bins", 0),
+    ("window", "30d"),
+    ("probe", ProbeConfig(frozen_input_set="s3://p", frequency="daily")),
+    ("segment_dimension", "region"),
+    ("segment_values", ["eu"]),
+    ("metric", "escalation"),
+    ("source", "lineage"),
+    ("confidence_threshold", 0.9),
+    ("confidence_threshold", 0.0),
+    ("outcome_signal", OutcomeSignal(source="tickets", window="7d")),
+])
+def test_each_measurement_field_changes_the_key_when_set(field, value):
+    # Dropping absent fields must not drop a set one, including a falsy 0.
+    bare = JudgmentThreshold("segments", {"maximum_variance_from_overall": 0.05})
+    m = ThresholdMeasurement(**{field: value})
+    assert threshold_key("svc", bare) != threshold_key("svc", JudgmentThreshold(bare.type, bare.bounds, m))
 
 
 def test_bounds_digest_depends_on_values_not_order():

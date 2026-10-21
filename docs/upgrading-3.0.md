@@ -24,8 +24,20 @@ versions of its neighbours.
   `judgment_slo_evaluation`), including when it is not evaluable. Reasons:
   `no_data_source` (segments, stability, audit_backlog have no series yet),
   `no_data`, `insufficient_window`, `beyond_top_bucket`.
-- A breach emits a `quality_breach` verdict with severity `high`. It reaches
-  the autonomy ratchet only with `MEASURE_THRESHOLD_AUTONOMY` on.
+- A breach emits a `quality_breach` verdict with severity `high`. Like an SLO
+  breach, it opens a respond incident (a case in the bench queue, which can
+  escalate there) **regardless of `MEASURE_THRESHOLD_AUTONOMY`**: the toggle
+  gates only the autonomy ratchet. The verdict carries `breaching_bounds`
+  (each breaching bound, or segment, with its measured value and limit) and a
+  one-line `summary`, e.g. `calibration threshold breach on svc:
+  maximum_expected_calibration_error 0.12 > 0.05`; a breach decided from a
+  lower bound reads `>= <limit> (lower bound)`. Respond uses the summary as
+  the case briefing. It has no `slo_name`, `current_value` or `target`.
+- Threshold state saved by the measure module carries
+  `threshold_state_version: 1` (state without it is read as version 1). A
+  worker that finds a version it does not know logs
+  `threshold_state_version_unknown` and starts threshold state afresh (an
+  open breach may re-raise); all other measure state is kept.
 - A served entry that fails to parse is logged once and skipped; its
   service's existing threshold state is kept until the manifest parses
   cleanly.

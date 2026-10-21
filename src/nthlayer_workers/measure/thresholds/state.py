@@ -19,15 +19,12 @@ from nthlayer_common.manifest import JudgmentThreshold
 REARM_INTERVALS = 3
 
 
-def threshold_key(service: str, t: JudgmentThreshold) -> str:
-    """service:type:hash of what identifies the entry: its measurement fields,
-    the metric's parameters, and the NAMES of its bounds. Bound VALUES are
-    excluded, so tightening a bound keeps the key; segment order is irrelevant.
-    Two distinct entries of one service can still share it (same names,
-    different values): the phase then suffixes each with bounds_digest."""
+def _identity(service: str, t: JudgmentThreshold) -> dict[str, Any]:
+    """What identifies an entry within its service: its measurement fields,
+    the metric's parameters, and the NAMES of its bounds."""
     m = t.measurement
     signal = m.outcome_signal
-    ident = {
+    return {
         "bounds": sorted(t.bounds),
         "metric": m.metric,
         "source": m.source,
@@ -39,6 +36,20 @@ def threshold_key(service: str, t: JudgmentThreshold) -> str:
         "window": m.window,
         "bins": m.bins,
     }
+
+
+def threshold_key(service: str, t: JudgmentThreshold) -> str:
+    """service:type:hash of _identity. Bound VALUES are excluded, so
+    tightening a bound keeps the key; segment order is irrelevant. Two
+    distinct entries of one service can still share it (same names,
+    different values): the phase then suffixes each with bounds_digest.
+
+    Fields that are None or empty are left out of the hash, so a field a
+    later measurement schema adds (absent, so None or empty, on every
+    existing entry) leaves every existing key, and its state, unchanged.
+    A falsy but set value (0, 0.0, False) is kept."""
+    ident = {k: v for k, v in _identity(service, t).items()
+             if v is not None and v not in ([], (), "")}
     digest = hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()[:12]
     return f"{service}:{t.type}:{digest}"
 

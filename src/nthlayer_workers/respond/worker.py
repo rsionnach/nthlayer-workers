@@ -507,16 +507,23 @@ class RespondModule:
         # exists when correlate is degraded).
         # See docs/superpowers/decisions/eager-case-creation.md
         breach_data = breach.get("data") or {}
-        slo_name = breach_data.get("slo_name", "unknown")
         # Quality_breach verdicts are emitted by measure as raw dicts (no
         # judgment.reasoning). Briefing is composed from breach.data fields
         # — richer content lands once the triage verdict completes and the
         # bench brief logic walks descendants.
-        briefing = (
-            f"{slo_name} breach on {service}: "
-            f"{breach_data.get('current_value', '?')} vs target "
-            f"{breach_data.get('target', '?')}"
-        )
+        if "threshold_key" in breach_data:
+            # A judgment-threshold breach (opensrm-g32d) has no SLO, target or
+            # current value; measure writes a one-line summary instead.
+            summary = breach_data.get("summary")
+            briefing = summary if isinstance(summary, str) and summary else (
+                f"{breach_data.get('threshold_type', 'unknown')} threshold breach on {service}"
+            )
+        else:
+            briefing = (
+                f"{breach_data.get('slo_name', 'unknown')} breach on {service}: "
+                f"{breach_data.get('current_value', '?')} vs target "
+                f"{breach_data.get('target', '?')}"
+            )
         await self._create_case_for_incident(
             ctx,
             underlying_verdict=breach["id"],

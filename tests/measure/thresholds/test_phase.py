@@ -5,9 +5,11 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import structlog
 import yaml
 from nthlayer_common.api_client import APIResult
 from nthlayer_common.manifest import (
+    AtLeast,
     Missing,
     Samples,
     evaluate_threshold,
@@ -15,7 +17,7 @@ from nthlayer_common.manifest import (
     threshold_to_v2_entry,
 )
 
-from nthlayer_workers.measure.thresholds.phase import outcome_signature
+from nthlayer_workers.measure.thresholds.phase import breach_readout, outcome_signature
 from nthlayer_workers.measure.thresholds.state import bounds_digest, threshold_key
 from nthlayer_workers.measure.worker import MeasureModule
 
@@ -196,6 +198,57 @@ async def test_restart_does_not_refire():
     assert _breaches(v2) == []           # ...and did not re-raise
 
 
+async def test_saved_state_carries_threshold_state_version_1():
+    m, prov, a, v = _module([0.2], _manifests(("svc", [_CAL])))
+    await _cycles(m, prov, 1)
+    assert (await m.get_state())["threshold_state_version"] == 1
+
+
+@pytest.mark.parametrize("version", ["absent", 1])
+async def test_version_1_or_no_version_restores_threshold_state(version):
+    # No marker: state saved before the marker existed, which is version 1.
+    m, prov, a, v = _module([0.2], _manifests(("svc", [_CAL])))
+    await _cycles(m, prov, 1)
+    saved = await m.get_state()
+    if version == "absent":
+        del saved["threshold_state_version"]
+    else:
+        saved["threshold_state_version"] = version
+    m2, prov2, a2, v2 = _module([0.2], _manifests(("svc", [_CAL])))
+    await m2.restore_state(saved)
+    assert m2._threshold_state == saved["threshold_state"] != {}
+    m2.clock.t = m.clock.t
+    await _cycles(m2, prov2, 1)
+    assert prov2.query.await_count == 1 and _breaches(v2) == []
+
+
+@pytest.mark.parametrize("version", [2, 0, "1", 1.0, True, None, [1]])
+async def test_an_unknown_threshold_state_version_discards_only_threshold_state(version):
+    key = "svc:calibration:abc"
+    saved = {
+        "slo_status": {"svc:rr": "breach"},
+        "breach_decisions": {"svc:rr": {"decided": True}, key: {"decided": True}},
+        "autonomy_levels": {"svc": "supervised"},
+        "breach_severities": {"svc:rr": "high"},
+        "threshold_state": {key: {"service": "svc", "last_evaluable": "breach", "armed": False}},
+        "threshold_last_run": NOW,
+        "threshold_governed": [key],
+        "threshold_state_version": version,
+    }
+    m, _, _, _ = _module([], _manifests(("svc", [_CAL])))
+    with structlog.testing.capture_logs() as logs:
+        await m.restore_state(saved)
+    assert m._threshold_state == {} and m._threshold_governed == set()
+    assert [e for e in logs if e["event"] == "threshold_state_version_unknown"] == [
+        {"event": "threshold_state_version_unknown", "version": version, "log_level": "warning"}]
+    # Everything else is restored as saved.
+    assert m._slo_status == saved["slo_status"]
+    assert m._breach_decisions == saved["breach_decisions"]
+    assert m._autonomy_levels == saved["autonomy_levels"]
+    assert m._breach_severities == saved["breach_severities"]
+    assert m._threshold_last_run == NOW
+
+
 _SPEC_V2 = Path(__file__).resolve().parents[4] / "opensrm" / "spec" / "v2"
 
 
@@ -227,6 +280,75 @@ async def test_served_shape_drives_a_cycle():
     for t in ("segments", "stability", "audit_backlog"):
         assert {b["reason"] for b in outcomes[t]["bounds"]} == {"no_data_source"}, t
     assert v == []
+
+
+# --- Breach verdicts readable downstream -----------------------------------
+
+async def test_breach_verdict_names_its_breaching_bounds_and_summarises():
+    entry = dict(_CAL, bounds={"maximum_expected_calibration_error": 0.05, "maximum_brier_score": 0.5})
+    m, prov, a, v = _module([0.12, 0.01], _manifests(("svc", [entry])))  # ECE then Brier
+    await _cycles(m, prov, 1)
+    (breach,) = _breaches(v)
+    data = breach["data"]
+    # Only the breaching bound; the within Brier bound is not listed.
+    assert data["breaching_bounds"] == [
+        {"bound": "maximum_expected_calibration_error", "measured": 0.12, "limit": 0.05}]
+    assert data["summary"] == (
+        "calibration threshold breach on svc: maximum_expected_calibration_error 0.12 > 0.05")
+    # Existing fields are kept; SLO fields are not faked.
+    assert data["threshold_key"] == a[0]["data"]["threshold_key"]
+    assert (data["threshold_type"], data["severity"]) == ("calibration", "high")
+    assert data["outcome"] == a[0]["data"]["outcome"]
+    assert not {"slo_name", "current_value", "target"} & set(data)
+
+
+def _spec_threshold(threshold_type):
+    """The spec example's entry of this type, parsed as core serves it."""
+    src = _SPEC_V2 / "examples" / "judgment-thresholds" / "all-five-types.yaml"
+    (entry,) = [e for e in yaml.safe_load(src.read_text())["spec"]["judgment_threshold"]
+                if e["type"] == threshold_type]
+    return threshold_from_v2_entry(entry)
+
+
+def test_a_lower_bound_breach_reads_as_at_least_the_limit():
+    # A p50 beyond the histogram's top finite bucket (3600s) is AtLeast(3600):
+    # a breach of the 1h bound decided from a lower bound (reason lower_bound).
+    t = _spec_threshold("feedback_latency")
+    outcome = evaluate_threshold(t, Samples(bounds={"maximum_p50": AtLeast(3600.0),
+                                                    "maximum_p90": 1000.0}))
+    assert outcome.bounds[0].reason == "lower_bound"
+    rows, summary = breach_readout("svc", outcome)
+    assert rows == [{"bound": "maximum_p50", "measured": 3600.0, "limit": "1h"}]
+    assert summary == "feedback_latency threshold breach on svc: maximum_p50 3600s >= 1h (lower bound)"
+
+
+def test_a_segments_breach_lists_each_breaching_segment():
+    t = _spec_threshold("segments")   # enterprise, smb, consumer; bound 0.05
+    outcome = evaluate_threshold(t, Samples(overall=0.1, segments={
+        "enterprise": 0.3, "smb": 0.12, "consumer": 0.2}))
+    rows, summary = breach_readout("svc", outcome)
+    assert rows == [
+        {"bound": "maximum_variance_from_overall", "segment": "enterprise", "measured": 0.2, "limit": 0.05},
+        {"bound": "maximum_variance_from_overall", "segment": "consumer", "measured": 0.1, "limit": 0.05},
+    ]
+    assert summary == ("segments threshold breach on svc: "
+                       "maximum_variance_from_overall (segment enterprise) 0.2 > 0.05")
+
+
+def test_an_outcome_without_a_breaching_row_gets_the_bare_summary():
+    outcome = evaluate_threshold(threshold_from_v2_entry(_CAL),
+                                 Samples(bounds={"maximum_expected_calibration_error": 0.01}))
+    assert breach_readout("svc", outcome) == ([], "calibration threshold breach on svc")
+
+
+async def test_the_breaches_log_names_keys_and_services():
+    m, prov, a, v = _module([0.2, 0.2], _manifests(("b", [_CAL]), ("a", [_CAL])))
+    with structlog.testing.capture_logs() as logs:
+        await _cycles(m, prov, 1)
+    keys = sorted(x["data"]["threshold_key"] for x in _breaches(v))
+    (event,) = [e for e in logs if e["event"] == "threshold_breaches"]
+    assert (event["count"], sorted(event["keys"]), event["services"]) == (len(keys), keys, ["a", "b"])
+    assert len(keys) == 2
 
 
 # --- Failure containment and delivery (R5 edge-cases) ----------------------

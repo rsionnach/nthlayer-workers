@@ -66,6 +66,37 @@ def outcome_signature(outcome: ThresholdOutcome) -> str:
     }, sort_keys=True)
 
 
+def breach_readout(service: str, outcome: ThresholdOutcome) -> tuple[list[dict[str, Any]], str]:
+    """What a breach verdict says to a reader that does not parse the outcome
+    (respond's briefing, bench): (breaching_bounds, summary).
+
+    breaching_bounds lists each breaching row as {"bound", "measured",
+    "limit"}; for a segments threshold, one row per breaching segment, with
+    "segment" added and the segments bound's name and limit. summary is one
+    line about the first such row. A row decided from a lower bound (reason
+    "lower_bound") measured the boundary, not the value, so it reads
+    ">= limit (lower bound)". A Duration bound's measured value is seconds."""
+    rows: list[tuple[dict[str, Any], str | None]] = []   # (row, reason)
+    if outcome.type == "segments":
+        for b in outcome.bounds:
+            rows.extend(({"bound": b.bound, "segment": s.segment, "measured": s.measured,
+                          "limit": b.limit}, s.reason)
+                        for s in outcome.segments if s.status == "breach")
+    else:
+        rows.extend(({"bound": b.bound, "measured": b.measured, "limit": b.limit}, b.reason)
+                    for b in outcome.bounds if b.status == "breach")
+    summary = f"{outcome.type} threshold breach on {service}"
+    if rows:  # always, for an outcome whose status is breach
+        row, reason = rows[0]
+        name = row["bound"] + (f" (segment {row['segment']})" if "segment" in row else "")
+        # A breach row always has a measured value (_decide sets it).
+        value = f"{row['measured']:g}" + ("s" if isinstance(row["limit"], str) else "")
+        relation = (f">= {row['limit']} (lower bound)" if reason == "lower_bound"
+                    else f"> {row['limit']}")
+        summary += f": {name} {value} {relation}"
+    return [row for row, _ in rows], summary
+
+
 def _canonical(t: JudgmentThreshold) -> dict:
     """The entry's v2 form for the identical-entry check, with segment_values
     sorted: their order is not part of an entry's meaning (or its key)."""
@@ -261,6 +292,7 @@ async def _evaluate(
     breach: tuple[str, str, str] | None = None
     if fire:
         breach_id = f"vrd-tbreach-{service}-{t.type}-{uuid.uuid4().hex[:8]}"
+        breaching_bounds, summary = breach_readout(service, outcome)
         verdict = {
             "id": breach_id,
             "created_at": datetime.now(UTC).isoformat(),
@@ -268,7 +300,8 @@ async def _evaluate(
             "service": service,
             "parent_ids": [assessment_id],
             "data": {"threshold_key": key, "threshold_type": t.type,
-                     "severity": THRESHOLD_BREACH_SEVERITY, "outcome": outcome.to_dict()},
+                     "severity": THRESHOLD_BREACH_SEVERITY, "outcome": outcome.to_dict(),
+                     "breaching_bounds": breaching_bounds, "summary": summary},
         }
         sent = await client.submit_verdict(wrap_verdict(verdict, component="measure"))
         if not sent.ok:

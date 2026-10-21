@@ -58,6 +58,11 @@ def _env_flag(name: str) -> bool:
 # a zero interval would evaluate every cycle and collapse re-arm hysteresis.
 _MAX_TIMING_SECONDS = 7 * 86400.0
 
+# Layout of the persisted threshold_state / threshold_governed. Bump it when
+# that layout (or threshold_key) changes incompatibly: restore_state discards
+# threshold state of any version it does not know.
+THRESHOLD_STATE_VERSION = 1
+
 
 def _env_seconds(name: str, default: float) -> float:
     """Seconds from the environment, in (0, 7d]. Unset: the default. Not a
@@ -150,6 +155,15 @@ class MeasureModule:
         self._breach_decisions = state.get("breach_decisions", {})
         self._autonomy_levels = state.get("autonomy_levels", {})
         self._breach_severities = state.get("breach_severities", {})
+        self._threshold_last_run = as_timestamp(state.get("threshold_last_run"))
+        # Absent: written before the marker existed, which is version 1. Any
+        # other version is a layout this release cannot read: start threshold
+        # state afresh (an open breach may re-raise, the safe direction).
+        version = state.get("threshold_state_version", THRESHOLD_STATE_VERSION)
+        if type(version) is not int or version != THRESHOLD_STATE_VERSION:
+            logger.warning("threshold_state_version_unknown", version=version)
+            self._threshold_state, self._threshold_governed = {}, set()
+            return
         # Restored component_state is untrusted; KeyState.from_dict handles
         # wrong-typed fields, so only the entry shape is checked here.
         raw = state.get("threshold_state")
@@ -158,7 +172,6 @@ class MeasureModule:
              if isinstance(k, str) and isinstance(v, dict) and isinstance(v.get("service"), str)}
             if isinstance(raw, dict) else {}
         )
-        self._threshold_last_run = as_timestamp(state.get("threshold_last_run"))
         # Only keys with restored threshold state: an SLO key smuggled in here
         # must never let threshold cleanup wipe that SLO's decision.
         raw_governed = state.get("threshold_governed")
@@ -211,7 +224,9 @@ class MeasureModule:
             # Phase 1b: threshold phase (own cadence).
             threshold_breaches = await self._maybe_run_threshold_phase(manifests, provider)
             if threshold_breaches:
-                logger.info("threshold_breaches", count=len(threshold_breaches))
+                logger.info("threshold_breaches", count=len(threshold_breaches),
+                            keys=[key for key, _, _ in threshold_breaches],
+                            services=sorted({svc for _, svc, _ in threshold_breaches}))
 
             # Phase 2: Detect breach transitions + classify severity
             new_breaches = _detect_transitions(current_status, self._slo_status)
@@ -573,6 +588,7 @@ class MeasureModule:
             "threshold_state": self._threshold_state,
             "threshold_last_run": self._threshold_last_run,
             "threshold_governed": sorted(self._threshold_governed),
+            "threshold_state_version": THRESHOLD_STATE_VERSION,
         }
 
 
