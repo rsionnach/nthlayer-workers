@@ -792,3 +792,17 @@ async def test_a_rejected_assessment_is_not_recorded_as_emitted():
     await _cycles(m, prov, 2)  # within both times, same signature, inside the heartbeat
     assert m.client.submit_assessment.await_count == 2
     assert v == []
+
+
+def test_a_value_just_over_its_limit_is_not_rounded_onto_it():
+    # 6-digit %g would print "0.05 > 0.05"; a breach must read as one.
+    outcome = evaluate_threshold(threshold_from_v2_entry(_CAL),
+                                 Samples(bounds={"maximum_expected_calibration_error": 0.05000001}))
+    assert breach_readout("svc", outcome)[1] == (
+        "calibration threshold breach on svc: maximum_expected_calibration_error 0.05000001 > 0.05")
+
+
+def test_a_long_duration_reads_in_plain_seconds():
+    t = _spec_threshold("feedback_latency")
+    outcome = evaluate_threshold(t, Samples(bounds={"maximum_p50": 1234567.0, "maximum_p90": 1.0}))
+    assert breach_readout("svc", outcome)[1].endswith("maximum_p50 1234567s > 1h")

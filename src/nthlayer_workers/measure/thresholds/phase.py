@@ -90,7 +90,9 @@ def breach_readout(service: str, outcome: ThresholdOutcome) -> tuple[list[dict[s
         row, reason = rows[0]
         name = row["bound"] + (f" (segment {row['segment']})" if "segment" in row else "")
         # A breach row always has a measured value (_decide sets it).
-        value = f"{row['measured']:g}" + ("s" if isinstance(row["limit"], str) else "")
+        # 12 significant digits: a value just over its limit must not print as
+        # the limit (6-digit %g did), nor a long duration in exponent form.
+        value = f"{row['measured']:.12g}" + ("s" if isinstance(row["limit"], str) else "")
         relation = (f">= {row['limit']} (lower bound)" if reason == "lower_bound"
                     else f"> {row['limit']}")
         summary += f": {name} {value} {relation}"

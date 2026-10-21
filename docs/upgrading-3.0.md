@@ -31,8 +31,8 @@ versions of its neighbours.
   (each breaching bound, or segment, with its measured value and limit) and a
   one-line `summary`, e.g. `calibration threshold breach on svc:
   maximum_expected_calibration_error 0.12 > 0.05`; a breach decided from a
-  lower bound reads `>= <limit> (lower bound)`. Respond uses the summary as
-  the case briefing. It has no `slo_name`, `current_value` or `target`.
+  lower bound reads `>= <limit> (lower bound)`. When respond opens a case
+  directly from the breach, the summary is the case briefing. It has no `slo_name`, `current_value` or `target`.
 - Threshold state saved by the measure module carries
   `threshold_state_version: 1` (state without it is read as version 1). A
   worker that finds a version it does not know logs
