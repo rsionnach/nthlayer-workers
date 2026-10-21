@@ -37,6 +37,9 @@ THRESHOLD_BREACH_SEVERITY = "high"
 # Defaults for MeasureModule's MEASURE_THRESHOLD_INTERVAL / _HEARTBEAT.
 DEFAULT_THRESHOLD_INTERVAL_SECONDS = 900.0
 DEFAULT_THRESHOLD_HEARTBEAT_SECONDS = 3600.0
+# MeasureModule bounds one threshold run by this (asyncio.wait_for), so a
+# hanging Prometheus cannot hold the measure cycle (and its SLO phases).
+THRESHOLD_PHASE_TIMEOUT_SECONDS = 120.0
 
 _Entry = tuple[str, str, JudgmentThreshold]  # (key, service, threshold)
 
@@ -75,11 +78,14 @@ def _canonical(t: JudgmentThreshold) -> dict:
 def _entries(manifests: list[dict], seen_problems: set[str]) -> tuple[set[str], list[_Entry]]:
     """Parse and key every served threshold: (services present, entries).
 
-    "Present" means fully present, i.e. safe to retire against: a service
-    with any entry that fails to parse is left out, so every existing key of
-    it is kept (an open breach must not retire and re-raise because one
-    entry was briefly malformed). Cost: a removed-and-broken entry lingers
-    until the manifest parses cleanly or the service disappears.
+    "Present" means fully present, i.e. safe to retire against. A service is
+    left out, so every existing key of it is kept, when any of its manifests
+    has an entry that fails to parse, a judgment_thresholds that is not a
+    list, or no judgment_thresholds at all (a pre-3.0 core serves none: that
+    says nothing about which entries exist). An open breach must not retire
+    and re-raise because a response was briefly malformed or old. Cost: a
+    removed-and-broken entry lingers until the manifest parses cleanly or
+    the service disappears.
 
     Identical entries are kept once. A threshold_key shared by several
     distinct entries of a service (same identity, other bound values) is
@@ -95,12 +101,17 @@ def _entries(manifests: list[dict], seen_problems: set[str]) -> tuple[set[str], 
                       where=f"/manifests[{i}]")
             continue
         items = m.get("judgment_thresholds")
-        if items is None:  # an older core serves no key: no thresholds
-            items = []
+        if items is None:
+            # Absent (pre-3.0 core) or null: nothing to evaluate, and no
+            # evidence any entry was removed, so nothing of it retires.
+            partial.add(service)
+            continue
         if not isinstance(items, list):
-            # Not marked present: a malformed response must not retire state.
+            # Partial (not just "not present"): another manifest of the same
+            # name must not retire this service's keys either.
             _log_once(seen_problems, f"thresholds:{service}:{type(items).__name__}",
                       "threshold_manifest_skipped", where=f"/manifests[{i}].judgment_thresholds")
+            partial.add(service)
             continue
         present.add(service)
         for j, item in enumerate(items):
@@ -135,6 +146,61 @@ def _entries(manifests: list[dict], seen_problems: set[str]) -> tuple[set[str], 
             used.add(key)
             entries.append((key, service, t))
     return present - partial, entries
+
+
+def _migrate(state: dict[str, dict], entries: list[_Entry]) -> dict[str, str]:
+    """Carry state across a re-key; returns {old_key: new_key}.
+
+    Adding or removing a same-identity sibling moves an entry between the
+    bare key and key~bounds_digest (and editing a suffixed sibling's bound
+    changes its digest). Without this the old key retires and the new one
+    starts armed, so an open breach re-fires and, with autonomy on, steps
+    the one-way ratchet again.
+
+    Per service and base key, each live key with no state is matched to a
+    non-live state key of the same service and base: first by equal stored
+    bounds_digest (when exactly one such key has it); then, if exactly one
+    old and one new key remain unmatched, the two pair (a bound edited while
+    re-keyed). Anything else is ambiguous and starts fresh, the safe
+    direction (it may re-raise). State without a stored base and digest
+    (written before they existed) is never migrated. Runs before
+    evaluation, so a migrated key is evaluated from its carried state."""
+    live = {key for key, _, _ in entries}
+    new: dict[tuple[str, str], list[tuple[str, str]]] = {}   # (service, base) -> [(key, digest)]
+    for key, service, t in entries:
+        if key not in state:
+            new.setdefault((service, threshold_key(service, t)), []).append((key, bounds_digest(t)))
+    old: dict[tuple[str, str], list[tuple[str, str]]] = {}   # (service, base) -> [(key, digest)]
+    for key, v in state.items():
+        if key in live or not isinstance(v, dict):
+            continue
+        service, base, digest = v.get("service"), v.get("base"), v.get("bounds_digest")
+        if isinstance(service, str) and isinstance(base, str) and isinstance(digest, str):
+            old.setdefault((service, base), []).append((key, digest))
+    renamed: dict[str, str] = {}
+    for group, new_keys in new.items():
+        olds = old.get(group, [])
+        if not olds:
+            continue
+        pairs: list[tuple[str, str, str]] = []   # (old_key, new_key, new_digest)
+        for new_key, digest in new_keys:
+            same = [k for k, d in olds if d == digest]
+            if len(same) == 1:
+                pairs.append((same[0], new_key, digest))
+        matched_old = {o for o, _, _ in pairs}
+        if len(matched_old) != len(pairs):   # two new keys claimed one old key
+            pairs = []
+            matched_old = set()
+        matched_new = {n for _, n, _ in pairs}
+        rest_old = [k for k, _ in olds if k not in matched_old]
+        rest_new = [(k, d) for k, d in new_keys if k not in matched_new]
+        if len(rest_old) == 1 and len(rest_new) == 1:
+            pairs.append((rest_old[0], rest_new[0][0], rest_new[0][1]))
+        for old_key, new_key, digest in pairs:
+            state[new_key] = {**state.pop(old_key), "base": group[1], "bounds_digest": digest}
+            renamed[old_key] = new_key
+            logger.info("threshold_migrated", old_key=old_key, new_key=new_key)
+    return renamed
 
 
 async def _evaluate(
@@ -202,6 +268,7 @@ async def _evaluate(
             return None
         breach = (key, service, breach_id)
     state[key] = {**new_state.to_dict(), "service": service,
+                  "base": threshold_key(service, t), "bounds_digest": bounds_digest(t),
                   "last_signature": last_signature, "last_emitted_at": last_emitted_at}
     return breach
 
@@ -212,21 +279,32 @@ async def run_threshold_phase(
     now: float | None = None,
     rearm_seconds: float = REARM_INTERVALS * DEFAULT_THRESHOLD_INTERVAL_SECONDS,
     heartbeat_seconds: float = DEFAULT_THRESHOLD_HEARTBEAT_SECONDS,
+    renamed: dict[str, str] | None = None,
+    breaches_out: list[tuple[str, str, str]] | None = None,
 ) -> list[tuple[str, str, str]]:
     """Evaluate every served threshold; mutate *state*; return new breaches as
     (key, service, breach_verdict_id). Caller guarantees *manifests* came from a
     successful /manifests response. Entries are evaluated concurrently, at most
     *eval_concurrency* at a time; one that raises is logged and skipped. An
     assessment is emitted on first sight, when the outcome's signature
-    changes, after *heartbeat_seconds*, or whenever a breach fires."""
+    changes, after *heartbeat_seconds*, or whenever a breach fires.
+
+    Out-parameters, filled as the run goes so a caller that cancels it (the
+    worker's timeout) still sees them: *renamed* gets {old_key: new_key}
+    for state carried across a re-key (before any evaluation); each breach
+    whose verdict core accepted is appended to *breaches_out* at once, since
+    its state has advanced and it will never fire again."""
     now = time.time() if now is None else now
     present_services, entries = _entries(manifests, seen_problems)
+    moved = _migrate(state, entries)
+    if renamed is not None:
+        renamed.update(moved)
     # Prometheus's retention, queried once per run and only if needed.
     retention: float | Missing | None = None
     if retention_check and any(needs_retention(t) for _, _, t in entries):
         retention = await fetch_retention(provider)
     sem = asyncio.Semaphore(eval_concurrency)
-    new_breaches: list[tuple[str, str, str]] = []
+    new_breaches = breaches_out if breaches_out is not None else []
 
     async def one(key: str, service: str, t: JudgmentThreshold) -> None:
         async with sem:
@@ -240,12 +318,14 @@ async def run_threshold_phase(
                 _log_once(seen_problems, f"eval:{key}:{type(exc).__name__}", "threshold_eval_failed",
                           service=service, key=key, error=f"{type(exc).__name__}: {exc}")
                 return
-        if breach is not None:
-            new_breaches.append(breach)
+            # No await between the accepted verdict and this append, so a
+            # cancellation cannot drop an accepted breach.
+            if breach is not None:
+                new_breaches.append(breach)
 
     await asyncio.gather(*(one(*e) for e in entries))
     _retire(state, present_services, {key for key, _, _ in entries})
-    return new_breaches
+    return list(new_breaches)
 
 
 def _retire(state: dict[str, dict], present_services: set[str], live_keys: set[str]) -> None:
@@ -260,11 +340,18 @@ def _retire(state: dict[str, dict], present_services: set[str], live_keys: set[s
         logger.info("threshold_retired", key=key)
 
 
-def retire_thresholds(*, manifests: list[dict], state: dict[str, dict], seen_problems: set[str]) -> None:
+def retire_thresholds(
+    *, manifests: list[dict], state: dict[str, dict], seen_problems: set[str],
+    renamed: dict[str, str] | None = None,
+) -> None:
     """Garbage collection alone, for measure cycles on which the threshold
     phase does not run: /manifests is fetched every cycle, so a removed
     entry retires (and leaves governance) without waiting for the next
     threshold run. Same rule as the phase: successful response, service
-    present, entry gone. Parses only; sends no query."""
+    present, entry gone; and the same re-key migration first (*renamed*
+    gets {old_key: new_key}). Parses only; sends no query."""
     present_services, entries = _entries(manifests, seen_problems)
+    moved = _migrate(state, entries)
+    if renamed is not None:
+        renamed.update(moved)
     _retire(state, present_services, {key for key, _, _ in entries})

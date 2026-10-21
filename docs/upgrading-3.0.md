@@ -10,7 +10,8 @@ versions of its neighbours.
 - **`nthlayer-common` 5.2.** The pin is now `>=5.2.0,<6.0.0`.
 - **`nthlayer-core` 3.0 or later.** Thresholds are read from core's
   `/manifests` (the `judgment_thresholds` key). An older core serves none, so
-  nothing is evaluated.
+  nothing is evaluated, and threshold state already saved is kept, not
+  retired.
 - **`calibration`, `segments` and `stability` under `judgment_slo` now fail
   to load.** Move them to `spec.judgment_threshold`. Thresholds are not SLOs:
   they have no target or budget. State saved by 2.x for those removed SLOs is

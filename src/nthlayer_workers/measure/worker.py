@@ -35,6 +35,7 @@ from nthlayer_workers.measure.thresholds.phase import (
     DEFAULT_THRESHOLD_HEARTBEAT_SECONDS,
     DEFAULT_THRESHOLD_INTERVAL_SECONDS,
     THRESHOLD_BREACH_SEVERITY,
+    THRESHOLD_PHASE_TIMEOUT_SECONDS,
     retire_thresholds,
     run_threshold_phase,
 )
@@ -342,8 +343,13 @@ class MeasureModule:
         Returns this run's new breaches as (key, service, breach_verdict_id).
         Open threshold breaches still reach governance every cycle, from
         _threshold_state. It must never stop Phases 2-3: on failure, log and
-        return no threshold breaches."""
+        go on; a run is bounded by THRESHOLD_PHASE_TIMEOUT_SECONDS, and on a
+        timeout the breaches core already accepted (their state has
+        advanced) still go to governance. State carried across a sibling
+        re-key renames its governance entries too, on run and not-run
+        cycles alike."""
         threshold_breaches: list[tuple[str, str, str]] = []
+        renamed: dict[str, str] = {}
         now = self.clock()
         last = self._threshold_last_run
         if last is None or now < last or now - last >= self.threshold_interval_seconds:
@@ -351,14 +357,21 @@ class MeasureModule:
             # retries after one interval, not every cycle (no log flood).
             self._threshold_last_run = now
             try:
-                threshold_breaches = await run_threshold_phase(
-                    client=self.client, provider=provider, manifests=manifests,
-                    state=self._threshold_state, seen_problems=self._threshold_problems,
-                    eval_concurrency=self._eval_concurrency,
-                    retention_check=self.retention_check, now=now,
-                    rearm_seconds=REARM_INTERVALS * self.threshold_interval_seconds,
-                    heartbeat_seconds=self.threshold_heartbeat_seconds,
+                await asyncio.wait_for(
+                    run_threshold_phase(
+                        client=self.client, provider=provider, manifests=manifests,
+                        state=self._threshold_state, seen_problems=self._threshold_problems,
+                        eval_concurrency=self._eval_concurrency,
+                        retention_check=self.retention_check, now=now,
+                        rearm_seconds=REARM_INTERVALS * self.threshold_interval_seconds,
+                        heartbeat_seconds=self.threshold_heartbeat_seconds,
+                        renamed=renamed, breaches_out=threshold_breaches,
+                    ),
+                    THRESHOLD_PHASE_TIMEOUT_SECONDS,
                 )
+            except TimeoutError:
+                logger.warning("threshold_phase_timeout", timeout=THRESHOLD_PHASE_TIMEOUT_SECONDS,
+                               accepted_breaches=len(threshold_breaches))
             except Exception as exc:
                 logger.warning("threshold_phase_failed", error=f"{type(exc).__name__}: {exc}")
         else:
@@ -366,10 +379,27 @@ class MeasureModule:
             # /manifests is fresh every cycle.
             try:
                 retire_thresholds(manifests=manifests, state=self._threshold_state,
-                                  seen_problems=self._threshold_problems)
+                                  seen_problems=self._threshold_problems, renamed=renamed)
             except Exception as exc:
                 logger.warning("threshold_retire_failed", error=f"{type(exc).__name__}: {exc}")
-        return threshold_breaches
+        # Before Phase 3 and _release_threshold_governance, which would
+        # otherwise see the old key as retired and drop its decision.
+        self._rename_threshold_governance(renamed)
+        return list(threshold_breaches)
+
+    def _rename_threshold_governance(self, renamed: dict[str, str]) -> None:
+        """Move governance entries of re-keyed threshold state to the new key,
+        so an open breach keeps its decision (no second autonomy step).
+        Only keys in _threshold_governed: _breach_decisions also holds SLO
+        keys."""
+        for old, new in renamed.items():
+            if old not in self._threshold_governed:
+                continue
+            for store in (self._breach_decisions, self._breach_severities):
+                if old in store:
+                    store[new] = store.pop(old)
+            self._threshold_governed.discard(old)
+            self._threshold_governed.add(new)
 
     def _inject_threshold_breaches(
         self,
