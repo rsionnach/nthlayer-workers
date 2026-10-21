@@ -77,8 +77,7 @@ class KeyState:
         """Read a persisted state. Restored component_state is not trusted: a
         non-dict, or a field of the wrong type, takes the default (armed, no
         within run), so a corrupt entry can re-raise a breach but never
-        silences one. State written before within_since existed (it carried
-        within_streak) reads as no within run."""
+        silences one."""
         if not isinstance(d, dict):
             return cls()
         last, armed, count = d.get("last_evaluable"), d.get("armed"), d.get("within_count")

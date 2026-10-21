@@ -13,7 +13,8 @@ versions of its neighbours.
   nothing is evaluated.
 - **`calibration`, `segments` and `stability` under `judgment_slo` now fail
   to load.** Move them to `spec.judgment_threshold`. Thresholds are not SLOs:
-  they have no target or budget.
+  they have no target or budget. State saved by 2.x for those removed SLOs is
+  left in place and is inert (never counted in governance).
 
 ## What is new
 
@@ -57,14 +58,17 @@ All four are read once at startup: restart the worker to change them.
 - **Autonomy.** While on, an open breach keeps counting in governance until
   its key re-arms or is removed, not after one `within` evaluation. The
   ratchet is one-way: recovery never raises autonomy. Turning the toggle off
-  stops threshold breaches counting; turning it back on re-injects open ones
-  without a second `autonomy_change`.
+  stops threshold breaches counting; turning it back on re-injects breaches
+  that were governed before it went off, without a second `autonomy_change`.
+  A breach that opened while it was off does not count (it never had a
+  governance decision).
 - **Retention check.** Set it **off** behind Thanos sidecar, Mimir or Cortex:
   there the metric describes a local TSDB, not what the query path sees, and
   would wrongly report `insufficient_window`. It allows 1h of slack; an empty
   TSDB counts as unknown retention and measures normally.
-- **Interval.** Re-arm after a breach takes 3 intervals of `within` AND 3
-  `within` evaluations.
+- **Interval.** Re-arm after a breach takes 3 intervals measured from the
+  first `within` observation AND 3 `within` evaluations. At the default
+  cadence a breach re-arms on about the 4th consecutive `within` run (~1h).
 - **Heartbeat.** A changed assessment (any bound or segment status or
   reason, or a bound's declared limit) is emitted at once. Dashboards should
   read the latest assessment per key, not count them.
