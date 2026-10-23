@@ -918,7 +918,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "nthlayer-workers"
-version = "3.0.1"
+version = "3.0.2"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
