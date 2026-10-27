@@ -6,6 +6,13 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [3.0.4](https://github.com/rsionnach/nthlayer-workers/compare/v3.0.3...v3.0.4) (2026-10-27)
+
+
+### Dependencies
+
+* require nthlayer-common 5.5.0 (opensrm-wo62.1) ([85feea9](https://github.com/rsionnach/nthlayer-workers/commit/85feea981028961a4957e53884c4f040d8638178))
+
 ## [3.0.3](https://github.com/rsionnach/nthlayer-workers/compare/v3.0.2...v3.0.3) (2026-10-24)
 
 
