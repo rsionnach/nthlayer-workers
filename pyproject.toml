@@ -47,7 +47,7 @@ dependencies = [
     # green. Still missing, and tracked as opensrm-p62o: the EXPECTED_MAJORS
     # half, which reads the BUILT wheel's own metadata in the release
     # container, where deps come from PyPI instead of the sibling checkout.
-    # WHY 5.4.0 (opensrm-wo62.1): the version this repo is now built and tested
+    # WHY 5.5.0 (opensrm-wo62.1): the version this repo is now built and tested
     # against (nthlayer-core rule 10: the floor is the installed sibling). Bump
     # it on every nthlayer-common minor release: the floor guard fails until you
     # do.
@@ -55,7 +55,7 @@ dependencies = [
     # nthlayer-common's evaluate_threshold (CORE §5.5.6) and read from core 3.0's
     # /manifests via threshold_from_v2_entry; error magnitudes are no longer
     # SLOs (decision 3c, common 4.0/5.0). See nthlayer-common/docs/upgrading-5.0.md.
-    "nthlayer-common>=5.4.0,<6.0.0",
+    "nthlayer-common>=5.5.0,<6.0.0",
     "httpx>=0.27",
     "pyyaml>=6.0",
     "structlog>=24.1.0",
