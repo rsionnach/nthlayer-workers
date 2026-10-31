@@ -6,6 +6,14 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [3.0.7](https://github.com/rsionnach/nthlayer-workers/compare/v3.0.6...v3.0.7) (2026-10-31)
+
+
+### Bug Fixes
+
+* ship the Apache-2.0 LICENSE and declare it in package metadata (opensrm-bqfj) ([aa1aefa](https://github.com/rsionnach/nthlayer-workers/commit/aa1aefa3dfe9d326f5711bdfebcd3032c1621b5f))
+* ship the Apache-2.0 LICENSE and declare it in package metadata (opensrm-bqfj) ([b8ca392](https://github.com/rsionnach/nthlayer-workers/commit/b8ca39284abccd8d9d2e5862029e3da090c0f0af))
+
 ## [3.0.6](https://github.com/rsionnach/nthlayer-workers/compare/v3.0.5...v3.0.6) (2026-10-29)
 
 
