@@ -7,6 +7,7 @@ name = "nthlayer-workers"
 version = "3.0.6"
 description = "NthLayer workers — Tier 2 background computation (observe, measure, correlate, respond, learn)"
 readme = "README.md"
+license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
 dependencies = [
     # >=3.0.0, NOT >=2.1.2. Two of the six breaks documented in
