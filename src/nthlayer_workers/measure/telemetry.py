@@ -21,24 +21,55 @@ except ImportError:
     _HAS_OTEL = False
 
 
+# OpenSRM Addendum A1 (opensrm-ju8r). Measure's scores are grader evaluations,
+# emitted as the upstream grader event (A1 §4.4). The other events here are
+# nthlayer.* implementation events: A1 does not define them, and A1 §4.0 bars
+# gen_ai.* names for anything OpenSRM-defined or our own.
+GRADER_EVENT = "gen_ai.evaluation.result"
+
+
 def emit_decision_event(score: QualityScore, alerts: list[Alert] | None = None) -> None:
-    """Record an evaluation decision as a span event."""
+    """Record an evaluation: one grader event per dimension, plus a summary.
+
+    Each dimension score is a ``gen_ai.evaluation.result`` by the
+    implementation about the evaluated task's decision. Per-evaluation facts
+    (cost, alerts, dimension count) go on one ``nthlayer.evaluation.completed``
+    event instead, so they are not repeated, and summed, once per dimension.
+
+    An auto-approved output emits the summary only: no evaluator ran, so its
+    configured scores are nobody's opinion and must not reach grader
+    consumers (A1 §3).
+    """
     if not _HAS_OTEL:
         return
     span = trace.get_current_span()
-    attributes: dict[str, str | float | int | bool] = {
-        "eval_id": score.eval_id,
-        "agent_name": score.agent_name,
-        "task_id": score.task_id,
-        "confidence": score.confidence,
-        "evaluator_model": score.evaluator_model,
-        "dimension_count": len(score.dimensions),
+    if not score.auto_approved:
+        for dimension, value in score.dimensions.items():
+            span.add_event(
+                GRADER_EVENT,
+                attributes={
+                    "gen_ai.evaluation.name": dimension,
+                    "gen_ai.evaluation.score.value": value,
+                    "nthlayer.evaluator.kind": "implementation",
+                    "nthlayer.decision.id": score.task_id,
+                    "gen_ai.agent.name": score.agent_name,
+                    "nthlayer.evaluation.id": score.eval_id,
+                    "nthlayer.evaluator.model": score.evaluator_model,
+                    "nthlayer.evaluator.confidence": score.confidence,
+                },
+            )
+    summary: dict[str, str | float | int | bool] = {
+        "nthlayer.evaluation.id": score.eval_id,
+        "nthlayer.decision.id": score.task_id,
+        "gen_ai.agent.name": score.agent_name,
+        "nthlayer.evaluation.dimension_count": len(score.dimensions),
+        "nthlayer.evaluation.auto_approved": score.auto_approved,
     }
     if score.cost_usd is not None:
-        attributes["cost_usd"] = score.cost_usd
+        summary["nthlayer.evaluation.cost_usd"] = score.cost_usd
     if alerts:
-        attributes["alert_count"] = len(alerts)
-    span.add_event("gen_ai.decision.evaluated", attributes=attributes)
+        summary["nthlayer.evaluation.alert_count"] = len(alerts)
+    span.add_event("nthlayer.evaluation.completed", attributes=summary)
 
 
 def emit_override_event(
@@ -47,21 +78,29 @@ def emit_override_event(
     original: float,
     corrected: float,
     corrector: str,
+    *,
+    decision_id: str | None = None,
 ) -> None:
-    """Record a human override as a span event."""
+    """Record a human's corrected dimension score as a human grader evaluation.
+
+    A1 §4.4: a human's verdict on a completion is a grader evaluation with
+    ``nthlayer.evaluator.kind`` ``human``. ``decision_id`` is the evaluated
+    task; it is omitted when unknown.
+    """
     if not _HAS_OTEL:
         return
     span = trace.get_current_span()
-    span.add_event(
-        "gen_ai.override.applied",
-        attributes={
-            "eval_id": eval_id,
-            "dimension": dimension,
-            "original_score": original,
-            "corrected_score": corrected,
-            "corrector": corrector,
-        },
-    )
+    attributes: dict[str, str | float | int | bool] = {
+        "gen_ai.evaluation.name": dimension,
+        "gen_ai.evaluation.score.value": corrected,
+        "nthlayer.evaluator.kind": "human",
+        "nthlayer.evaluation.id": eval_id,
+        "nthlayer.evaluation.original_score": original,
+        "nthlayer.evaluator.actor": corrector,
+    }
+    if decision_id is not None:
+        attributes["nthlayer.decision.id"] = decision_id
+    span.add_event(GRADER_EVENT, attributes=attributes)
 
 
 def emit_calibration_report_event(
@@ -92,7 +131,7 @@ def emit_calibration_report_event(
         attributes["recall"] = recall
     if compliant is not None:
         attributes["reversal_rate_compliant"] = compliant
-    span.add_event("gen_ai.calibration.report", attributes=attributes)
+    span.add_event("nthlayer.calibration.report", attributes=attributes)
 
 
 def emit_state_transition_event(
@@ -106,7 +145,7 @@ def emit_state_transition_event(
         return
     span = trace.get_current_span()
     span.add_event(
-        "gen_ai.agent.state.changed",
+        "nthlayer.autonomy.changed",
         attributes={
             "agent_name": agent_name,
             "from_level": from_level,

@@ -156,7 +156,7 @@ class SQLiteScoreStore:
         with self._lock:
             # Verify eval_id exists
             exists = self._conn.execute(
-                "SELECT 1 FROM evaluations WHERE eval_id = ?", (eval_id,)
+                "SELECT task_id FROM evaluations WHERE eval_id = ?", (eval_id,)
             ).fetchone()
             if not exists:
                 raise ValueError(
@@ -186,6 +186,8 @@ class SQLiteScoreStore:
                 emit_override_event(
                     eval_id, dim_name, original_score,
                     corrected_score, corrector,
+                    # The evaluated task is the decision the correction is about.
+                    decision_id=exists["task_id"],
                 )
             self._conn.commit()
 
