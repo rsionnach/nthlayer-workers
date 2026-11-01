@@ -12,7 +12,8 @@ from __future__ import annotations
 
 UNKNOWN_PROVIDER = "unknown"
 
-# Bare-model prefixes whose provider is not in doubt.
+# Bare-model prefixes whose provider is not in doubt. Add a family here only
+# when its prefix cannot belong to another provider; otherwise it stays unknown.
 _FAMILY_PREFIXES: tuple[tuple[str, str], ...] = (
     ("claude", "anthropic"),
     ("gpt", "openai"),
