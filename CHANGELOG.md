@@ -6,6 +6,14 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [3.0.10](https://github.com/rsionnach/nthlayer-workers/compare/v3.0.9...v3.0.10) (2026-11-01)
+
+
+### Bug Fixes
+
+* require nthlayer-common 5.9.1 ([b5ba803](https://github.com/rsionnach/nthlayer-workers/commit/b5ba803f9d651deaea1e6d5a2a05ca6a2ff4b55c))
+* require nthlayer-common 5.9.1 ([603ba90](https://github.com/rsionnach/nthlayer-workers/commit/603ba9099793e6d43daa0c2ae599608423a1b3ae))
+
 ## [3.0.9](https://github.com/rsionnach/nthlayer-workers/compare/v3.0.8...v3.0.9) (2026-11-01)
 
 
