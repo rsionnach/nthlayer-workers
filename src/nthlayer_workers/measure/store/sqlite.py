@@ -11,7 +11,7 @@ from pathlib import Path
 
 from nthlayer_common.verdicts import VerdictStore as VerdictStoreBase
 
-from nthlayer_workers.measure.telemetry import emit_override_event, emit_state_transition_event
+from nthlayer_workers.measure.telemetry import emit_correction_event, emit_state_transition_event
 from nthlayer_workers.measure.types import QualityScore
 
 _SCHEMA_PATH = Path(__file__).parent / "schema.sql"
@@ -155,10 +155,10 @@ class SQLiteScoreStore:
         verdict_id = None
         with self._lock:
             # Verify eval_id exists
-            exists = self._conn.execute(
+            eval_row = self._conn.execute(
                 "SELECT task_id FROM evaluations WHERE eval_id = ?", (eval_id,)
             ).fetchone()
-            if not exists:
+            if not eval_row:
                 raise ValueError(
                     f"Cannot override non-existent evaluation: {eval_id}"
                 )
@@ -183,11 +183,11 @@ class SQLiteScoreStore:
                         corrector,
                     ),
                 )
-                emit_override_event(
+                emit_correction_event(
                     eval_id, dim_name, original_score,
                     corrected_score, corrector,
                     # The evaluated task is the decision the correction is about.
-                    decision_id=exists["task_id"],
+                    decision_id=eval_row["task_id"],
                 )
             self._conn.commit()
 

@@ -130,7 +130,7 @@ async def test_override_telemetry_names_the_evaluated_task(store):
     from unittest.mock import patch
 
     await store.save_score(_make_score(eval_id="e1", task="task-42"))
-    with patch("nthlayer_workers.measure.store.sqlite.emit_override_event") as emit:
+    with patch("nthlayer_workers.measure.store.sqlite.emit_correction_event") as emit:
         await store.save_override("e1", {"correctness": 0.5}, "reviewer")
 
     emit.assert_called_once()

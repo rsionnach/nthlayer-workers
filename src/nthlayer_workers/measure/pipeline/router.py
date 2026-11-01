@@ -14,7 +14,7 @@ from nthlayer_workers.measure.detection.protocol import DegradationDetector
 from nthlayer_workers.measure.governance.engine import GovernanceEngine
 from nthlayer_workers.measure.pipeline.evaluator import Evaluator
 from nthlayer_workers.measure.store.protocol import ScoreStore
-from nthlayer_workers.measure.telemetry import emit_decision_event
+from nthlayer_workers.measure.telemetry import emit_evaluation_events
 from nthlayer_workers.measure.tiering.classifier import TierClassifier
 from nthlayer_workers.measure.trends.tracker import TrendTracker
 from nthlayer_workers.measure.types import QualityScore
@@ -82,7 +82,7 @@ class PipelineRouter:
                         auto_approved=True,
                     )
                     await self._store.save_score(auto_score)
-                    emit_decision_event(auto_score, None)
+                    emit_evaluation_events(auto_score, None)
                     continue
 
                 # Model routing for non-minimal tiers (or sampled minimal)
@@ -117,7 +117,7 @@ class PipelineRouter:
                 )
                 alerts = self._detector.check(window)
 
-            emit_decision_event(score, alerts)
+            emit_evaluation_events(score, alerts)
 
             if self._governance is not None:
                 await self._governance.check_agent(output.agent_name)

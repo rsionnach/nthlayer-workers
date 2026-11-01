@@ -12,7 +12,7 @@ from nthlayer_workers.measure.detection.protocol import Alert
 from nthlayer_workers.measure.types import QualityScore
 
 GRADER_EVENT = "gen_ai.evaluation.result"
-RETIRED = (
+RETIRED_EVENT_NAMES = (
     "gen_ai.decision.evaluated",
     "gen_ai.override.applied",
     "gen_ai.calibration.report",
@@ -35,21 +35,22 @@ def _make_score(**kwargs) -> QualityScore:
 
 
 def _events(emit) -> list[tuple[str, dict]]:
-    """Run *emit* against a mocked current span; return (name, attributes) pairs."""
+    """Run *emit* against a mocked current span; return (name, attributes) pairs,
+    and assert no retired event name was emitted."""
     mock_span = MagicMock()
     with patch("nthlayer_workers.measure.telemetry._HAS_OTEL", True), \
          patch("nthlayer_workers.measure.telemetry.trace") as mock_trace:
         mock_trace.get_current_span.return_value = mock_span
         emit()
     events = [(c.args[0], c.kwargs["attributes"]) for c in mock_span.add_event.call_args_list]
-    assert not [name for name, _ in events if name in RETIRED]
+    assert not [name for name, _ in events if name in RETIRED_EVENT_NAMES]
     return events
 
 
 def test_evaluation_is_one_grader_event_per_dimension():
-    from nthlayer_workers.measure.telemetry import emit_decision_event
+    from nthlayer_workers.measure.telemetry import emit_evaluation_events
 
-    events = _events(lambda: emit_decision_event(_make_score()))
+    events = _events(lambda: emit_evaluation_events(_make_score()))
 
     graded = {a["gen_ai.evaluation.name"]: a for n, a in events if n == GRADER_EVENT}
     assert set(graded) == {"correctness", "safety"}
@@ -69,13 +70,13 @@ def test_evaluation_is_one_grader_event_per_dimension():
 
 
 def test_evaluation_summary_carries_per_evaluation_facts():
-    from nthlayer_workers.measure.telemetry import emit_decision_event
+    from nthlayer_workers.measure.telemetry import emit_evaluation_events
 
     alerts = [
         Alert(agent_name="agent-a", metric_name="reversal_rate",
               current_value=0.5, threshold=0.3, message="too high")
     ]
-    events = _events(lambda: emit_decision_event(_make_score(), alerts))
+    events = _events(lambda: emit_evaluation_events(_make_score(), alerts))
 
     (summary,) = [a for n, a in events if n == "nthlayer.evaluation.completed"]
     assert summary["nthlayer.evaluation.id"] == "e1"
@@ -88,10 +89,10 @@ def test_evaluation_summary_carries_per_evaluation_facts():
 
 def test_auto_approved_output_is_not_a_grader_evaluation():
     """No evaluator ran, so the configured scores are not anyone's opinion."""
-    from nthlayer_workers.measure.telemetry import emit_decision_event
+    from nthlayer_workers.measure.telemetry import emit_evaluation_events
 
     score = _make_score(auto_approved=True, evaluator_model="auto-approved", cost_usd=None)
-    events = _events(lambda: emit_decision_event(score))
+    events = _events(lambda: emit_evaluation_events(score))
 
     assert [n for n, _ in events] == ["nthlayer.evaluation.completed"]
     summary = events[0][1]
@@ -102,10 +103,10 @@ def test_auto_approved_output_is_not_a_grader_evaluation():
 
 def test_empty_task_id_is_not_emitted_as_a_decision_id():
     """A1 §4.4: omit nthlayer.decision.id when the decision is not identifiable."""
-    from nthlayer_workers.measure.telemetry import emit_decision_event, emit_override_event
+    from nthlayer_workers.measure.telemetry import emit_correction_event, emit_evaluation_events
 
-    events = _events(lambda: emit_decision_event(_make_score(task_id="")))
-    events += _events(lambda: emit_override_event("e1", "correctness", 0.9, 0.5, "r", decision_id=""))
+    events = _events(lambda: emit_evaluation_events(_make_score(task_id="")))
+    events += _events(lambda: emit_correction_event("e1", "correctness", 0.9, 0.5, "r", decision_id=""))
 
     assert events
     assert not [n for n, a in events if "nthlayer.decision.id" in a]
@@ -113,16 +114,16 @@ def test_empty_task_id_is_not_emitted_as_a_decision_id():
 
 def test_noop_without_otel():
     with patch("nthlayer_workers.measure.telemetry._HAS_OTEL", False):
-        from nthlayer_workers.measure.telemetry import emit_decision_event
+        from nthlayer_workers.measure.telemetry import emit_evaluation_events
         # Should not raise even with no OTel
-        emit_decision_event(_make_score())
+        emit_evaluation_events(_make_score())
 
 
 def test_human_correction_is_a_human_grader_evaluation():
     """A1 §4.4: a human's verdict on a completion is a grader evaluation."""
-    from nthlayer_workers.measure.telemetry import emit_override_event
+    from nthlayer_workers.measure.telemetry import emit_correction_event
 
-    events = _events(lambda: emit_override_event(
+    events = _events(lambda: emit_correction_event(
         "e1", "correctness", 0.9, 0.5, "reviewer", decision_id="t1",
     ))
 

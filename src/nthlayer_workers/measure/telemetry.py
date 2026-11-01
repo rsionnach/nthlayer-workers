@@ -24,15 +24,18 @@ except ImportError:
 # OpenSRM Addendum A1 (opensrm-ju8r). Measure's scores are grader evaluations,
 # emitted as the upstream grader event (A1 §4.4). The other events here are
 # nthlayer.* implementation events: A1 does not define them, and A1 §4.0 bars
-# gen_ai.* names for anything OpenSRM-defined or our own.
+# gen_ai.* names for anything OpenSRM-defined or our own. The calibration and
+# autonomy events only had their names changed: their attributes stay bare
+# (agent_name, from_level), unlike the namespaced grader attributes.
 GRADER_EVENT = "gen_ai.evaluation.result"
 
 
-def emit_decision_event(score: QualityScore, alerts: list[Alert] | None = None) -> None:
+def emit_evaluation_events(score: QualityScore, alerts: list[Alert] | None = None) -> None:
     """Record an evaluation: one grader event per dimension, plus a summary.
 
-    Each dimension score is a ``gen_ai.evaluation.result`` by the
-    implementation about the evaluated task's decision. Per-evaluation facts
+    Each dimension score is a ``gen_ai.evaluation.result`` with
+    ``nthlayer.evaluator.kind`` ``implementation`` (NthLayer's evaluator, vs
+    ``human`` in ``emit_correction_event``) about the evaluated task's decision. Per-evaluation facts
     (cost, alerts, dimension count) go on one ``nthlayer.evaluation.completed``
     event instead, so they are not repeated, and summed, once per dimension.
 
@@ -45,13 +48,15 @@ def emit_decision_event(score: QualityScore, alerts: list[Alert] | None = None) 
     span = trace.get_current_span()
     # A1 §4.4: nthlayer.decision.id only when the decision is identifiable;
     # some adapters leave task_id empty.
-    decision: dict[str, str] = {"nthlayer.decision.id": score.task_id} if score.task_id else {}
+    decision_attrs: dict[str, str] = (
+        {"nthlayer.decision.id": score.task_id} if score.task_id else {}
+    )
     if not score.auto_approved:
         for dimension, value in score.dimensions.items():
             span.add_event(
                 GRADER_EVENT,
                 attributes={
-                    **decision,
+                    **decision_attrs,
                     "gen_ai.evaluation.name": dimension,
                     "gen_ai.evaluation.score.value": value,
                     "nthlayer.evaluator.kind": "implementation",
@@ -62,7 +67,7 @@ def emit_decision_event(score: QualityScore, alerts: list[Alert] | None = None) 
                 },
             )
     summary: dict[str, str | float | int | bool] = {
-        **decision,
+        **decision_attrs,
         "nthlayer.evaluation.id": score.eval_id,
         "gen_ai.agent.name": score.agent_name,
         "nthlayer.evaluation.dimension_count": len(score.dimensions),
@@ -75,7 +80,7 @@ def emit_decision_event(score: QualityScore, alerts: list[Alert] | None = None) 
     span.add_event("nthlayer.evaluation.completed", attributes=summary)
 
 
-def emit_override_event(
+def emit_correction_event(
     eval_id: str,
     dimension: str,
     original: float,
