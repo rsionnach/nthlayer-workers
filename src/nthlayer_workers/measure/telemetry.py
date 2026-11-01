@@ -33,9 +33,9 @@ GRADER_EVENT = "gen_ai.evaluation.result"
 def emit_evaluation_events(score: QualityScore, alerts: list[Alert] | None = None) -> None:
     """Record an evaluation: one grader event per dimension, plus a summary.
 
-    Each dimension score is a ``gen_ai.evaluation.result`` with
-    ``nthlayer.evaluator.kind`` ``implementation`` (NthLayer's evaluator, vs
-    ``human`` in ``emit_correction_event``) about the evaluated task's decision. Per-evaluation facts
+    Each dimension score is a ``gen_ai.evaluation.result`` about the evaluated
+    task's decision, with ``nthlayer.evaluator.kind`` ``implementation``
+    (NthLayer's evaluator, vs ``human`` in ``emit_correction_event``). Per-evaluation facts
     (cost, alerts, dimension count) go on one ``nthlayer.evaluation.completed``
     event instead, so they are not repeated, and summed, once per dimension.
 
