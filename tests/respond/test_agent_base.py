@@ -459,3 +459,31 @@ async def test_structured_path_emits_otel_event_on_failure(verdict_store):
     assert kwargs["caller"] == "respond.triage"
     # Token fields are absent on failure (no usage data available).
     assert "input_tokens" not in kwargs or kwargs["input_tokens"] is None
+
+
+async def test_structured_path_reports_a_bare_model_s_provider(verdict_store):
+    """A bare Claude model is reported as anthropic, not "unknown" (opensrm-ju8r J4)."""
+    from nthlayer_common.llm_structured import StructuredCallResult, StructuredCallUsage
+
+    from nthlayer_workers.respond.agents.response_models import TriageResponse
+
+    canned = TriageResponse(
+        severity=2, blast_radius=[], affected_slos=[],
+        assigned_team=None, reasoning="", confidence=0.5,
+    )
+    agent = StructuredStubAgent(
+        model="claude-sonnet-4-20250514", max_tokens=100,
+        verdict_store=verdict_store, config={},
+    )
+
+    with patch(
+        "nthlayer_workers.respond.agents.base.structured_call_with_usage",
+        return_value=StructuredCallResult(
+            data=canned, usage=StructuredCallUsage(input_tokens=1, output_tokens=1),
+        ),
+    ), patch(
+        "nthlayer_workers.respond.agents.base.emit_llm_event",
+    ) as mock_emit:
+        await agent._call_model_structured("s", "u", TriageResponse)
+
+    assert mock_emit.call_args.kwargs["provider"] == "anthropic"

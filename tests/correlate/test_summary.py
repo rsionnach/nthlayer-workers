@@ -195,3 +195,34 @@ class TestGenerateSummary:
             [],
         )
         assert result is None
+
+
+def test_failure_telemetry_derives_the_provider_from_the_model():
+    """A bare Claude model is reported as anthropic, not "unknown" (opensrm-ju8r J4)."""
+    from unittest.mock import patch
+
+    from nthlayer_workers.correlate.summary import _record_failure
+
+    with patch("nthlayer_common.telemetry.emit_llm_event") as emit:
+        _record_failure(RuntimeError("boom"), "checkout", model="claude-sonnet-4-20250514")
+
+    emit.assert_called_once()
+    assert emit.call_args.kwargs["provider"] == "anthropic"
+
+
+def test_failure_telemetry_without_a_model_reports_the_default_model():
+    """correlate's worker passes no model; the call used common's DEFAULT_MODEL."""
+    from unittest.mock import patch
+
+    from nthlayer_common.llm import DEFAULT_MODEL
+
+    from nthlayer_workers.correlate.summary import _record_failure
+    from nthlayer_workers.llm_provider import provider_for_model
+
+    with patch("nthlayer_common.telemetry.emit_llm_event") as emit:
+        _record_failure(RuntimeError("boom"), "checkout")
+
+    kwargs = emit.call_args.kwargs
+    assert kwargs["model"] == DEFAULT_MODEL
+    assert kwargs["provider"] == provider_for_model(DEFAULT_MODEL)
+    assert kwargs["provider"] != "unknown"

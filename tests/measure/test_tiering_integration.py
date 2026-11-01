@@ -142,3 +142,33 @@ async def test_router_without_classifier_unchanged(
     await router.run()
 
     mock_evaluator.evaluate.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tier", ["minimal", "standard"], ids=["auto-approved", "evaluated"])
+async def test_router_emits_evaluation_telemetry_for_each_saved_score(
+    mock_evaluator, mock_store, mock_tracker, tier
+):
+    """Both router paths emit the A1 evaluation telemetry for the score they save (opensrm-ju8r)."""
+    from unittest.mock import patch
+
+    config = TieringConfig(
+        enabled=True, default_tier=tier, sampling_rate=0.0,
+        models={"standard": "anthropic/claude-haiku-4-20250414"},
+    )
+    classifier = TierClassifier(config, manifests={})
+
+    async def single_output():
+        yield _make_output()
+
+    adapter = AsyncMock()
+    adapter.receive = single_output
+    router = PipelineRouter(
+        adapter=adapter, evaluator=mock_evaluator, store=mock_store,
+        tracker=mock_tracker, dimensions=["correctness"], classifier=classifier,
+    )
+    with patch("nthlayer_workers.measure.pipeline.router.emit_evaluation_events") as emit:
+        await router.run()
+
+    emit.assert_called_once()
+    assert emit.call_args.args[0] is mock_store.save_score.call_args.args[0]

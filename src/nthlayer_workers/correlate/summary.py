@@ -151,7 +151,11 @@ def _select_sample_events(events: list[SitRepEvent], max_samples: int = 10) -> l
 def _record_failure(error: Exception, snapshot_service: str, model: str | None = None) -> None:
     """Record summary generation failure via logging + metrics."""
     reason = _classify_failure(error)
-    resolved_model = model or "default"
+    # No model means the call used nthlayer-common's default; report that
+    # model, so the provider can be derived from it (opensrm-ju8r J4).
+    from nthlayer_common.llm import DEFAULT_MODEL
+
+    resolved_model = model or DEFAULT_MODEL
     logger.warning(
         "correlate_summary_failed",
         reason=reason,
@@ -165,9 +169,11 @@ def _record_failure(error: Exception, snapshot_service: str, model: str | None =
         pass  # metrics infra may not be configured
     try:
         from nthlayer_common.telemetry import emit_llm_event
+
+        from nthlayer_workers.llm_provider import provider_for_model
         emit_llm_event(
             model=resolved_model,
-            provider="unknown",
+            provider=provider_for_model(resolved_model),
             caller="correlate.generate_summary",
             success=False,
             error=str(error),
