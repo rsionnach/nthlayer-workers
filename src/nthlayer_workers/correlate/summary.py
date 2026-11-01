@@ -165,9 +165,11 @@ def _record_failure(error: Exception, snapshot_service: str, model: str | None =
         pass  # metrics infra may not be configured
     try:
         from nthlayer_common.telemetry import emit_llm_event
+
+        from nthlayer_workers.llm_provider import provider_for_model
         emit_llm_event(
             model=resolved_model,
-            provider="unknown",
+            provider=provider_for_model(resolved_model),
             caller="correlate.generate_summary",
             success=False,
             error=str(error),

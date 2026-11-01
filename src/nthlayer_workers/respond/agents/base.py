@@ -16,6 +16,7 @@ from nthlayer_common.telemetry import emit_llm_event
 from nthlayer_common.verdicts import Verdict
 from nthlayer_common.verdicts import create as verdict_create
 
+from nthlayer_workers.llm_provider import provider_for_model
 from nthlayer_workers.respond.types import AgentRole, IncidentContext
 
 log = structlog.get_logger(__name__)
@@ -111,7 +112,7 @@ class AgentBase(ABC):
         existing ``parse_response`` (which accepts a JSON string and
         produces a dataclass result) can be reused without rewrite.
         """
-        provider = self._model.split("/", 1)[0] if "/" in self._model else "unknown"
+        provider = provider_for_model(self._model)
         caller = f"respond.{self.role.value}"
         try:
             result = await asyncio.wait_for(

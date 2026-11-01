@@ -195,3 +195,16 @@ class TestGenerateSummary:
             [],
         )
         assert result is None
+
+
+def test_failure_telemetry_derives_the_provider_from_the_model():
+    """A bare Claude model is reported as anthropic, not "unknown" (opensrm-ju8r J4)."""
+    from unittest.mock import patch
+
+    from nthlayer_workers.correlate.summary import _record_failure
+
+    with patch("nthlayer_common.telemetry.emit_llm_event") as emit:
+        _record_failure(RuntimeError("boom"), "checkout", model="claude-sonnet-4-20250514")
+
+    emit.assert_called_once()
+    assert emit.call_args.kwargs["provider"] == "anthropic"
