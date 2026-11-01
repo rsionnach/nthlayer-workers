@@ -18,6 +18,8 @@ from nthlayer_workers.llm_provider import provider_for_model
         ("anthropic/claude-sonnet-4-20250514", "anthropic"),
         ("openai/gpt-4o", "openai"),
         ("ollama/claude-lookalike", "ollama"),
+        # An empty prefix names nothing.
+        ("/claude-sonnet", "unknown"),
         # Bare model names from the two families whose provider is unambiguous.
         ("claude-sonnet-4-20250514", "anthropic"),
         ("gpt-4o", "openai"),

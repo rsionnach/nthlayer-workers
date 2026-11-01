@@ -43,15 +43,18 @@ def emit_decision_event(score: QualityScore, alerts: list[Alert] | None = None) 
     if not _HAS_OTEL:
         return
     span = trace.get_current_span()
+    # A1 §4.4: nthlayer.decision.id only when the decision is identifiable;
+    # some adapters leave task_id empty.
+    decision: dict[str, str] = {"nthlayer.decision.id": score.task_id} if score.task_id else {}
     if not score.auto_approved:
         for dimension, value in score.dimensions.items():
             span.add_event(
                 GRADER_EVENT,
                 attributes={
+                    **decision,
                     "gen_ai.evaluation.name": dimension,
                     "gen_ai.evaluation.score.value": value,
                     "nthlayer.evaluator.kind": "implementation",
-                    "nthlayer.decision.id": score.task_id,
                     "gen_ai.agent.name": score.agent_name,
                     "nthlayer.evaluation.id": score.eval_id,
                     "nthlayer.evaluator.model": score.evaluator_model,
@@ -59,8 +62,8 @@ def emit_decision_event(score: QualityScore, alerts: list[Alert] | None = None) 
                 },
             )
     summary: dict[str, str | float | int | bool] = {
+        **decision,
         "nthlayer.evaluation.id": score.eval_id,
-        "nthlayer.decision.id": score.task_id,
         "gen_ai.agent.name": score.agent_name,
         "nthlayer.evaluation.dimension_count": len(score.dimensions),
         "nthlayer.evaluation.auto_approved": score.auto_approved,
@@ -85,7 +88,7 @@ def emit_override_event(
 
     A1 §4.4: a human's verdict on a completion is a grader evaluation with
     ``nthlayer.evaluator.kind`` ``human``. ``decision_id`` is the evaluated
-    task; it is omitted when unknown.
+    task; it is omitted when unknown or empty.
     """
     if not _HAS_OTEL:
         return
@@ -98,7 +101,7 @@ def emit_override_event(
         "nthlayer.evaluation.original_score": original,
         "nthlayer.evaluator.actor": corrector,
     }
-    if decision_id is not None:
+    if decision_id:
         attributes["nthlayer.decision.id"] = decision_id
     span.add_event(GRADER_EVENT, attributes=attributes)
 

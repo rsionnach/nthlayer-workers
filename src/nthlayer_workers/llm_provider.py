@@ -24,7 +24,8 @@ _FAMILY_PREFIXES: tuple[tuple[str, str], ...] = (
 def provider_for_model(model: str) -> str:
     """Return the ``gen_ai.provider.name`` value for *model*."""
     if "/" in model:
-        return model.split("/", 1)[0]
+        prefix = model.split("/", 1)[0]
+        return prefix or UNKNOWN_PROVIDER
     for prefix, provider in _FAMILY_PREFIXES:
         if model.startswith(prefix):
             return provider

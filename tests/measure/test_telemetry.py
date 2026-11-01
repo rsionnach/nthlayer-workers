@@ -100,6 +100,17 @@ def test_auto_approved_output_is_not_a_grader_evaluation():
     assert "nthlayer.evaluation.alert_count" not in summary
 
 
+def test_empty_task_id_is_not_emitted_as_a_decision_id():
+    """A1 §4.4: omit nthlayer.decision.id when the decision is not identifiable."""
+    from nthlayer_workers.measure.telemetry import emit_decision_event, emit_override_event
+
+    events = _events(lambda: emit_decision_event(_make_score(task_id="")))
+    events += _events(lambda: emit_override_event("e1", "correctness", 0.9, 0.5, "r", decision_id=""))
+
+    assert events
+    assert not [n for n, a in events if "nthlayer.decision.id" in a]
+
+
 def test_noop_without_otel():
     with patch("nthlayer_workers.measure.telemetry._HAS_OTEL", False):
         from nthlayer_workers.measure.telemetry import emit_decision_event
