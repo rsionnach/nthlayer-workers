@@ -6,6 +6,19 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [4.0.0](https://github.com/rsionnach/nthlayer-workers/compare/v3.0.10...v4.0.0) (2026-11-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* every OTel event the measure module emits is renamed. gen_ai.decision.evaluated becomes one gen_ai.evaluation.result per scored dimension (nthlayer.evaluator.kind=implementation) plus one nthlayer.evaluation.completed summary per evaluation; auto-approved outputs emit the summary only. gen_ai.override.applied becomes a gen_ai.evaluation.result with nthlayer.evaluator.kind=human. gen_ai.calibration.report becomes nthlayer.calibration.report and gen_ai.agent.state.changed becomes nthlayer.autonomy.changed. Attribute keys move to gen_ai.evaluation.*, gen_ai.agent.name and nthlayer.*; see docs/upgrading-4.0.md. LLM-call events now report a derived gen_ai.provider.name instead of "unknown" for bare model names.
+
+### Bug Fixes
+
+* measure telemetry follows OpenSRM Addendum A1 (opensrm-ju8r) ([c195c49](https://github.com/rsionnach/nthlayer-workers/commit/c195c49c43b7521b098190d8e65f1d8d3a5e776b))
+* report the LLM provider derived from the model, not "unknown" (opensrm-ju8r) ([7c32022](https://github.com/rsionnach/nthlayer-workers/commit/7c320229e6d26fd35b93a49255886a7ad3f27461))
+* workers telemetry uses OpenSRM A1 event names (opensrm-ju8r) ([1fa2edb](https://github.com/rsionnach/nthlayer-workers/commit/1fa2edbb09a59855f26c97c4886e10aca9feba0c))
+
 ## [3.0.10](https://github.com/rsionnach/nthlayer-workers/compare/v3.0.9...v3.0.10) (2026-11-01)
 
 
