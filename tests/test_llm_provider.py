@@ -26,6 +26,9 @@ from nthlayer_workers.llm_provider import provider_for_model
         ("o1-mini", "openai"),
         ("o3", "openai"),
         # Nothing to go on: say so rather than guess.
+        # Not normalised: unrecognised spellings are unknown, not guessed.
+        ("Claude-sonnet", "unknown"),
+        ("anthropic.claude-3-sonnet", "unknown"),
         ("llama3", "unknown"),
         ("default", "unknown"),
         ("", "unknown"),

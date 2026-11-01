@@ -112,6 +112,15 @@ def test_empty_task_id_is_not_emitted_as_a_decision_id():
     assert not [n for n, a in events if "nthlayer.decision.id" in a]
 
 
+def test_evaluation_with_no_dimensions_emits_only_the_summary():
+    from nthlayer_workers.measure.telemetry import emit_evaluation_events
+
+    events = _events(lambda: emit_evaluation_events(_make_score(dimensions={})))
+
+    assert [n for n, _ in events] == ["nthlayer.evaluation.completed"]
+    assert events[0][1]["nthlayer.evaluation.dimension_count"] == 0
+
+
 def test_noop_without_otel():
     with patch("nthlayer_workers.measure.telemetry._HAS_OTEL", False):
         from nthlayer_workers.measure.telemetry import emit_evaluation_events
