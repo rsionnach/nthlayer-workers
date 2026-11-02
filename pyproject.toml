@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nthlayer-workers"
-version = "4.0.0"
+version = "4.0.1"
 description = "NthLayer workers — Tier 2 background computation (observe, measure, correlate, respond, learn)"
 readme = "README.md"
 license = {text = "Apache-2.0"}
