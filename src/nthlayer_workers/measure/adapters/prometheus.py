@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 from nthlayer_common.manifest import (
+    ERROR_BUDGET_REMAINING,
     ManifestLoadError,
     foreign_yaml_reason,
     iter_manifest_files,
@@ -120,7 +121,7 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
             # Deliberately NOT slo.indicator_query. evaluate_slos' branches
             # are hard-coded to the semantics of the synthesised queries:
             # availability breaches on `current < 0.0`, meaningful only for
-            # slo:error_budget:ratio, and judgment inverts, right only for
+            # the error-budget series, and judgment inverts, right only for
             # the overrides/decisions RATIO. A manifest's own query supplies
             # an SLI instead, which would make availability unbreachable and
             # double-invert judgment. Query and breach rule travel together.
@@ -148,7 +149,8 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
     a good-ratio SLI, seconds, or a signed error budget. Deriving it later
     from the SLO's name or type cannot work — that is precisely what broke.
 
-    Judgment SLOs get the interim raw-metric queries below. Everything else
+    Judgment SLOs get the interim raw-metric queries below. Availability-typed
+    classical SLOs read the error budget generate writes; everything else
     falls back to the recording-rule convention. Always returns a query: an
     SLO reaching evaluation with none would be dropped silently.
     """
@@ -163,8 +165,20 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
         if builder is not None:
             kind = _JUDGMENT_QUERY_KINDS[slo.judgment_type]
             return builder(service, slo.window or "7d"), kind
-    if name == "availability":
-        return f'slo:error_budget:ratio{{service="{service}"}}', "error_budget"
+    if not slo.judgment_type and "availability" in (slo.slo_type or name).lower():
+        # The right-hand test is generate's, verbatim (manifest_builder.py
+        # `_build_standard_slo_rules`): keyed by type, falling back to the
+        # name only when no type is set. Substring and lower() because srm/v1
+        # and legacy pass an explicit `type:` through unnormalised (opensrm-hiw2). The
+        # left-hand `not judgment_type` stands in for generate only ever
+        # passing classical SLOs there; judgment SLOs are availability-shaped
+        # too, and one with no builder above keeps the fallback below. The
+        # selector filters to this SLO, as each series carries slo=<name>
+        # (opensrm-h0at).
+        return (
+            ERROR_BUDGET_REMAINING.selector(service=service, slo=name),
+            "error_budget",
+        )
     if name == "latency":
         percentile = slo.percentile or "p99"
         return (
@@ -416,7 +430,7 @@ async def evaluate_slos(
                 sli_pct = (1.0 - current_value) * 100
                 raw_breach = sli_pct < slo.target
             elif slo.query_kind == "error_budget":
-                # slo:error_budget:ratio is signed — negative is overspent.
+                # The error budget is signed — negative is overspent.
                 # The target is not consulted; it is baked into the rule.
                 raw_breach = current_value < 0.0
             elif slo.query_kind == "latency_seconds":
