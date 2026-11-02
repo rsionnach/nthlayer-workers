@@ -164,11 +164,14 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
         if builder is not None:
             kind = _JUDGMENT_QUERY_KINDS[slo.judgment_type]
             return builder(service, slo.window or "7d"), kind
-    if slo.slo_type == "availability" and not slo.judgment_type:
-        # Keyed by slo_type, not name, and filtered to this SLO: generate
-        # writes the error budget for every availability-typed SLO, labelled
-        # with its name (opensrm-h0at). Judgment SLOs are availability-shaped
-        # too; one with no builder above keeps the fallback below.
+    if not slo.judgment_type and "availability" in (slo.slo_type or name).lower():
+        # generate's own test for writing the error budget, verbatim
+        # (manifest_builder.py `_build_standard_slo_rules`), so the reader asks for
+        # exactly the series the writer wrote: keyed by type, not name, and
+        # filtered to this SLO (opensrm-h0at). Substring and lower() because
+        # srm/v1 and legacy pass an explicit `type:` through unnormalised.
+        # Judgment SLOs are availability-shaped too; one with no builder
+        # above keeps the fallback below.
         return (
             ERROR_BUDGET_REMAINING.selector(service=service, slo=name),
             "error_budget",

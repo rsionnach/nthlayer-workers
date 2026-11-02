@@ -1051,3 +1051,16 @@ def test_an_unbuilt_judgment_slo_does_not_read_the_error_budget():
 
     assert ERROR_BUDGET_REMAINING.metric not in query
     assert kind == "ratio"
+
+
+def test_an_explicit_type_is_matched_as_generate_matches_it():
+    """srm/v1 (parser/v1.py) and legacy (parser/loader.py) keep an explicit
+    `type:` exactly as written; generate writes the error budget whenever
+    "availability" is in it, case-insensitively."""
+    explicit = ManifestSLO(name="checkout-avail", target=99.9,
+                           slo_type="Availability", window="30d")
+
+    query, kind = _query_for("s", explicit)
+
+    assert query == ERROR_BUDGET_REMAINING.selector(service="s", slo="checkout-avail")
+    assert kind == "error_budget"
