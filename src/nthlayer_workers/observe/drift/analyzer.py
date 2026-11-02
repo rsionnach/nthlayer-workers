@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import numpy as np
+from nthlayer_common.manifest import ERROR_BUDGET_REMAINING
 from scipy import stats
 
 from nthlayer_workers.observe.drift.models import (
@@ -159,7 +160,7 @@ class DriftAnalyzer:
         """Query error budget over time window."""
         import httpx
 
-        query = f'slo:error_budget_remaining:ratio{{service="{service}", slo="{slo}"}}'
+        query = ERROR_BUDGET_REMAINING.selector(service=service, slo=slo)
 
         end = datetime.now(UTC)
         start = end - self._parse_duration(window)

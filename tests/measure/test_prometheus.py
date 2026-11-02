@@ -2,9 +2,11 @@
 """Tests for the Prometheus polling adapter with mocked HTTP responses."""
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from nthlayer_common.manifest import ERROR_BUDGET_REMAINING
 from nthlayer_common.manifest.models import SLODefinition as ManifestSLO
 
 from nthlayer_workers.measure.adapters.prometheus import (
@@ -616,7 +618,7 @@ class TestQueryAndBreachLogicAreAMatchedPair:
     hard-coded to the semantics of its OWN synthesised queries.
 
     `availability` breaches on `current < 0.0`, which is only meaningful for
-    the synthesised `slo:error_budget:ratio`. Judgment SLOs invert
+    the synthesised error-budget series. Judgment SLOs invert
     (`(1-rate)*100`), which is only right for the synthesised
     overrides/decisions RATIO — measure/worker.py does not invert because it
     feeds get_sli_value(indicator_query), whose value is already an SLI.
@@ -638,7 +640,9 @@ class TestQueryAndBreachLogicAreAMatchedPair:
 
         slo = load_specs(tmp_path).slos[0]
 
-        assert "slo:error_budget:ratio" in slo.query, (
+        assert slo.query == ERROR_BUDGET_REMAINING.selector(
+            service="svc", slo="availability"
+        ), (
             "availability's breach check is `current < 0.0`, which only the "
             "synthesised error-budget query can satisfy"
         )
@@ -834,13 +838,16 @@ async def test_latency_rule_follows_the_query_not_the_slo_name(verdict_store):
 
 def test_query_for_reports_the_breach_rule_with_the_query():
     """_query_for's invariant, as a returned value rather than a comment."""
-    rate = ManifestSLO(name="rev", target=98.5, slo_type="judgment",
+    # slo_type as the parsers set it: judgment SLOs are "availability"-shaped
+    # (nthlayer-common SLODefinition docstring), classical ones carry their
+    # kind. "judgment" and "traditional" are not values any parser writes.
+    rate = ManifestSLO(name="rev", target=98.5, slo_type="availability",
                        window="5m", judgment_type="reversal_rate")
-    unbuilt = ManifestSLO(name="seg", target=98.0, slo_type="judgment",
+    unbuilt = ManifestSLO(name="seg", target=98.0, slo_type="availability",
                           window="5m", judgment_type="segment_disparity")
-    latency = ManifestSLO(name="latency", target=100.0, slo_type="traditional",
+    latency = ManifestSLO(name="latency", target=100.0, slo_type="latency",
                           window="30d")
-    avail = ManifestSLO(name="availability", target=99.9, slo_type="traditional",
+    avail = ManifestSLO(name="availability", target=99.9, slo_type="availability",
                         window="30d")
 
     assert _query_for("s", rate)[1] == "judgment_rate"
@@ -997,3 +1004,50 @@ def test_a_non_string_unit_warns_rather_than_aborting_the_cycle():
     from nthlayer_workers.measure.adapters.prometheus import _target_seconds
 
     assert _target_seconds(2.0, 100) == pytest.approx(0.002)  # assumes ms
+
+
+# --- opensrm-h0at: measure reads the error-budget series generate writes ---
+
+# The spec's own v2 example, not a fixture written for this test. CI checks
+# opensrm out as a sibling (test.yml), as for measure/thresholds/test_phase.py;
+# a missing file fails here, it does not skip.
+_API_FULL_V2 = (
+    Path(__file__).resolve().parents[3]
+    / "opensrm" / "spec" / "v2" / "examples" / "migration" / "api-full-v2.yaml"
+)
+
+
+def test_a_v2_availability_slo_reads_the_series_generate_writes(tmp_path):
+    """v2 names SLOs freely: this one is `payment-api-availability`.
+
+    measure keyed the error-budget branch on the NAME `availability`, so every
+    such SLO fell through to `slo:payment-api-availability:ratio`, a series
+    nothing writes, and read as no data. generate writes the error budget for
+    every availability-typed SLO, labelled with the SLO's name.
+    """
+    (tmp_path / "payment-api.yaml").write_text(_API_FULL_V2.read_text())
+
+    by_name = {s.slo_name: s for s in load_specs(tmp_path).slos}
+
+    avail = by_name["payment-api-availability"]
+    assert avail.query == ERROR_BUDGET_REMAINING.selector(
+        service="payment-api", slo="payment-api-availability"
+    )
+    assert avail.query_kind == "error_budget"
+    # The same manifest's non-availability SLOs keep their own queries.
+    for name in ("payment-api-latency", "payment-api-error-rate"):
+        assert ERROR_BUDGET_REMAINING.metric not in by_name[name].query, name
+        assert by_name[name].query_kind != "error_budget", name
+
+
+def test_an_unbuilt_judgment_slo_does_not_read_the_error_budget():
+    """Judgment SLOs parse with slo_type="availability" too. One with no
+    builder must not be sent to the error-budget branch: its breach rule
+    (`current < 0.0`) is meaningless for a judgment rate."""
+    unbuilt = ManifestSLO(name="seg", target=98.0, slo_type="availability",
+                          window="5m", judgment_type="segment_disparity")
+
+    query, kind = _query_for("s", unbuilt)
+
+    assert ERROR_BUDGET_REMAINING.metric not in query
+    assert kind == "ratio"

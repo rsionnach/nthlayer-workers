@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import httpx
 import structlog
+from nthlayer_common.manifest import ERROR_BUDGET_REMAINING
 
 from nthlayer_workers.correlate.types import EventType, SitRepEvent
 
@@ -60,10 +61,11 @@ async def fetch_metric_breaches(
     now = datetime.now(UTC)
 
     for service in services:
-        # Check error budget
+        # Check error budget: the worst across the service's SLOs, since
+        # generate writes one series per availability SLO (opensrm-h0at).
         budget = await _query_instant(
             client, prometheus_url,
-            f'slo:error_budget:ratio{{service="{service}"}}',
+            f"min({ERROR_BUDGET_REMAINING.selector(service=service)})",
         )
         if budget is not None and budget < 0.0:
             events.append(SitRepEvent(
@@ -75,7 +77,7 @@ async def fetch_metric_breaches(
                 environment="production",
                 severity=min(1.0, abs(budget) * 5),  # 20% deficit → severity 1.0
                 payload={
-                    "metric": "slo:error_budget:ratio",
+                    "metric": ERROR_BUDGET_REMAINING.metric,
                     "value": budget,
                     "breach": "error_budget_exhausted",
                 },

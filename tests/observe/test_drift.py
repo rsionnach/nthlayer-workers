@@ -349,3 +349,36 @@ class TestDriftCLI:
         assert "--service" in captured.out
         assert "--prometheus-url" in captured.out
         assert "--tier" in captured.out
+
+
+# --- opensrm-h0at: drift reads the error-budget series through the contract ---
+
+
+@pytest.mark.asyncio
+async def test_budget_history_queries_the_shared_error_budget_series(monkeypatch):
+    import httpx
+    from nthlayer_common.manifest import ERROR_BUDGET_REMAINING
+
+    sent: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request.url.params["query"])
+        # Prometheus HTTP API range-query shape.
+        return httpx.Response(200, json={"status": "success", "data": {
+            "resultType": "matrix",
+            "result": [{"metric": {}, "values": [[1730000000, "0.8"]]}],
+        }})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
+    )
+
+    analyzer = DriftAnalyzer(prometheus_url="http://prom")
+    data = await analyzer._query_budget_history("checkout", "7d", slo="checkout-availability")
+
+    assert sent == [
+        ERROR_BUDGET_REMAINING.selector(service="checkout", slo="checkout-availability")
+    ]
+    assert [v for _, v in data] == [0.8]

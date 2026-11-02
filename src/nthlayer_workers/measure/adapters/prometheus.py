@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 from nthlayer_common.manifest import (
+    ERROR_BUDGET_REMAINING,
     ManifestLoadError,
     foreign_yaml_reason,
     iter_manifest_files,
@@ -120,7 +121,7 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
             # Deliberately NOT slo.indicator_query. evaluate_slos' branches
             # are hard-coded to the semantics of the synthesised queries:
             # availability breaches on `current < 0.0`, meaningful only for
-            # slo:error_budget:ratio, and judgment inverts, right only for
+            # the error-budget series, and judgment inverts, right only for
             # the overrides/decisions RATIO. A manifest's own query supplies
             # an SLI instead, which would make availability unbreachable and
             # double-invert judgment. Query and breach rule travel together.
@@ -163,8 +164,15 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
         if builder is not None:
             kind = _JUDGMENT_QUERY_KINDS[slo.judgment_type]
             return builder(service, slo.window or "7d"), kind
-    if name == "availability":
-        return f'slo:error_budget:ratio{{service="{service}"}}', "error_budget"
+    if slo.slo_type == "availability" and not slo.judgment_type:
+        # Keyed by slo_type, not name, and filtered to this SLO: generate
+        # writes the error budget for every availability-typed SLO, labelled
+        # with its name (opensrm-h0at). Judgment SLOs are availability-shaped
+        # too; one with no builder above keeps the fallback below.
+        return (
+            ERROR_BUDGET_REMAINING.selector(service=service, slo=name),
+            "error_budget",
+        )
     if name == "latency":
         percentile = slo.percentile or "p99"
         return (
@@ -416,7 +424,7 @@ async def evaluate_slos(
                 sli_pct = (1.0 - current_value) * 100
                 raw_breach = sli_pct < slo.target
             elif slo.query_kind == "error_budget":
-                # slo:error_budget:ratio is signed — negative is overspent.
+                # The error budget is signed — negative is overspent.
                 # The target is not consulted; it is baked into the rule.
                 raw_breach = current_value < 0.0
             elif slo.query_kind == "latency_seconds":

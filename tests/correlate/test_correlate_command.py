@@ -177,7 +177,7 @@ def test_correlate_command_writes_correlation_verdict(specs_dir, tmp_path):
             service="fraud-detect",
             environment="production",
             severity=0.7,
-            payload={"metric": "slo:error_budget:ratio", "value": -0.05},
+            payload={"metric": "slo:error_budget_remaining:ratio", "value": -0.05},
         )]
 
     from nthlayer_workers.correlate.cli import correlate_command
@@ -285,7 +285,7 @@ def _setup_trigger_and_mocks(specs_dir, tmp_path):
             id="breach-1", timestamp="2026-03-25T10:01:00Z",
             source="prometheus", type=EventType.METRIC_BREACH,
             service="fraud-detect", environment="production",
-            severity=0.7, payload={"metric": "slo:error_budget:ratio", "value": -0.05},
+            severity=0.7, payload={"metric": "slo:error_budget_remaining:ratio", "value": -0.05},
         )]
 
     return store_path, trigger.id, mock_fetch_alerts, mock_fetch_breaches
@@ -465,3 +465,38 @@ def test_trace_baseline_window_passed_through(specs_dir, tmp_path):
     # Verify baseline_window was passed as timedelta(hours=2)
     call_kwargs = mock_backend.get_trace_evidence.call_args
     assert call_kwargs[1]["baseline_window"] == timedelta(hours=2)
+
+
+# --- opensrm-h0at: correlate reads the error-budget series generate writes ---
+
+
+@pytest.mark.asyncio
+async def test_metric_breaches_read_the_error_budget_series_generate_writes():
+    """correlate queried slo:error_budget:ratio, which nothing writes, so it
+    never saw an exhausted budget. It has no SLO in hand, so it asks for the
+    service's worst budget across all its SLOs."""
+    import httpx
+    from nthlayer_common.manifest import ERROR_BUDGET_REMAINING
+
+    from nthlayer_workers.correlate.prometheus import fetch_metric_breaches
+
+    budget_query = f"min({ERROR_BUDGET_REMAINING.selector(service='checkout')})"
+    sent: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        query = request.url.params["query"]
+        sent.append(query)
+        # Prometheus HTTP API instant-query shape; an aggregation drops labels.
+        result = [{"metric": {}, "value": [1730000000, "-0.05"]}] if query == budget_query else []
+        return httpx.Response(
+            200, json={"status": "success", "data": {"resultType": "vector", "result": result}}
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        events = await fetch_metric_breaches(client, "http://prom", {"checkout"})
+
+    assert budget_query in sent
+    budget = [e for e in events if e.payload.get("breach") == "error_budget_exhausted"]
+    assert len(budget) == 1
+    assert budget[0].payload["metric"] == ERROR_BUDGET_REMAINING.metric
+    assert budget[0].payload["value"] == -0.05
