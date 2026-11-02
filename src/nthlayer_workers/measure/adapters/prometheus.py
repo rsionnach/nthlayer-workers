@@ -149,7 +149,8 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
     a good-ratio SLI, seconds, or a signed error budget. Deriving it later
     from the SLO's name or type cannot work — that is precisely what broke.
 
-    Judgment SLOs get the interim raw-metric queries below. Everything else
+    Judgment SLOs get the interim raw-metric queries below. Availability-typed
+    classical SLOs read the error budget generate writes; everything else
     falls back to the recording-rule convention. Always returns a query: an
     SLO reaching evaluation with none would be dropped silently.
     """
@@ -165,13 +166,15 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
             kind = _JUDGMENT_QUERY_KINDS[slo.judgment_type]
             return builder(service, slo.window or "7d"), kind
     if not slo.judgment_type and "availability" in (slo.slo_type or name).lower():
-        # generate's own test for writing the error budget, verbatim
-        # (manifest_builder.py `_build_standard_slo_rules`), so the reader asks for
-        # exactly the series the writer wrote: keyed by type, not name, and
-        # filtered to this SLO (opensrm-h0at). Substring and lower() because
-        # srm/v1 and legacy pass an explicit `type:` through unnormalised.
-        # Judgment SLOs are availability-shaped too; one with no builder
-        # above keeps the fallback below.
+        # The right-hand test is generate's, verbatim (manifest_builder.py
+        # `_build_standard_slo_rules`): keyed by type, falling back to the
+        # name only when no type is set. Substring and lower() because srm/v1
+        # and legacy pass an explicit `type:` through unnormalised. The
+        # left-hand `not judgment_type` stands in for generate only ever
+        # passing classical SLOs there; judgment SLOs are availability-shaped
+        # too, and one with no builder above keeps the fallback below. The
+        # selector filters to this SLO, as each series carries slo=<name>
+        # (opensrm-h0at).
         return (
             ERROR_BUDGET_REMAINING.selector(service=service, slo=name),
             "error_budget",

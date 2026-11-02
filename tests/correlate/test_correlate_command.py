@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+from nthlayer_common.manifest import ERROR_BUDGET_REMAINING
 
 from nthlayer_workers.correlate.prometheus import (
     blast_radius_services,
@@ -177,7 +178,7 @@ def test_correlate_command_writes_correlation_verdict(specs_dir, tmp_path):
             service="fraud-detect",
             environment="production",
             severity=0.7,
-            payload={"metric": "slo:error_budget_remaining:ratio", "value": -0.05},
+            payload={"metric": ERROR_BUDGET_REMAINING.metric, "value": -0.05},
         )]
 
     from nthlayer_workers.correlate.cli import correlate_command
@@ -285,7 +286,7 @@ def _setup_trigger_and_mocks(specs_dir, tmp_path):
             id="breach-1", timestamp="2026-03-25T10:01:00Z",
             source="prometheus", type=EventType.METRIC_BREACH,
             service="fraud-detect", environment="production",
-            severity=0.7, payload={"metric": "slo:error_budget_remaining:ratio", "value": -0.05},
+            severity=0.7, payload={"metric": ERROR_BUDGET_REMAINING.metric, "value": -0.05},
         )]
 
     return store_path, trigger.id, mock_fetch_alerts, mock_fetch_breaches
@@ -476,7 +477,6 @@ async def test_metric_breaches_read_the_error_budget_series_generate_writes():
     never saw an exhausted budget. It has no SLO in hand, so it asks for the
     service's worst budget across all its SLOs."""
     import httpx
-    from nthlayer_common.manifest import ERROR_BUDGET_REMAINING
 
     from nthlayer_workers.correlate.prometheus import fetch_metric_breaches
 
