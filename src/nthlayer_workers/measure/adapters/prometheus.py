@@ -169,7 +169,7 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
         # The right-hand test is generate's, verbatim (manifest_builder.py
         # `_build_standard_slo_rules`): keyed by type, falling back to the
         # name only when no type is set. Substring and lower() because srm/v1
-        # and legacy pass an explicit `type:` through unnormalised. The
+        # and legacy pass an explicit `type:` through unnormalised (opensrm-hiw2). The
         # left-hand `not judgment_type` stands in for generate only ever
         # passing classical SLOs there; judgment SLOs are availability-shaped
         # too, and one with no builder above keeps the fallback below. The

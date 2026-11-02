@@ -1054,9 +1054,12 @@ def test_an_unbuilt_judgment_slo_does_not_read_the_error_budget():
 
 
 def test_an_explicit_type_is_matched_as_generate_matches_it():
-    """srm/v1 (parser/v1.py) and legacy (parser/loader.py) keep an explicit
-    `type:` exactly as written; generate writes the error budget whenever
-    "availability" is in it, case-insensitively."""
+    """measure must ask for every series generate writes, and generate's test
+    is case-insensitive (manifest_builder.py `_build_standard_slo_rules`,
+    `"availability" in slo_type.lower()`). The shape is not spec-valid: the
+    v1 schema has no SLO `type` field. It is reachable only because
+    parser/v1.py and parser/loader.py pass an explicit type through
+    unnormalised (opensrm-hiw2)."""
     explicit = ManifestSLO(name="checkout-avail", target=99.9,
                            slo_type="Availability", window="30d")
 
