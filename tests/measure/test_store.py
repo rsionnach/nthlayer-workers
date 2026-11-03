@@ -1,5 +1,6 @@
 """Tests for SQLiteScoreStore — round-trip save/get for scores, overrides, autonomy."""
 
+import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -176,3 +177,53 @@ async def test_autonomy_event_time_is_the_stored_change_time(store):
         "SELECT created_at FROM governance_log WHERE agent_name = 'agent-a'"
     ).fetchone()
     assert event.timestamp == _iso_ns(row["updated_at"]) == _iso_ns(log["created_at"])
+
+
+def _committed(store, sql: str) -> list:
+    """Rows a separate connection sees, i.e. what is durably committed."""
+    import sqlite3
+
+    conn = sqlite3.connect(str(store._db_path))
+    try:
+        return conn.execute(sql).fetchall()
+    finally:
+        conn.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_override_is_rolled_back_not_committed_by_a_later_write(store):
+    """A write that fails on its second dimension leaves nothing pending: a
+    later unrelated commit must not persist the first dimension's row, which
+    would be a stored correction with no grader event."""
+    from nthlayer_common.telemetry import capture_events
+
+    await store.save_score(_make_score(eval_id="e1"))
+    with capture_events() as cap:
+        with pytest.raises(sqlite3.Error):
+            # A value sqlite cannot bind fails the second INSERT.
+            await store.save_override("e1", {"correctness": 0.5, "style": object()}, "rob")
+        await store.set_autonomy("agent-a", "supervised", "governance")
+
+    assert _committed(store, "SELECT dimension FROM overrides") == []
+    assert cap.named("gen_ai.evaluation.result") == []
+
+
+@pytest.mark.asyncio
+async def test_failed_autonomy_change_is_rolled_back_not_committed_by_a_later_write(store):
+    """If the governance-log INSERT fails, the level upsert before it must not
+    be committed by the next write: a changed level with no transition event
+    and no log entry."""
+    from nthlayer_common.telemetry import capture_events
+
+    store._conn.execute(
+        "CREATE TEMP TRIGGER fail_log BEFORE INSERT ON governance_log "
+        "BEGIN SELECT RAISE(ABORT, 'injected'); END"
+    )
+    with capture_events() as cap:
+        with pytest.raises(sqlite3.IntegrityError):
+            await store.set_autonomy("agent-a", "supervised", "governance")
+        store._conn.execute("DROP TRIGGER fail_log")
+        await store.save_score(_make_score(eval_id="e1"))
+
+    assert _committed(store, "SELECT level FROM agent_autonomy") == []
+    assert cap.named("nthlayer.autonomy.changed") == []
