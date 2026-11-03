@@ -62,7 +62,7 @@ class SQLiteScoreStore:
                     raise
 
     def _save_score_sync(self, score: QualityScore) -> None:
-        with self._lock:
+        with self._lock, self._rolled_back_on_error():
             self._conn.execute(
                 "INSERT INTO evaluations (eval_id, agent_name, task_id, evaluator_model, confidence, cost_usd, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",

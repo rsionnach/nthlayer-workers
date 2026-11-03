@@ -227,3 +227,14 @@ async def test_failed_autonomy_change_is_rolled_back_not_committed_by_a_later_wr
 
     assert _committed(store, "SELECT level FROM agent_autonomy") == []
     assert cap.named("nthlayer.autonomy.changed") == []
+
+
+@pytest.mark.asyncio
+async def test_failed_score_is_rolled_back_not_committed_by_a_later_write(store):
+    """An evaluation whose dimension INSERT fails must not be persisted, with
+    missing dimensions, by the next unrelated commit."""
+    with pytest.raises(sqlite3.Error):
+        await store.save_score(_make_score(eval_id="e1", dimensions={"correctness": object()}))
+    await store.set_autonomy("agent-a", "supervised", "governance")
+
+    assert _committed(store, "SELECT eval_id FROM evaluations") == []
