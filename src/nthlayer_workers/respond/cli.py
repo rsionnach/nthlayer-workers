@@ -15,7 +15,7 @@ import yaml
 from nthlayer_common.telemetry import init_telemetry
 from nthlayer_common.verdicts import MemoryStore, SQLiteVerdictStore
 
-from nthlayer_workers import TELEMETRY_SERVICE_NAME, log_telemetry_status
+from nthlayer_workers import TELEMETRY_SERVICE_NAME
 from nthlayer_workers.respond.agents.communication import CommunicationAgent
 from nthlayer_workers.respond.agents.investigation import InvestigationAgent
 from nthlayer_workers.respond.agents.remediation import RemediationAgent
@@ -553,7 +553,7 @@ def main() -> None:
     """CLI entry point."""
     parser = build_parser()
     args = parser.parse_args()
-    log_telemetry_status(init_telemetry(TELEMETRY_SERVICE_NAME))
+    init_telemetry(TELEMETRY_SERVICE_NAME)
 
     if args.command is None:
         parser.print_help()

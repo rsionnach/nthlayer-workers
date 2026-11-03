@@ -24,11 +24,11 @@ events must read them as logs instead.
 To export them, set an OTLP endpoint (`OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` or
 `OTEL_EXPORTER_OTLP_ENDPOINT`). The exporter is gRPC only, so point it at a
 collector's gRPC port (4317, not 4318); `OTEL_EXPORTER_OTLP_PROTOCOL` is not
-read. Every workers CLI calls nthlayer-common's `init_telemetry` at startup
-and logs its result at debug level. All of them report `service.name`
-`nthlayer-workers`; set `OTEL_SERVICE_NAME` per process to tell them apart.
-The SDK and gRPC exporter (`nthlayer-common[otel]`, which pulls in grpcio and
-protobuf) are now installed with workers. Query the events as logs, not spans. A one-shot CLI
+read. Every workers CLI calls nthlayer-common's `init_telemetry` at
+startup. All of them report `service.name` `nthlayer-workers`; set
+`OTEL_SERVICE_NAME` per process to tell them apart. The SDK and gRPC exporter
+(`nthlayer-common[otel]`, which pulls in grpcio and protobuf) are now
+installed with workers. Query the events as logs, not spans. A one-shot CLI
 command flushes its events as it exits, and with the collector unreachable it
 waits up to `OTEL_EXPORTER_OTLP_TIMEOUT` (10s by default) to do so; set it
 lower where that matters, e.g. in scripts.

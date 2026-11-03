@@ -16,7 +16,7 @@ from nthlayer_common.verdicts.serialise import to_dict
 from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
 from nthlayer_common.verdicts.store import AccuracyFilter, VerdictFilter
 
-from nthlayer_workers import TELEMETRY_SERVICE_NAME, log_telemetry_status
+from nthlayer_workers import TELEMETRY_SERVICE_NAME
 from nthlayer_workers.learn._apply import apply_recommendations, format_summary
 from nthlayer_workers.learn._gh import (
     PreflightError,
@@ -534,7 +534,7 @@ def main(argv: list[str] | None = None) -> None:
     _add_recommendations_subcommand(sub)
 
     args = parser.parse_args(argv)
-    log_telemetry_status(init_telemetry(TELEMETRY_SERVICE_NAME))
+    init_telemetry(TELEMETRY_SERVICE_NAME)
 
     if args.command == "accuracy":
         _cmd_accuracy(args)
