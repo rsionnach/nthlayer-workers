@@ -4,6 +4,8 @@ import argparse
 import asyncio
 import sys
 
+from nthlayer_common.telemetry import init_telemetry
+
 from nthlayer_workers import __version__
 from nthlayer_workers.runner import ModuleRunner
 
@@ -58,6 +60,9 @@ def main():
                              help="Core API URL (default: http://localhost:8000)")
 
     args = parser.parse_args()
+    # Before any subcommand runs, so its events export (opensrm-quqo); a no-op
+    # without an OTLP endpoint.
+    init_telemetry("nthlayer-workers")
 
     if args.command == "serve":
         from nthlayer_common.api_client import CoreAPIClient

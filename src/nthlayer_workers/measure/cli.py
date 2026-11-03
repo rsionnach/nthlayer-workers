@@ -13,6 +13,8 @@ from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from nthlayer_common.telemetry import init_telemetry
+
 from nthlayer_workers.measure.config import MeasureConfig, load_config
 
 if TYPE_CHECKING:
@@ -539,6 +541,9 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    # Before any subcommand runs, so its events export (opensrm-quqo); a no-op
+    # without an OTLP endpoint.
+    init_telemetry("nthlayer-workers")
 
     handlers = {
         "evaluate": cmd_evaluate,

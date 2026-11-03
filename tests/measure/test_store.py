@@ -127,11 +127,50 @@ async def test_override_telemetry_names_the_evaluated_task(store):
     The store looks the task up from the evaluation (opensrm-ju8r); the
     corrector does not supply it.
     """
-    from unittest.mock import patch
+    from nthlayer_common.telemetry import capture_events
 
     await store.save_score(_make_score(eval_id="e1", task="task-42"))
-    with patch("nthlayer_workers.measure.store.sqlite.emit_correction_event") as emit:
+    with capture_events() as cap:
         await store.save_override("e1", {"correctness": 0.5}, "reviewer")
 
-    emit.assert_called_once()
-    assert emit.call_args.kwargs["decision_id"] == "task-42"
+    (event,) = cap.named("gen_ai.evaluation.result")
+    assert event.attributes["nthlayer.decision.id"] == "task-42"
+
+
+def _iso_ns(text: str) -> int:
+    """Unix nanoseconds of a stored ``...T...Z`` timestamp."""
+    dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    return int(dt.timestamp()) * 10**9 + dt.microsecond * 1000
+
+
+@pytest.mark.asyncio
+async def test_override_event_time_is_the_stored_correction_time(store):
+    """A1 T1: the human grader event carries when the correction was made,
+    the same time the store records for it."""
+    from nthlayer_common.telemetry import capture_events
+
+    await store.save_score(_make_score(eval_id="e1"))
+    with capture_events() as cap:
+        await store.save_override("e1", {"correctness": 0.5, "style": 0.4}, "reviewer")
+
+    stored = await store.get_overrides(since=datetime(2000, 1, 1, tzinfo=UTC))
+    events = cap.named("gen_ai.evaluation.result")
+    assert len(stored) == len(events) == 2
+    assert {e.timestamp for e in events} == {_iso_ns(o["created_at"]) for o in stored}
+
+
+@pytest.mark.asyncio
+async def test_autonomy_event_time_is_the_stored_change_time(store):
+    from nthlayer_common.telemetry import capture_events
+
+    with capture_events() as cap:
+        await store.set_autonomy("agent-a", "supervised", "governance")
+
+    (event,) = cap.named("nthlayer.autonomy.changed")
+    row = store._conn.execute(
+        "SELECT updated_at FROM agent_autonomy WHERE agent_name = 'agent-a'"
+    ).fetchone()
+    log = store._conn.execute(
+        "SELECT created_at FROM governance_log WHERE agent_name = 'agent-a'"
+    ).fetchone()
+    assert event.timestamp == _iso_ns(row["updated_at"]) == _iso_ns(log["created_at"])

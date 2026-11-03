@@ -10,6 +10,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from nthlayer_common.errors import main_with_error_handling
+from nthlayer_common.telemetry import init_telemetry
 
 from nthlayer_workers.cli_output import warn_parse_failures
 
@@ -728,6 +729,9 @@ def main(argv: list[str] | None = None) -> int:
     vr_parser.add_argument("--incident", default=None, help="Incident ID to verify")
 
     args = parser.parse_args(argv)
+    # Before any subcommand runs, so its events export (opensrm-quqo); a no-op
+    # without an OTLP endpoint.
+    init_telemetry("nthlayer-workers")
 
     dispatch = {
         "collect": _cmd_collect,

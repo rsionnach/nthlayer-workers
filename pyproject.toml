@@ -56,7 +56,10 @@ dependencies = [
     # nthlayer-common's evaluate_threshold (CORE §5.5.6) and read from core 3.0's
     # /manifests via threshold_from_v2_entry; error magnitudes are no longer
     # SLOs (decision 3c, common 4.0/5.0). See nthlayer-common/docs/upgrading-5.0.md.
-    "nthlayer-common>=5.11.0,<6.0.0",
+    # [otel] (opensrm-quqo): the OTel SDK and OTLP log exporter, so the events
+    # workers emits are exported once init_telemetry finds an endpoint. Without
+    # them every event is dropped, which is how they all went missing.
+    "nthlayer-common[otel]>=5.11.0,<6.0.0",
     "httpx>=0.27",
     "pyyaml>=6.0",
     "structlog>=24.1.0",

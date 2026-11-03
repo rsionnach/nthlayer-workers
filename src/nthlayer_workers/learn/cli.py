@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from nthlayer_common.telemetry import init_telemetry
 from nthlayer_common.verdicts.serialise import to_dict
 from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
 from nthlayer_common.verdicts.store import AccuracyFilter, VerdictFilter
@@ -532,6 +533,9 @@ def main(argv: list[str] | None = None) -> None:
     _add_recommendations_subcommand(sub)
 
     args = parser.parse_args(argv)
+    # Before any subcommand runs, so its events export (opensrm-quqo); a no-op
+    # without an OTLP endpoint.
+    init_telemetry("nthlayer-workers")
 
     if args.command == "accuracy":
         _cmd_accuracy(args)

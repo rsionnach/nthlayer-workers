@@ -4,9 +4,15 @@ Event shapes follow OpenSRM Addendum A1 (opensrm-ju8r): measure's scores are
 grader evaluations, emitted as the upstream ``gen_ai.evaluation.result``
 (A1 §4.4); the rest are ``nthlayer.*`` implementation events. No ``gen_ai.``
 form of an OpenSRM-defined event is emitted (A1 §4.0).
+
+Every event is an OTel log record (opensrm-quqo), asserted on through
+nthlayer-common's ``capture_events()``, whose Timestamp is the event's own
+time (A1 T1).
 """
 
-from unittest.mock import MagicMock, patch
+from datetime import UTC, datetime
+
+from nthlayer_common.telemetry import capture_events
 
 from nthlayer_workers.measure.detection.protocol import Alert
 from nthlayer_workers.measure.types import QualityScore
@@ -34,17 +40,27 @@ def _make_score(**kwargs) -> QualityScore:
     return QualityScore(**defaults)
 
 
-def _events(emit) -> list[tuple[str, dict]]:
-    """Run *emit* against a mocked current span; return (name, attributes) pairs,
-    and assert no retired event name was emitted."""
-    mock_span = MagicMock()
-    with patch("nthlayer_workers.measure.telemetry._HAS_OTEL", True), \
-         patch("nthlayer_workers.measure.telemetry.trace") as mock_trace:
-        mock_trace.get_current_span.return_value = mock_span
+# An event time well clear of "now", so a record stamped with the emit time
+# instead of the event's own fails the timestamp assertions.
+EVENT_TIME = datetime(2026, 1, 2, 3, 4, 5, 678000, tzinfo=UTC)
+EVENT_TIME_NS = 1767323045678000000
+INFO = 9  # SeverityNumber.INFO (ruling Q2)
+
+
+def _records(emit):
+    """Run *emit*; return the log records it emitted, asserting each is an
+    INFO record and that no retired event name was emitted."""
+    with capture_events() as cap:
         emit()
-    events = [(c.args[0], c.kwargs["attributes"]) for c in mock_span.add_event.call_args_list]
-    assert not [name for name, _ in events if name in RETIRED_EVENT_NAMES]
-    return events
+    records = cap.events
+    assert not [r.name for r in records if r.name in RETIRED_EVENT_NAMES]
+    assert {r.severity_number for r in records} <= {INFO}
+    return records
+
+
+def _events(emit) -> list[tuple[str, dict]]:
+    """(name, attributes) for each record *emit* emitted."""
+    return [(r.name, r.attributes) for r in _records(emit)]
 
 
 def test_evaluation_is_one_grader_event_per_dimension():
@@ -106,7 +122,9 @@ def test_empty_task_id_is_not_emitted_as_a_decision_id():
     from nthlayer_workers.measure.telemetry import emit_correction_event, emit_evaluation_events
 
     events = _events(lambda: emit_evaluation_events(_make_score(task_id="")))
-    events += _events(lambda: emit_correction_event("e1", "correctness", 0.9, 0.5, "r", decision_id=""))
+    events += _events(lambda: emit_correction_event(
+        "e1", "correctness", 0.9, 0.5, "r", corrected_at=EVENT_TIME, decision_id="",
+    ))
 
     assert events
     assert not [n for n, a in events if "nthlayer.decision.id" in a]
@@ -121,11 +139,41 @@ def test_evaluation_with_no_dimensions_emits_only_the_summary():
     assert events[0][1]["nthlayer.evaluation.dimension_count"] == 0
 
 
-def test_noop_without_otel():
-    with patch("nthlayer_workers.measure.telemetry._HAS_OTEL", False):
-        from nthlayer_workers.measure.telemetry import emit_evaluation_events
-        # Should not raise even with no OTel
-        emit_evaluation_events(_make_score())
+def test_evaluation_records_are_stamped_with_the_evaluation_time():
+    """A1 T1: every record of an evaluation carries when it was made."""
+    from nthlayer_workers.measure.telemetry import emit_evaluation_events
+
+    records = _records(lambda: emit_evaluation_events(_make_score(timestamp=EVENT_TIME)))
+
+    assert len(records) == 3  # two dimensions and the summary
+    assert {r.timestamp for r in records} == {EVENT_TIME_NS}
+
+
+def test_correction_record_is_stamped_with_the_correction_time():
+    from nthlayer_workers.measure.telemetry import emit_correction_event
+
+    (record,) = _records(lambda: emit_correction_event(
+        "e1", "correctness", 0.9, 0.5, "reviewer", corrected_at=EVENT_TIME,
+    ))
+
+    assert record.timestamp == EVENT_TIME_NS
+
+
+def test_autonomy_record_is_stamped_with_the_change_time():
+    from nthlayer_workers.measure.telemetry import emit_state_transition_event
+
+    (record,) = _records(lambda: emit_state_transition_event(
+        "agent-a", "full", "supervised", "governance", changed_at=EVENT_TIME,
+    ))
+
+    assert record.timestamp == EVENT_TIME_NS
+
+
+def test_emitting_without_telemetry_initialised_does_not_raise():
+    """Outside capture_events and before init_telemetry, emits are no-ops."""
+    from nthlayer_workers.measure.telemetry import emit_evaluation_events
+
+    emit_evaluation_events(_make_score())
 
 
 def test_human_correction_is_a_human_grader_evaluation():
@@ -133,7 +181,7 @@ def test_human_correction_is_a_human_grader_evaluation():
     from nthlayer_workers.measure.telemetry import emit_correction_event
 
     events = _events(lambda: emit_correction_event(
-        "e1", "correctness", 0.9, 0.5, "reviewer", decision_id="t1",
+        "e1", "correctness", 0.9, 0.5, "reviewer", corrected_at=EVENT_TIME, decision_id="t1",
     ))
 
     (attrs,) = [a for n, a in events if n == GRADER_EVENT]
@@ -167,7 +215,7 @@ def test_autonomy_change_is_an_implementation_event():
     from nthlayer_workers.measure.telemetry import emit_state_transition_event
 
     events = _events(lambda: emit_state_transition_event(
-        "agent-a", "full", "supervised", "governance",
+        "agent-a", "full", "supervised", "governance", changed_at=EVENT_TIME,
     ))
 
     assert [n for n, _ in events] == ["nthlayer.autonomy.changed"]

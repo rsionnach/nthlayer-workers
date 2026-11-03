@@ -14,6 +14,7 @@ from typing import Any
 
 import structlog
 import yaml
+from nthlayer_common.telemetry import init_telemetry
 
 from nthlayer_workers.correlate.config import SitRepConfig, load_config
 from nthlayer_workers.correlate.correlation.changes import find_change_candidates
@@ -794,6 +795,9 @@ def main() -> None:
     """CLI entry point."""
     parser = _build_parser()
     args = parser.parse_args()
+    # Before any subcommand runs, so its events export (opensrm-quqo); a no-op
+    # without an OTLP endpoint.
+    init_telemetry("nthlayer-workers")
 
     if args.command is None:
         parser.print_help()

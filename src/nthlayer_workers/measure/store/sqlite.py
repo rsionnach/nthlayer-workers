@@ -6,7 +6,7 @@ import asyncio
 import sqlite3
 import threading
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from nthlayer_common.verdicts import VerdictStore as VerdictStoreBase
@@ -15,6 +15,15 @@ from nthlayer_workers.measure.telemetry import emit_correction_event, emit_state
 from nthlayer_workers.measure.types import QualityScore
 
 _SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+
+
+def _now_ms() -> tuple[datetime, str]:
+    """Now, at the millisecond precision schema.sql's column defaults store,
+    with the same text. The row and its telemetry event share one time, so
+    the event's Timestamp (A1 T1) is exactly the time the store records."""
+    now = datetime.now(UTC)
+    now = now.replace(microsecond=now.microsecond // 1000 * 1000)
+    return now, now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
 
 
 class SQLiteScoreStore:
@@ -153,6 +162,8 @@ class SQLiteScoreStore:
         self, eval_id: str, corrected_dimensions: dict[str, float], corrector: str
     ) -> None:
         verdict_id = None
+        corrected_at, corrected_at_text = _now_ms()
+        corrections: list[tuple[str, float, float]] = []
         with self._lock:
             # Verify eval_id exists
             eval_row = self._conn.execute(
@@ -173,7 +184,7 @@ class SQLiteScoreStore:
                 self._conn.execute(
                     "INSERT INTO overrides "
                     "(override_id, eval_id, dimension, original_score, "
-                    "corrected_score, corrector) VALUES (?, ?, ?, ?, ?, ?)",
+                    "corrected_score, corrector, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         str(uuid.uuid4()),
                         eval_id,
@@ -181,14 +192,10 @@ class SQLiteScoreStore:
                         original_score,
                         corrected_score,
                         corrector,
+                        corrected_at_text,
                     ),
                 )
-                emit_correction_event(
-                    eval_id, dim_name, original_score,
-                    corrected_score, corrector,
-                    # The evaluated task is the decision the correction is about.
-                    decision_id=eval_row["task_id"],
-                )
+                corrections.append((dim_name, original_score, corrected_score))
             self._conn.commit()
 
             # Look up verdict_id for resolution
@@ -200,6 +207,16 @@ class SQLiteScoreStore:
                 verdict_id = (
                     verdict_row["verdict_id"] if verdict_row else None
                 )
+
+        # After the commit, so a failed write emits no event.
+        for dim_name, original_score, corrected_score in corrections:
+            emit_correction_event(
+                eval_id, dim_name, original_score,
+                corrected_score, corrector,
+                corrected_at=corrected_at,
+                # The evaluated task is the decision the correction is about.
+                decision_id=eval_row["task_id"],
+            )
 
         # Resolve linked verdict outside the lock (verdict store has its own)
         if self._verdict_store is not None and verdict_id is not None:
@@ -250,6 +267,7 @@ class SQLiteScoreStore:
         return await asyncio.to_thread(self._get_autonomy_sync, agent_name)
 
     def _set_autonomy_sync(self, agent_name: str, level: str, updated_by: str) -> None:
+        changed_at, changed_at_text = _now_ms()
         with self._lock:
             current = self._conn.execute(
                 "SELECT level FROM agent_autonomy WHERE agent_name = ?",
@@ -258,18 +276,25 @@ class SQLiteScoreStore:
             from_level = current["level"] if current else "full"
 
             self._conn.execute(
-                "INSERT INTO agent_autonomy (agent_name, level, updated_by) VALUES (?, ?, ?) "
+                "INSERT INTO agent_autonomy (agent_name, level, updated_by, updated_at) "
+                "VALUES (?, ?, ?, ?) "
                 "ON CONFLICT(agent_name) DO UPDATE SET level = excluded.level, "
-                "updated_by = excluded.updated_by, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-                (agent_name, level, updated_by),
+                "updated_by = excluded.updated_by, updated_at = excluded.updated_at",
+                (agent_name, level, updated_by, changed_at_text),
             )
             self._conn.execute(
-                "INSERT INTO governance_log (agent_name, from_level, to_level, reason, triggered_by) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (agent_name, from_level, level, f"Autonomy changed to {level}", updated_by),
+                "INSERT INTO governance_log "
+                "(agent_name, from_level, to_level, reason, triggered_by, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    agent_name, from_level, level, f"Autonomy changed to {level}",
+                    updated_by, changed_at_text,
+                ),
             )
             self._conn.commit()
-        emit_state_transition_event(agent_name, from_level, level, updated_by)
+        emit_state_transition_event(
+            agent_name, from_level, level, updated_by, changed_at=changed_at
+        )
 
     async def set_autonomy(self, agent_name: str, level: str, updated_by: str) -> None:
         await asyncio.to_thread(self._set_autonomy_sync, agent_name, level, updated_by)
