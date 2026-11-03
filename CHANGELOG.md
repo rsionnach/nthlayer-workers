@@ -6,6 +6,18 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [4.1.0](https://github.com/rsionnach/nthlayer-workers/compare/v4.0.2...v4.1.0) (2026-11-03)
+
+
+### Features
+
+* **measure:** emit telemetry as OTel log records [opensrm-quqo]; to export them, set an OTLP gRPC endpoint (see docs/upgrading-4.0.md) ([ddda1e8](https://github.com/rsionnach/nthlayer-workers/commit/ddda1e8dc28874dfd2eac5ce597ce331228d0736))
+
+
+### Bug Fixes
+
+* require nthlayer-common 5.11.0 ([a0276ad](https://github.com/rsionnach/nthlayer-workers/commit/a0276ad840a0a4ce60da014c885be11d3cbeb6ae))
+
 ## [4.0.2](https://github.com/rsionnach/nthlayer-workers/compare/v4.0.1...v4.0.2) (2026-11-02)
 
 
