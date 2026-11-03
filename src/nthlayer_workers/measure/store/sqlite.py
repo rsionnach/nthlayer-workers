@@ -24,7 +24,7 @@ def _store_now() -> tuple[datetime, str]:
     exactly the time the store records."""
     now = datetime.now(UTC)
     now = now.replace(microsecond=now.microsecond // 1000 * 1000)
-    return now, now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
+    return now, now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 class SQLiteScoreStore:

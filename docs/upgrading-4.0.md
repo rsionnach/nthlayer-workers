@@ -12,8 +12,14 @@ measure module's scores are grader evaluations, so they now use the upstream
 OpenTelemetry grader event, `gen_ai.evaluation.result` (A1 §4.4). Its other
 events become `nthlayer.*` implementation events.
 
-The events are still emitted as span events on the current span. Whether
-they should be OTel log events, as A1 §4.0 describes, is open (opensrm-a829).
+In 4.0 the events were span events on the current span. Nothing in workers
+made a span recording, so none of them was ever exported. From 4.1 they are
+OTel log records, as A1 §4.0 describes (opensrm-quqo): each record's
+`event_name` is the event name, its attributes are the keys below, and its
+Timestamp is when the event happened. To export them, set an OTLP endpoint
+(`OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT`, a
+collector's gRPC port); every workers CLI calls nthlayer-common's
+`init_telemetry` at startup. Query them as logs, not spans.
 
 ## Breaking changes
 
