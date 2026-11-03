@@ -162,9 +162,10 @@ class SQLiteScoreStore:
         self, eval_id: str, corrected_dimensions: dict[str, float], corrector: str
     ) -> None:
         verdict_id = None
-        corrected_at, corrected_at_text = _now_ms()
         corrections: list[tuple[str, float, float]] = []
         with self._lock:
+            # Taken under the lock, so stored times follow commit order.
+            corrected_at, corrected_at_text = _now_ms()
             # Verify eval_id exists
             eval_row = self._conn.execute(
                 "SELECT task_id FROM evaluations WHERE eval_id = ?", (eval_id,)
@@ -197,6 +198,16 @@ class SQLiteScoreStore:
                 )
                 corrections.append((dim_name, original_score, corrected_score))
             self._conn.commit()
+            # Straight after the commit: a failed write emits no event, and
+            # nothing that could raise sits between the commit and the emit.
+            for dim_name, original_score, corrected_score in corrections:
+                emit_correction_event(
+                    eval_id, dim_name, original_score,
+                    corrected_score, corrector,
+                    corrected_at=corrected_at,
+                    # The evaluated task is the decision the correction is about.
+                    decision_id=eval_row["task_id"],
+                )
 
             # Look up verdict_id for resolution
             if self._verdict_store is not None:
@@ -207,16 +218,6 @@ class SQLiteScoreStore:
                 verdict_id = (
                     verdict_row["verdict_id"] if verdict_row else None
                 )
-
-        # After the commit, so a failed write emits no event.
-        for dim_name, original_score, corrected_score in corrections:
-            emit_correction_event(
-                eval_id, dim_name, original_score,
-                corrected_score, corrector,
-                corrected_at=corrected_at,
-                # The evaluated task is the decision the correction is about.
-                decision_id=eval_row["task_id"],
-            )
 
         # Resolve linked verdict outside the lock (verdict store has its own)
         if self._verdict_store is not None and verdict_id is not None:
@@ -267,8 +268,9 @@ class SQLiteScoreStore:
         return await asyncio.to_thread(self._get_autonomy_sync, agent_name)
 
     def _set_autonomy_sync(self, agent_name: str, level: str, updated_by: str) -> None:
-        changed_at, changed_at_text = _now_ms()
         with self._lock:
+            # Taken under the lock, so stored times follow commit order.
+            changed_at, changed_at_text = _now_ms()
             current = self._conn.execute(
                 "SELECT level FROM agent_autonomy WHERE agent_name = ?",
                 (agent_name,),
