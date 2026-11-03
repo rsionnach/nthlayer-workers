@@ -1,5 +1,6 @@
 """Tests for SQLiteScoreStore — round-trip save/get for scores, overrides, autonomy."""
 
+import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -127,11 +128,138 @@ async def test_override_telemetry_names_the_evaluated_task(store):
     The store looks the task up from the evaluation (opensrm-ju8r); the
     corrector does not supply it.
     """
-    from unittest.mock import patch
+    from nthlayer_common.telemetry import capture_events
 
     await store.save_score(_make_score(eval_id="e1", task="task-42"))
-    with patch("nthlayer_workers.measure.store.sqlite.emit_correction_event") as emit:
+    with capture_events() as cap:
         await store.save_override("e1", {"correctness": 0.5}, "reviewer")
 
-    emit.assert_called_once()
-    assert emit.call_args.kwargs["decision_id"] == "task-42"
+    (event,) = cap.named("gen_ai.evaluation.result")
+    assert event.attributes["nthlayer.decision.id"] == "task-42"
+
+
+def _iso_ns(text: str) -> int:
+    """Unix nanoseconds of a stored ``...T...Z`` timestamp."""
+    dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    return int(dt.timestamp()) * 10**9 + dt.microsecond * 1000
+
+
+@pytest.mark.asyncio
+async def test_override_event_time_is_the_stored_correction_time(store):
+    """Ruling Q2: the human grader event carries when the correction was made,
+    the same time the store records for it."""
+    from nthlayer_common.telemetry import capture_events
+
+    await store.save_score(_make_score(eval_id="e1"))
+    with capture_events() as cap:
+        await store.save_override("e1", {"correctness": 0.5, "style": 0.4}, "reviewer")
+
+    stored = await store.get_overrides(since=datetime(2000, 1, 1, tzinfo=UTC))
+    events = cap.named("gen_ai.evaluation.result")
+    assert len(stored) == len(events) == 2
+    assert {e.timestamp for e in events} == {_iso_ns(o["created_at"]) for o in stored}
+
+
+@pytest.mark.asyncio
+async def test_autonomy_event_time_is_the_stored_change_time(store):
+    """Ruling Q2: the autonomy event carries when the level changed, the same time
+    the store records on the autonomy row and in the governance log."""
+    from nthlayer_common.telemetry import capture_events
+
+    with capture_events() as cap:
+        await store.set_autonomy("agent-a", "supervised", "governance")
+
+    (event,) = cap.named("nthlayer.autonomy.changed")
+    row = store._conn.execute(
+        "SELECT updated_at FROM agent_autonomy WHERE agent_name = 'agent-a'"
+    ).fetchone()
+    log = store._conn.execute(
+        "SELECT created_at FROM governance_log WHERE agent_name = 'agent-a'"
+    ).fetchone()
+    assert event.timestamp == _iso_ns(row["updated_at"]) == _iso_ns(log["created_at"])
+
+
+def _committed(store, sql: str) -> list:
+    """Rows a separate connection sees, i.e. what is durably committed."""
+    import sqlite3
+
+    conn = sqlite3.connect(str(store._db_path))
+    try:
+        return conn.execute(sql).fetchall()
+    finally:
+        conn.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_override_is_rolled_back_not_committed_by_a_later_write(store):
+    """A write that fails on its second dimension leaves nothing pending: a
+    later unrelated commit must not persist the first dimension's row, which
+    would be a stored correction with no grader event."""
+    from nthlayer_common.telemetry import capture_events
+
+    await store.save_score(_make_score(eval_id="e1"))
+    with capture_events() as cap:
+        with pytest.raises(sqlite3.Error):
+            # A value sqlite cannot bind fails the second INSERT.
+            await store.save_override("e1", {"correctness": 0.5, "style": object()}, "rob")
+        await store.set_autonomy("agent-a", "supervised", "governance")
+
+    assert _committed(store, "SELECT dimension FROM overrides") == []
+    assert cap.named("gen_ai.evaluation.result") == []
+
+
+@pytest.mark.asyncio
+async def test_failed_autonomy_change_is_rolled_back_not_committed_by_a_later_write(store):
+    """If the governance-log INSERT fails, the level upsert before it must not
+    be committed by the next write: a changed level with no transition event
+    and no log entry."""
+    from nthlayer_common.telemetry import capture_events
+
+    store._conn.execute(
+        "CREATE TEMP TRIGGER fail_log BEFORE INSERT ON governance_log "
+        "BEGIN SELECT RAISE(ABORT, 'injected'); END"
+    )
+    with capture_events() as cap:
+        with pytest.raises(sqlite3.IntegrityError):
+            await store.set_autonomy("agent-a", "supervised", "governance")
+        store._conn.execute("DROP TRIGGER fail_log")
+        await store.save_score(_make_score(eval_id="e1"))
+
+    assert _committed(store, "SELECT level FROM agent_autonomy") == []
+    assert cap.named("nthlayer.autonomy.changed") == []
+
+
+@pytest.mark.asyncio
+async def test_failed_score_is_rolled_back_not_committed_by_a_later_write(store):
+    """An evaluation whose dimension INSERT fails must not be persisted, with
+    missing dimensions, by the next unrelated commit."""
+    with pytest.raises(sqlite3.Error):
+        await store.save_score(_make_score(eval_id="e1", dimensions={"correctness": object()}))
+    await store.set_autonomy("agent-a", "supervised", "governance")
+
+    assert _committed(store, "SELECT eval_id FROM evaluations") == []
+
+
+@pytest.mark.asyncio
+async def test_written_times_are_in_the_schema_default_format(store):
+    """The times the store writes must be text SQLite's own column default
+    (schema.sql: strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) would have written,
+    or `created_at >= ?` comparisons and ORDER BY mix two formats. SQLite is
+    the oracle: re-formatting each value with that pattern is the identity."""
+    await store.save_score(_make_score(eval_id="e1"))
+    await store.save_override("e1", {"correctness": 0.5}, "reviewer")
+    await store.set_autonomy("agent-a", "supervised", "governance")
+
+    written = [
+        r[0] for r in store._conn.execute(
+            "SELECT created_at FROM overrides "
+            "UNION ALL SELECT updated_at FROM agent_autonomy "
+            "UNION ALL SELECT created_at FROM governance_log"
+        )
+    ]
+    assert len(written) == 3
+    for text in written:
+        (reformatted,) = store._conn.execute(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', ?)", (text,)
+        ).fetchone()
+        assert reformatted == text

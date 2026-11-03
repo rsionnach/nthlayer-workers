@@ -11,10 +11,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from nthlayer_common.telemetry import init_telemetry
 from nthlayer_common.verdicts.serialise import to_dict
 from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
 from nthlayer_common.verdicts.store import AccuracyFilter, VerdictFilter
 
+from nthlayer_workers import TELEMETRY_SERVICE_NAME
 from nthlayer_workers.learn._apply import apply_recommendations, format_summary
 from nthlayer_workers.learn._gh import (
     PreflightError,
@@ -532,6 +534,7 @@ def main(argv: list[str] | None = None) -> None:
     _add_recommendations_subcommand(sub)
 
     args = parser.parse_args(argv)
+    init_telemetry(TELEMETRY_SERVICE_NAME)
 
     if args.command == "accuracy":
         _cmd_accuracy(args)

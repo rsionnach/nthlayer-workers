@@ -6,7 +6,9 @@ import asyncio
 import sqlite3
 import threading
 import uuid
-from datetime import datetime
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 from nthlayer_common.verdicts import VerdictStore as VerdictStoreBase
@@ -15,6 +17,16 @@ from nthlayer_workers.measure.telemetry import emit_correction_event, emit_state
 from nthlayer_workers.measure.types import QualityScore
 
 _SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+
+
+def _store_now() -> tuple[datetime, str]:
+    """Now, truncated to milliseconds, and its text in the format schema.sql's
+    column defaults write (``strftime('%Y-%m-%dT%H:%M:%fZ')``). A row and its
+    telemetry event share this one time, so the event's Timestamp (ruling Q2)
+    is exactly the time the store records."""
+    now = datetime.now(UTC)
+    now = now.replace(microsecond=now.microsecond // 1000 * 1000)
+    return now, now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 class SQLiteScoreStore:
@@ -50,7 +62,7 @@ class SQLiteScoreStore:
                     raise
 
     def _save_score_sync(self, score: QualityScore) -> None:
-        with self._lock:
+        with self._lock, self._rolled_back_on_error():
             self._conn.execute(
                 "INSERT INTO evaluations (eval_id, agent_name, task_id, evaluator_model, confidence, cost_usd, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -149,47 +161,71 @@ class SQLiteScoreStore:
     ) -> list[QualityScore]:
         return await asyncio.to_thread(self._get_scores_sync, agent_name, since, limit)
 
+    @contextmanager
+    def _rolled_back_on_error(self) -> Iterator[None]:
+        """Roll the open transaction back if the block raises. Without it a
+        failed write's earlier INSERTs stay pending on the shared connection,
+        and the next unrelated commit makes them durable with no telemetry
+        event for them. Call with self._lock held."""
+        try:
+            yield
+        except BaseException:
+            self._conn.rollback()
+            raise
+
     def _save_override_sync(
         self, eval_id: str, corrected_dimensions: dict[str, float], corrector: str
     ) -> None:
         verdict_id = None
+        corrections: list[tuple[str, float, float]] = []
         with self._lock:
-            # Verify eval_id exists
-            eval_row = self._conn.execute(
-                "SELECT task_id FROM evaluations WHERE eval_id = ?", (eval_id,)
-            ).fetchone()
-            if not eval_row:
-                raise ValueError(
-                    f"Cannot override non-existent evaluation: {eval_id}"
-                )
-
-            for dim_name, corrected_score in corrected_dimensions.items():
-                row = self._conn.execute(
-                    "SELECT score FROM dimension_scores "
-                    "WHERE eval_id = ? AND dimension = ?",
-                    (eval_id, dim_name),
+            # Taken under the lock, so stored times follow commit order.
+            corrected_at, corrected_at_text = _store_now()
+            with self._rolled_back_on_error():
+                # Verify eval_id exists
+                eval_row = self._conn.execute(
+                    "SELECT task_id FROM evaluations WHERE eval_id = ?", (eval_id,)
                 ).fetchone()
-                original_score = row["score"] if row else 0.0
-                self._conn.execute(
-                    "INSERT INTO overrides "
-                    "(override_id, eval_id, dimension, original_score, "
-                    "corrected_score, corrector) VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        str(uuid.uuid4()),
-                        eval_id,
-                        dim_name,
-                        original_score,
-                        corrected_score,
-                        corrector,
-                    ),
-                )
+                if not eval_row:
+                    raise ValueError(
+                        f"Cannot override non-existent evaluation: {eval_id}"
+                    )
+
+                for dim_name, corrected_score in corrected_dimensions.items():
+                    row = self._conn.execute(
+                        "SELECT score FROM dimension_scores "
+                        "WHERE eval_id = ? AND dimension = ?",
+                        (eval_id, dim_name),
+                    ).fetchone()
+                    original_score = row["score"] if row else 0.0
+                    self._conn.execute(
+                        "INSERT INTO overrides "
+                        "(override_id, eval_id, dimension, original_score, "
+                        "corrected_score, corrector, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            str(uuid.uuid4()),
+                            eval_id,
+                            dim_name,
+                            original_score,
+                            corrected_score,
+                            corrector,
+                            corrected_at_text,
+                        ),
+                    )
+                    corrections.append((dim_name, original_score, corrected_score))
+                self._conn.commit()
+            # Straight after the commit, still under the lock: a failed write
+            # emits no event, and the verdict lookup below cannot suppress one
+            # by raising. (_set_autonomy_sync emits after its lock instead;
+            # nothing follows its commit.)
+            for dim_name, original_score, corrected_score in corrections:
                 emit_correction_event(
                     eval_id, dim_name, original_score,
                     corrected_score, corrector,
+                    corrected_at=corrected_at,
                     # The evaluated task is the decision the correction is about.
                     decision_id=eval_row["task_id"],
                 )
-            self._conn.commit()
 
             # Look up verdict_id for resolution
             if self._verdict_store is not None:
@@ -251,25 +287,35 @@ class SQLiteScoreStore:
 
     def _set_autonomy_sync(self, agent_name: str, level: str, updated_by: str) -> None:
         with self._lock:
-            current = self._conn.execute(
-                "SELECT level FROM agent_autonomy WHERE agent_name = ?",
-                (agent_name,),
-            ).fetchone()
-            from_level = current["level"] if current else "full"
+            # Taken under the lock, so stored times follow commit order.
+            changed_at, changed_at_text = _store_now()
+            with self._rolled_back_on_error():
+                current = self._conn.execute(
+                    "SELECT level FROM agent_autonomy WHERE agent_name = ?",
+                    (agent_name,),
+                ).fetchone()
+                from_level = current["level"] if current else "full"
 
-            self._conn.execute(
-                "INSERT INTO agent_autonomy (agent_name, level, updated_by) VALUES (?, ?, ?) "
-                "ON CONFLICT(agent_name) DO UPDATE SET level = excluded.level, "
-                "updated_by = excluded.updated_by, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-                (agent_name, level, updated_by),
-            )
-            self._conn.execute(
-                "INSERT INTO governance_log (agent_name, from_level, to_level, reason, triggered_by) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (agent_name, from_level, level, f"Autonomy changed to {level}", updated_by),
-            )
-            self._conn.commit()
-        emit_state_transition_event(agent_name, from_level, level, updated_by)
+                self._conn.execute(
+                    "INSERT INTO agent_autonomy (agent_name, level, updated_by, updated_at) "
+                    "VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(agent_name) DO UPDATE SET level = excluded.level, "
+                    "updated_by = excluded.updated_by, updated_at = excluded.updated_at",
+                    (agent_name, level, updated_by, changed_at_text),
+                )
+                self._conn.execute(
+                    "INSERT INTO governance_log "
+                    "(agent_name, from_level, to_level, reason, triggered_by, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        agent_name, from_level, level, f"Autonomy changed to {level}",
+                        updated_by, changed_at_text,
+                    ),
+                )
+                self._conn.commit()
+        emit_state_transition_event(
+            agent_name, from_level, level, updated_by, changed_at=changed_at
+        )
 
     async def set_autonomy(self, agent_name: str, level: str, updated_by: str) -> None:
         await asyncio.to_thread(self._set_autonomy_sync, agent_name, level, updated_by)

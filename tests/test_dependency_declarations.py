@@ -345,3 +345,10 @@ def test_uv_lock_records_this_projects_version():
         f"uv.lock records {project['name']} {entries[0].get('version')}, pyproject says "
         f"{project['version']}: run `uv lock` (and check release-please-config.json extra-files)"
     )
+
+
+def test_common_is_declared_with_the_otel_extra():
+    """nthlayer-common's ``otel`` extra carries the OTel SDK and OTLP log
+    exporter. Without it, ``init_telemetry`` finds an endpoint but no SDK, and
+    every event workers emits is dropped (opensrm-quqo)."""
+    assert "otel" in _siblings()["nthlayer-common"].extras

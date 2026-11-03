@@ -10,7 +10,9 @@ from collections import defaultdict
 from pathlib import Path
 
 from nthlayer_common.errors import main_with_error_handling
+from nthlayer_common.telemetry import init_telemetry
 
+from nthlayer_workers import TELEMETRY_SERVICE_NAME
 from nthlayer_workers.cli_output import warn_parse_failures
 
 _log = logging.getLogger(__name__)
@@ -728,6 +730,7 @@ def main(argv: list[str] | None = None) -> int:
     vr_parser.add_argument("--incident", default=None, help="Incident ID to verify")
 
     args = parser.parse_args(argv)
+    init_telemetry(TELEMETRY_SERVICE_NAME)
 
     dispatch = {
         "collect": _cmd_collect,
