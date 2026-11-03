@@ -7,7 +7,7 @@ form of an OpenSRM-defined event is emitted (A1 §4.0).
 
 Every event is an OTel log record (opensrm-quqo), asserted on through
 nthlayer-common's ``capture_events()``, whose Timestamp is the event's own
-time (A1 T1).
+time (ruling Q2; A1 T1 itself names only the decision and outcome events).
 """
 
 from datetime import UTC, datetime
@@ -141,7 +141,7 @@ def test_evaluation_with_no_dimensions_emits_only_the_summary():
 
 
 def test_evaluation_records_are_stamped_with_the_evaluation_time():
-    """A1 T1: every record of an evaluation carries when it was made."""
+    """Ruling Q2: every record of an evaluation carries when it was made."""
     from nthlayer_workers.measure.telemetry import emit_evaluation_events
 
     records = _records(lambda: emit_evaluation_events(_make_score(timestamp=EVENT_TIME)))

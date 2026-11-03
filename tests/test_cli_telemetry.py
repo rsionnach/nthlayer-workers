@@ -41,11 +41,25 @@ def test_main_initialises_telemetry_before_running_a_command(module, argv):
     init.assert_called_once_with(TELEMETRY_SERVICE_NAME)
 
 
-def test_every_console_script_is_covered():
-    """A new console script must be added to ENTRY_POINTS."""
+def test_every_entry_point_is_covered():
+    """A new console script, or a new ``python -m`` module, must have its main
+    added to ENTRY_POINTS."""
     import tomllib
     from pathlib import Path
 
-    pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
+    root = Path(__file__).parents[1]
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text())
     scripts = {target.split(":")[0] for target in pyproject["project"]["scripts"].values()}
-    assert scripts <= {m for m, _ in ENTRY_POINTS}
+    # Each __main__ module runs its sibling cli.main.
+    mains = [p.parent for p in (root / "src" / "nthlayer_workers").rglob("__main__.py")]
+    assert len(mains) >= 4, "__main__ discovery found too few modules; the layout moved"
+    via_main = {f"nthlayer_workers.{pkg.name}.cli" for pkg in mains}
+
+    assert scripts | via_main <= {m for m, _ in ENTRY_POINTS}
+
+
+def test_the_otel_sdk_and_log_exporter_are_installed():
+    """The [otel] extra must actually deliver what init_telemetry imports, or
+    it reports SDK_MISSING and every event drops."""
+    import opentelemetry.exporter.otlp.proto.grpc._log_exporter  # noqa: F401
+    import opentelemetry.sdk._logs  # noqa: F401

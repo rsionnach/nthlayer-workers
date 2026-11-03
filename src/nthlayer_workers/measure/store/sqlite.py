@@ -22,8 +22,8 @@ _SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 def _store_now() -> tuple[datetime, str]:
     """Now, truncated to milliseconds, and its text in the format schema.sql's
     column defaults write (``strftime('%Y-%m-%dT%H:%M:%fZ')``). A row and its
-    telemetry event share this one time, so the event's Timestamp (A1 T1) is
-    exactly the time the store records."""
+    telemetry event share this one time, so the event's Timestamp (ruling Q2)
+    is exactly the time the store records."""
     now = datetime.now(UTC)
     now = now.replace(microsecond=now.microsecond // 1000 * 1000)
     return now, now.isoformat(timespec="milliseconds").replace("+00:00", "Z")

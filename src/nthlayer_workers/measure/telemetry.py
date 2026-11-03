@@ -3,9 +3,10 @@
 Every event is an OTel log record emitted through nthlayer-common's
 ``emit_event`` (opensrm-quqo, A1 §4.0). They used to be span events on the
 current span, but nothing in workers ever made a span recording, so all of
-them were dropped. Each record's Timestamp is when the event happened (A1
-T1), taken from the score or passed by the caller; only the calibration
-report, computed as it is emitted, uses the emit time.
+them were dropped. Each record's Timestamp is when the event happened,
+taken from the score or passed by the caller; only the calibration report,
+computed as it is emitted, uses the emit time. That is ruling Q2: A1 T1
+itself names only the decision and outcome events.
 
 Emitting is a no-op until the process calls ``init_telemetry`` with an OTLP
 endpoint; every CLI entry point does.
@@ -98,7 +99,7 @@ def emit_correction_event(
     A1 §4.4: a human's verdict on a completion is a grader evaluation with
     ``nthlayer.evaluator.kind`` ``human``. ``decision_id`` is the evaluated
     task; it is omitted when unknown or empty. ``corrected_at`` is when the
-    human made the correction, the record's Timestamp (A1 T1).
+    human made the correction, the record's Timestamp (ruling Q2).
     """
     attributes: dict[str, str | float | int | bool] = {
         "gen_ai.evaluation.name": dimension,
@@ -151,7 +152,7 @@ def emit_state_transition_event(
     changed_at: datetime,
 ) -> None:
     """Record an autonomy state transition. ``changed_at`` is when the level
-    changed, the record's Timestamp (A1 T1)."""
+    changed, the record's Timestamp (ruling Q2)."""
     emit_event(
         "nthlayer.autonomy.changed",
         {

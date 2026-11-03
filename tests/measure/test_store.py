@@ -146,7 +146,7 @@ def _iso_ns(text: str) -> int:
 
 @pytest.mark.asyncio
 async def test_override_event_time_is_the_stored_correction_time(store):
-    """A1 T1: the human grader event carries when the correction was made,
+    """Ruling Q2: the human grader event carries when the correction was made,
     the same time the store records for it."""
     from nthlayer_common.telemetry import capture_events
 
@@ -162,7 +162,7 @@ async def test_override_event_time_is_the_stored_correction_time(store):
 
 @pytest.mark.asyncio
 async def test_autonomy_event_time_is_the_stored_change_time(store):
-    """A1 T1: the autonomy event carries when the level changed, the same time
+    """Ruling Q2: the autonomy event carries when the level changed, the same time
     the store records on the autonomy row and in the governance log."""
     from nthlayer_common.telemetry import capture_events
 
@@ -238,3 +238,28 @@ async def test_failed_score_is_rolled_back_not_committed_by_a_later_write(store)
     await store.set_autonomy("agent-a", "supervised", "governance")
 
     assert _committed(store, "SELECT eval_id FROM evaluations") == []
+
+
+@pytest.mark.asyncio
+async def test_written_times_are_in_the_schema_default_format(store):
+    """The times the store writes must be text SQLite's own column default
+    (schema.sql: strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) would have written,
+    or `created_at >= ?` comparisons and ORDER BY mix two formats. SQLite is
+    the oracle: re-formatting each value with that pattern is the identity."""
+    await store.save_score(_make_score(eval_id="e1"))
+    await store.save_override("e1", {"correctness": 0.5}, "reviewer")
+    await store.set_autonomy("agent-a", "supervised", "governance")
+
+    written = [
+        r[0] for r in store._conn.execute(
+            "SELECT created_at FROM overrides "
+            "UNION ALL SELECT updated_at FROM agent_autonomy "
+            "UNION ALL SELECT created_at FROM governance_log"
+        )
+    ]
+    assert len(written) == 3
+    for text in written:
+        (reformatted,) = store._conn.execute(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', ?)", (text,)
+        ).fetchone()
+        assert reformatted == text
