@@ -6,6 +6,21 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [4.1.0](https://github.com/rsionnach/nthlayer-workers/compare/v4.0.2...v4.1.0) (2026-11-03)
+
+
+### Features
+
+* **cli:** log the telemetry init status; complete the upgrade note [opensrm-quqo] ([18aa4ae](https://github.com/rsionnach/nthlayer-workers/commit/18aa4aea990e710dcb7f413586fbdf5fb401e36a))
+* **measure:** emit telemetry as OTel log records [opensrm-quqo] ([ddda1e8](https://github.com/rsionnach/nthlayer-workers/commit/ddda1e8dc28874dfd2eac5ce597ce331228d0736))
+* **measure:** emit telemetry as OTel log records [opensrm-quqo] ([48f1f1b](https://github.com/rsionnach/nthlayer-workers/commit/48f1f1b9aa739b045b4207ebaed2942c439e3a66))
+
+
+### Bug Fixes
+
+* require nthlayer-common 5.11.0 ([a0276ad](https://github.com/rsionnach/nthlayer-workers/commit/a0276ad840a0a4ce60da014c885be11d3cbeb6ae))
+* require nthlayer-common 5.11.0 ([6b5742c](https://github.com/rsionnach/nthlayer-workers/commit/6b5742c58bad4a549df370528caadaa3f08c16a7))
+
 ## [4.0.2](https://github.com/rsionnach/nthlayer-workers/compare/v4.0.1...v4.0.2) (2026-11-02)
 
 
