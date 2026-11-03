@@ -63,3 +63,18 @@ def test_the_otel_sdk_and_log_exporter_are_installed():
     it reports SDK_MISSING and every event drops."""
     import opentelemetry.exporter.otlp.proto.grpc._log_exporter  # noqa: F401
     import opentelemetry.sdk._logs  # noqa: F401
+
+
+def test_the_init_status_is_logged(caplog):
+    """An operator can tell from the debug log whether events export."""
+    import logging
+
+    from nthlayer_common.telemetry import TelemetryStatus
+
+    from nthlayer_workers import log_telemetry_status
+
+    with caplog.at_level(logging.DEBUG, logger="nthlayer_workers"):
+        log_telemetry_status(TelemetryStatus.EXTERNAL_PROVIDER)
+
+    (record,) = [r for r in caplog.records if r.name == "nthlayer_workers"]
+    assert record.args == ("external_provider",)

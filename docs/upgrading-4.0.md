@@ -16,10 +16,19 @@ In 4.0 the events were span events on the current span. Nothing in workers
 made a span recording, so none of them was ever exported. From 4.1 they are
 OTel log records, as A1 §4.0 describes (opensrm-quqo): each record's
 `event_name` is the event name, its attributes are the keys below, and its
-Timestamp is when the event happened. To export them, set an OTLP endpoint
-(`OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT`, a
-collector's gRPC port); every workers CLI calls nthlayer-common's
-`init_telemetry` at startup. Query them as logs, not spans. A one-shot CLI
+Timestamp is when the event happened. The `nthlayer.llm.call` events the
+respond agents and correlate's summary emit start exporting the same way. A
+deployment that ran its own recording TracerProvider and read these as span
+events must read them as logs instead.
+
+To export them, set an OTLP endpoint (`OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` or
+`OTEL_EXPORTER_OTLP_ENDPOINT`). The exporter is gRPC only, so point it at a
+collector's gRPC port (4317, not 4318); `OTEL_EXPORTER_OTLP_PROTOCOL` is not
+read. Every workers CLI calls nthlayer-common's `init_telemetry` at startup
+and logs its result at debug level. All of them report `service.name`
+`nthlayer-workers`; set `OTEL_SERVICE_NAME` per process to tell them apart.
+The SDK and gRPC exporter (`nthlayer-common[otel]`, which pulls in grpcio and
+protobuf) are now installed with workers. Query the events as logs, not spans. A one-shot CLI
 command flushes its events as it exits, and with the collector unreachable it
 waits up to `OTEL_EXPORTER_OTLP_TIMEOUT` (10s by default) to do so; set it
 lower where that matters, e.g. in scripts.

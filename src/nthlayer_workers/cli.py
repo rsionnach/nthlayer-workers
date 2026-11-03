@@ -6,7 +6,7 @@ import sys
 
 from nthlayer_common.telemetry import init_telemetry
 
-from nthlayer_workers import TELEMETRY_SERVICE_NAME, __version__
+from nthlayer_workers import TELEMETRY_SERVICE_NAME, __version__, log_telemetry_status
 from nthlayer_workers.runner import ModuleRunner
 
 
@@ -60,7 +60,7 @@ def main():
                              help="Core API URL (default: http://localhost:8000)")
 
     args = parser.parse_args()
-    init_telemetry(TELEMETRY_SERVICE_NAME)
+    log_telemetry_status(init_telemetry(TELEMETRY_SERVICE_NAME))
 
     if args.command == "serve":
         from nthlayer_common.api_client import CoreAPIClient
