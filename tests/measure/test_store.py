@@ -161,6 +161,8 @@ async def test_override_event_time_is_the_stored_correction_time(store):
 
 @pytest.mark.asyncio
 async def test_autonomy_event_time_is_the_stored_change_time(store):
+    """A1 T1: the autonomy event carries when the level changed, the same time
+    the store records on the autonomy row and in the governance log."""
     from nthlayer_common.telemetry import capture_events
 
     with capture_events() as cap:

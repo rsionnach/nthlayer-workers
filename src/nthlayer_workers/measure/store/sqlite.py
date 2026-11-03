@@ -17,10 +17,11 @@ from nthlayer_workers.measure.types import QualityScore
 _SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
 
-def _now_ms() -> tuple[datetime, str]:
-    """Now, at the millisecond precision schema.sql's column defaults store,
-    with the same text. The row and its telemetry event share one time, so
-    the event's Timestamp (A1 T1) is exactly the time the store records."""
+def _store_now() -> tuple[datetime, str]:
+    """Now, truncated to milliseconds, and its text in the format schema.sql's
+    column defaults write (``strftime('%Y-%m-%dT%H:%M:%fZ')``). A row and its
+    telemetry event share this one time, so the event's Timestamp (A1 T1) is
+    exactly the time the store records."""
     now = datetime.now(UTC)
     now = now.replace(microsecond=now.microsecond // 1000 * 1000)
     return now, now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
@@ -165,7 +166,7 @@ class SQLiteScoreStore:
         corrections: list[tuple[str, float, float]] = []
         with self._lock:
             # Taken under the lock, so stored times follow commit order.
-            corrected_at, corrected_at_text = _now_ms()
+            corrected_at, corrected_at_text = _store_now()
             # Verify eval_id exists
             eval_row = self._conn.execute(
                 "SELECT task_id FROM evaluations WHERE eval_id = ?", (eval_id,)
@@ -198,8 +199,10 @@ class SQLiteScoreStore:
                 )
                 corrections.append((dim_name, original_score, corrected_score))
             self._conn.commit()
-            # Straight after the commit: a failed write emits no event, and
-            # nothing that could raise sits between the commit and the emit.
+            # Straight after the commit, still under the lock: a failed write
+            # emits no event, and the verdict lookup below cannot suppress one
+            # by raising. (_set_autonomy_sync emits after its lock instead;
+            # nothing follows its commit.)
             for dim_name, original_score, corrected_score in corrections:
                 emit_correction_event(
                     eval_id, dim_name, original_score,
@@ -270,7 +273,7 @@ class SQLiteScoreStore:
     def _set_autonomy_sync(self, agent_name: str, level: str, updated_by: str) -> None:
         with self._lock:
             # Taken under the lock, so stored times follow commit order.
-            changed_at, changed_at_text = _now_ms()
+            changed_at, changed_at_text = _store_now()
             current = self._conn.execute(
                 "SELECT level FROM agent_autonomy WHERE agent_name = ?",
                 (agent_name,),

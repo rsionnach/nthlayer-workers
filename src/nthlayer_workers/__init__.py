@@ -7,3 +7,9 @@ Communicates with nthlayer-core exclusively via HTTP API.
 from importlib.metadata import version
 
 __version__ = version("nthlayer-workers")
+
+# The OTel service.name every CLI entry point passes to nthlayer-common's
+# init_telemetry, which each calls after parsing its arguments and before
+# running a command, so the command's events export (opensrm-quqo). Without
+# an OTLP endpoint that call is a no-op.
+TELEMETRY_SERVICE_NAME = "nthlayer-workers"

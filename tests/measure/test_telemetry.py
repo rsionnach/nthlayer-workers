@@ -13,6 +13,7 @@ time (A1 T1).
 from datetime import UTC, datetime
 
 from nthlayer_common.telemetry import capture_events
+from opentelemetry._logs import SeverityNumber
 
 from nthlayer_workers.measure.detection.protocol import Alert
 from nthlayer_workers.measure.types import QualityScore
@@ -44,7 +45,7 @@ def _make_score(**kwargs) -> QualityScore:
 # instead of the event's own fails the timestamp assertions.
 EVENT_TIME = datetime(2026, 1, 2, 3, 4, 5, 678000, tzinfo=UTC)
 EVENT_TIME_NS = 1767323045678000000
-INFO = 9  # SeverityNumber.INFO (ruling Q2)
+INFO = SeverityNumber.INFO.value  # ruling Q2
 
 
 def _records(emit):

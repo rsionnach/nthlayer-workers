@@ -3,8 +3,9 @@
 Every event is an OTel log record emitted through nthlayer-common's
 ``emit_event`` (opensrm-quqo, A1 §4.0). They used to be span events on the
 current span, but nothing in workers ever made a span recording, so all of
-them were dropped. Each record's Timestamp is the event's own time (A1 T1):
-the caller passes it where the event happened earlier than the emit.
+them were dropped. Each record's Timestamp is when the event happened (A1
+T1), taken from the score or passed by the caller; only the calibration
+report, computed as it is emitted, uses the emit time.
 
 Emitting is a no-op until the process calls ``init_telemetry`` with an OTLP
 endpoint; every CLI entry point does.

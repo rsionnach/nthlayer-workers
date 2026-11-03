@@ -11,6 +11,8 @@ from unittest.mock import patch
 
 import pytest
 
+from nthlayer_workers import TELEMETRY_SERVICE_NAME
+
 
 class _Initialised(Exception):
     """Raised by the patched init_telemetry, so the test stops before the
@@ -36,7 +38,7 @@ def test_main_initialises_telemetry_before_running_a_command(module, argv):
          pytest.raises(_Initialised):
         cli.main()
 
-    init.assert_called_once_with("nthlayer-workers")
+    init.assert_called_once_with(TELEMETRY_SERVICE_NAME)
 
 
 def test_every_console_script_is_covered():
