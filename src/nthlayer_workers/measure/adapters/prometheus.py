@@ -36,7 +36,8 @@ class SLODefinition:
     # How to read `query`'s value, chosen by _query_for when it built the
     # query. The breach rule and the query are one decision: an
     # overrides/decisions RATE must be inverted, a `slo:*:ratio` recording
-    # rule must not, seconds must not be scaled at all. Keeping them apart
+    # rule must not, an error budget is signed against zero, and
+    # `not_evaluable` has an empty query that is never sent. Keeping them apart
     # meant the four judgment types with no builder got an SLI query and the
     # inverting rule, reading a healthy 0.99 as 1.0% (opensrm-fxln).
     #
