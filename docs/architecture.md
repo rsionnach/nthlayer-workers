@@ -312,16 +312,21 @@ query_kind)`, the single query builder. The kind rides on
 `SLODefinition.query_kind` (no default — a wrong one is silent) and is
 what `evaluate_slos` dispatches its breach rule on: `judgment_rate`
 inverts a 0-1 rate to an SLI, `ratio` scales a good-ratio SLI without
-inverting, `error_budget` tests a signed budget against zero. Dispatching
+inverting, `error_budget` tests a signed budget against zero, and
+`not_evaluable` is skipped. Dispatching
 on the SLO's name or `slo_type` instead is what broke: the name is
 author-chosen in v2, and most of the judgment taxonomy has no rate
 builder, so neither answers what units the value is in [opensrm-fxln].
-**Every classical SLO is `error_budget`** (ruling Z1, opensrm-zo0o): it
-reads `slo:error_budget_remaining:ratio{service, slo}` from
-nthlayer-common's `ERROR_BUDGET_REMAINING`, which generate writes per
-availability, latency and error_rate SLO. The latency-seconds and
-classical ratio branches are gone; a classical SLO with no budget series
-(throughput, freshness, lag, custom, or one generate's guard skipped) is
+**Every request-ratio classical SLO is `error_budget`** (ruling Z1,
+opensrm-zo0o): availability, latency and error_rate (`BUDGETED_KINDS`) read
+`slo:error_budget_remaining:ratio{service, slo}` from nthlayer-common's
+`ERROR_BUDGET_REMAINING`, which generate writes per SLO. The other classical
+kinds are `not_evaluable` with an empty query (ruling D5, E3's
+`no_data_source`): `evaluate_slos` never queries them and `evaluate-once`
+lists them. `_classical_kind` is a copy of generate's `_slo_kind` so both
+agree on which SLOs have a budget (opensrm-ltlw moves it to common). The
+latency-seconds and classical ratio branches are gone; a budgeted SLO whose
+series is missing (generate's guard skipped it, or pre-4.1.0 rules) is
 logged at info and not evaluated. Module-level `_JUDGMENT_SLO_QUERIES`
 lookup dict of lambdas keyed by **`spec.judgment_type`**, not by SLO
 name: in v2 `metadata.name` is author-chosen and independent of the type.

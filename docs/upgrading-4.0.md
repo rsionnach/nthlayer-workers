@@ -50,11 +50,14 @@ evaluated a latency SLO from its percentile. Budgets also read low for their
 first window after the rules are deployed, as generate's upgrade note
 explains.
 
-A classical SLO with no budget series is logged at info (`No error budget
-series for <service>/<slo>; not evaluated`) and skipped. That is expected for
-throughput, freshness, lag and custom SLOs, which generate gives no budget
-(D5, opensrm-vcxm), and for an SLO generate's guard skipped (its README lists
-when); anything else means the rules are missing.
+Throughput, freshness, lag and custom SLOs have no budget (D5,
+opensrm-vcxm), so measure no longer queries anything for them: `evaluate-once`
+lists each as `NOT EVALUABLE (no_data_source)`, writes no verdict for it, and
+counts them in its closing summary. A request-ratio SLO whose budget series
+is missing is logged at info (`No error budget series for <service>/<slo>;
+not evaluated`) and skipped. That is expected when generate's guard skipped
+its budget (generate's README lists when); otherwise generate 4.1.0's rules
+are not deployed.
 
 Two other readers of the budget change with it:
 

@@ -828,13 +828,12 @@ def test_query_for_reports_the_breach_rule_with_the_query():
     assert _query_for("s", unbuilt)[1] == "ratio"
 
 
-# slo_type as the parsers write it for each classical kind; throughput has no
-# budget (D5) but is still sent to the budget, where it reads no data.
-@pytest.mark.parametrize("kind", ["availability", "latency", "error_rate", "throughput"])
-def test_every_classical_slo_reads_its_own_error_budget(kind):
-    """Ruling Z1 (opensrm-zo0o): every classical SLO is good/total against its
-    objective, so generate writes one budget series per SLO and measure reads
-    that series, filtered to the SLO by name, whatever its kind."""
+# slo_type as the parsers write it for each request-ratio kind.
+@pytest.mark.parametrize("kind", ["availability", "latency", "error_rate"])
+def test_every_request_ratio_slo_reads_its_own_error_budget(kind):
+    """Ruling Z1 (opensrm-zo0o): every request-ratio SLO is good/total against
+    its objective, so generate writes one budget series per SLO and measure
+    reads that series, filtered to the SLO by name, whatever its kind."""
     slo = ManifestSLO(name=f"checkout-{kind}", target=99.0, slo_type=kind, window="30d")
 
     query, query_kind = _query_for("checkout", slo)
@@ -910,14 +909,41 @@ async def test_a_latency_slo_breaches_on_its_budget(tmp_path, verdict_store):
     assert healthy[0].raw_breach is False
 
 
+# The kinds generate writes no budget for (D5): throughput, and the three its
+# classifier maps to no rules at all.
+@pytest.mark.parametrize("kind", ["throughput", "freshness", "lag", "custom"])
+def test_a_kind_with_no_budget_is_not_evaluable(kind):
+    """Ruling D5 (opensrm-zo0o): measure reports these not evaluable (E3's
+    no_data_source) rather than querying a series nobody writes."""
+    slo = ManifestSLO(name=f"orders-{kind}", target=99.0, slo_type=kind, window="30d")
+
+    assert _query_for("orders", slo) == ("", "not_evaluable")
+
+
 @pytest.mark.asyncio
-async def test_a_classical_slo_with_no_budget_is_reported_not_hidden(verdict_store, caplog):
-    """Generate writes no budget for throughput, freshness, lag or custom SLOs
-    (D5), nor for an objective it cannot trust. Such an SLO is never
-    evaluated, so that is logged where an operator sees it, unlike a judgment
-    query's ordinary no-data, which stays at debug."""
+async def test_a_not_evaluable_slo_is_never_queried(verdict_store):
+    slo = SLODefinition(
+        service="svc", slo_name="freshness", slo_type="traditional",
+        target=99.0, window="30d", query="", query_kind="not_evaluable",
+    )
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        results = await evaluate_slos("http://prom", [slo], verdict_store)
+
+    mock_query.assert_not_called()
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_a_missing_budget_is_reported_not_hidden(verdict_store, caplog):
+    """Generate skips a budget whose objective or latency bound it cannot
+    trust, and rules older than generate 4.1.0 carry none for latency. Such
+    an SLO is never evaluated, so that is logged where an operator sees it,
+    unlike a judgment query's ordinary no-data, which stays at debug."""
     classical = SLODefinition(
-        service="svc", slo_name="throughput", slo_type="traditional",
+        service="svc", slo_name="latency", slo_type="traditional",
         target=99.0, window="30d", query="q", query_kind="error_budget",
     )
     judgment = SLODefinition(
@@ -937,7 +963,7 @@ async def test_a_classical_slo_with_no_budget_is_reported_not_hidden(verdict_sto
         r.args[1]: r.levelno for r in caplog.records
         if r.name == "nthlayer_workers.measure.adapters.prometheus" and r.msg.startswith("No ")
     }
-    assert levels == {"throughput": logging.INFO, "rev": logging.DEBUG}
+    assert levels == {"latency": logging.INFO, "rev": logging.DEBUG}
 
 
 # A v2 manifest that still declares calibration under judgment_slo. Error

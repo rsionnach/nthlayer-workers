@@ -143,14 +143,15 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
     SLO's name or type cannot work — that is precisely what broke.
 
     Judgment SLOs get the interim raw-metric queries below, or the
-    recording-rule convention when their type has no builder. Every
-    classical SLO reads the error budget generate writes for it: by ruling
-    Z1 (opensrm-zo0o) each one is good/total against its objective, so one
-    series and one breach rule cover them all. Generate writes no budget for
-    some (D5: throughput, freshness, lag and custom; and any whose objective
-    or latency bound it cannot trust), and those read no data. Always
-    returns a query: an SLO reaching evaluation with none would be dropped
-    silently.
+    recording-rule convention when their type has no builder. A classical
+    SLO of a request-ratio kind reads the error budget generate writes for
+    it: by ruling Z1 (opensrm-zo0o) each one is good/total against its
+    objective, so one series and one breach rule cover them all. Every
+    other classical kind is ``not_evaluable`` with an empty query (ruling
+    D5): generate writes no budget for it, so there is nothing to ask
+    Prometheus, and evaluate_slos reports it rather than querying a series
+    nobody writes. Every other kind always gets a query: an SLO reaching
+    evaluation with none would be dropped silently.
     """
     name = slo.name
     if slo.judgment_type:
@@ -164,16 +165,45 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
             kind = _JUDGMENT_QUERY_KINDS[slo.judgment_type]
             return builder(service, slo.window or "7d"), kind
     if not slo.judgment_type:
+        if _classical_kind(slo) not in BUDGETED_KINDS:
+            return "", "not_evaluable"
         # The selector filters to this SLO, as each series carries
-        # slo=<name> (opensrm-h0at). Keyed by name alone, not by kind:
-        # which SLOs have a budget is generate's decision, and reading the
-        # series it wrote is how measure follows it without a second copy of
-        # that rule.
+        # slo=<name> (opensrm-h0at).
         return (
             ERROR_BUDGET_REMAINING.selector(service=service, slo=name),
             "error_budget",
         )
     return f'slo:{name}:ratio{{service="{service}"}}', "ratio"
+
+
+# The classical kinds generate writes an error budget for (ruling D5,
+# opensrm-zo0o). Throughput, freshness, lag and custom have none until
+# time-slice budgets exist (opensrm-vcxm).
+BUDGETED_KINDS = frozenset({"availability", "latency", "error_rate"})
+
+
+def _classical_kind(slo: ManifestSLO) -> str | None:
+    """The SLO's kind as generate classifies it, or None for one it writes
+    no rules for (freshness, lag, custom).
+
+    A copy of generate's ``_slo_kind`` (recording_rules/manifest_builder.py),
+    kept identical so measure asks for exactly the budgets generate writes:
+    substring on the lowered type, falling back to the name when no type is
+    set, because srm/v1 and legacy pass an explicit ``type:`` through
+    unnormalised (opensrm-hiw2). TODO(opensrm-ltlw): move it to
+    nthlayer-common so the two cannot drift.
+    """
+    # str(): srm/v1 loads `name: 404` as an int.
+    slo_type = str(slo.slo_type or slo.name).lower()
+    for needle, kind in (
+        ("availability", "availability"),
+        ("latency", "latency"),
+        ("error", "error_rate"),
+        ("throughput", "throughput"),
+    ):
+        if needle in slo_type:
+            return kind
+    return None
 
 
 # PromQL builders keyed by judgment TYPE (spec.judgment_type), not by the
@@ -348,18 +378,29 @@ async def evaluate_slos(
 
     async with httpx.AsyncClient() as client:
         for slo in slos:
+            if slo.query_kind == "not_evaluable":
+                # E3's no_data_source: no series is defined for this kind.
+                # The CLI reports it; there is nothing to query or to count
+                # toward hysteresis.
+                logger.info(
+                    "%s/%s is not evaluable (no_data_source): generate writes "
+                    "no error budget for its kind",
+                    slo.service, slo.slo_name,
+                )
+                continue
             current_value = await query_prometheus(client, prometheus_url, slo.query)
             if current_value is None:
                 if slo.query_kind == "error_budget":
                     # Not debug: for a classical SLO this is usually not a
-                    # scrape gap but a budget generate chose not to write
-                    # (D5, or an objective it cannot trust), and the SLO is
-                    # then never evaluated. An operator needs to see that.
+                    # scrape gap but a budget generate chose not to write (an
+                    # objective or latency bound it cannot trust), or rules
+                    # older than generate 4.1.0, and the SLO is then never
+                    # evaluated. An operator needs to see that.
                     logger.info(
                         "No error budget series for %s/%s; not evaluated "
-                        "(generate writes none for throughput, freshness, lag "
-                        "or custom SLOs, nor for an objective or latency bound "
-                        "it cannot trust)",
+                        "(generate skips a budget whose objective or latency "
+                        "bound it cannot trust, and before 4.1.0 wrote only "
+                        "availability budgets)",
                         slo.service, slo.slo_name,
                     )
                 else:

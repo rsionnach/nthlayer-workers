@@ -212,7 +212,16 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
                         v.metadata.custom["slack_thread_ts"] = thread_ts
                         verdict_store.put(v)
 
-        print(f"\nEvaluated {len(results)} SLOs, {breach_count} in breach.")
+        # Ruling D5 (opensrm-zo0o): kinds with no error budget are reported,
+        # not queried, and get no verdict (E3 no_data_source).
+        not_evaluable = [s for s in slos if s.query_kind == "not_evaluable"]
+        for s in not_evaluable:
+            print(f"  {s.service}/{s.slo_name}: NOT EVALUABLE (no_data_source)")
+
+        print(
+            f"\nEvaluated {len(results)} SLOs, {breach_count} in breach"
+            f", {len(not_evaluable)} not evaluable."
+        )
         return results
 
     try:
