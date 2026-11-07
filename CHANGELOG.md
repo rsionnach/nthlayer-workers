@@ -11,12 +11,11 @@ was being done. This narrative is the honest substitute.
 
 ### Features
 
-* **measure:** evaluate every classical SLO from its error budget [opensrm-zo0o] ([0a4e93e](https://github.com/rsionnach/nthlayer-workers/commit/0a4e93e33c2b7a2794c67ac6330a9d8b95fb719b))
+* **measure:** evaluate every classical SLO from its error budget [opensrm-zo0o]; throughput, freshness, lag and custom SLOs are reported not evaluable. **Requires nthlayer-generate >= 4.1.0 recording rules**: on older rules latency and error_rate SLOs read no data (see docs/upgrading-4.0.md, section 4.2) ([0a4e93e](https://github.com/rsionnach/nthlayer-workers/commit/0a4e93e33c2b7a2794c67ac6330a9d8b95fb719b))
 
 
 ### Bug Fixes
 
-* **measure:** report budget-less classical SLOs not evaluable (D5) [opensrm-zo0o] ([def4bb0](https://github.com/rsionnach/nthlayer-workers/commit/def4bb0bc9eaf0222a1ae5e04d7e75dad1dd7b97))
 
 ## [4.1.1](https://github.com/rsionnach/nthlayer-workers/compare/v4.1.0...v4.1.1) (2026-11-04)
 
