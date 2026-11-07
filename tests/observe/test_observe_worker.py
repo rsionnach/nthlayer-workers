@@ -358,6 +358,22 @@ class TestDriftTargetsHaveABudget:
         assert [c.args[0] for c in log.warning.call_args_list] == ["drift_budget_discovery_failed"]
 
 
+    @patch("nthlayer_workers.observe.drift.DriftAnalyzer")
+    async def test_an_unexpected_discovery_error_skips_only_that_service(self, analyzer_cls):
+        two_services = _manifest_response([
+            {"name": "svc-a", "tier": "critical", "slos": [{"name": "availability", "target": 99.9}]},
+            {"name": "svc-b", "tier": "critical", "slos": [{"name": "availability", "target": 99.9}]},
+        ])
+        module, analyzer = self._module(analyzer_cls, {"availability"})
+        module.client.get_manifests = AsyncMock(return_value=two_services)
+        analyzer.budgeted_slos = AsyncMock(side_effect=[RuntimeError("surprise"), {"availability"}])
+
+        await module.process_cycle()
+
+        analysed = [c.args[0] for c in analyzer.analyze.await_args_list]
+        assert analysed == ["svc-b"]
+
+
 # ---------------------------------------------------------------------------
 # ObserveTopologyModule
 # ---------------------------------------------------------------------------

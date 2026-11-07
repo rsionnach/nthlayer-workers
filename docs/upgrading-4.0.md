@@ -54,7 +54,7 @@ Throughput, freshness, lag and custom SLOs have no budget (D5,
 opensrm-vcxm), so measure no longer queries anything for them: `evaluate-once`
 lists each as `NOT EVALUABLE (no_data_source)`, writes no verdict for it, and
 counts them in its closing summary. A request-ratio SLO whose budget series
-is missing is logged as a warning (`No error budget series for <service>/<slo>;
+is missing is logged as a warning (`No error budget value for <service>/<slo>;
 not evaluated`) and skipped. That is expected when generate's guard skipped
 its budget (generate's README lists when); otherwise generate 4.1.0's rules
 are not deployed.

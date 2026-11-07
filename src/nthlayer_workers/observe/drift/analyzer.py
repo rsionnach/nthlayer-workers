@@ -171,8 +171,10 @@ class DriftAnalyzer:
                 )
                 response.raise_for_status()
                 result = response.json()
-        except (httpx.HTTPError, ValueError) as e:
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as e:
             raise DriftAnalysisError(f"Failed to query Prometheus: {e}") from e
+        if not isinstance(result, dict):
+            raise DriftAnalysisError(f"Malformed Prometheus response: {type(result).__name__}")
         if result.get("status") != "success":
             raise DriftAnalysisError(f"Prometheus query failed: {result.get('error', 'Unknown')}")
         try:

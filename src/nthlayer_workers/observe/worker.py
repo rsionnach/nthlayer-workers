@@ -181,6 +181,11 @@ class ObserveDriftModule:
                 except DriftAnalysisError:
                     logger.warning("drift_budget_discovery_failed", service=service)
                     budgeted[service] = None
+                except Exception:
+                    # As analyze() below: one service's surprise must not end
+                    # the cycle for every other service.
+                    logger.exception("drift_budget_discovery_unexpected_error", service=service)
+                    budgeted[service] = None
             names = budgeted[service]
             if names is None or str(slo_name) not in names:
                 continue

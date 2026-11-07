@@ -234,7 +234,7 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
         for s in not_evaluable:
             print(f"  {s.service}/{s.slo_name}: NOT EVALUABLE (no_data_source)")
         for s in no_data:
-            print(f"  {s.service}/{s.slo_name}: NO DATA (no error budget series)")
+            print(f"  {s.service}/{s.slo_name}: NO DATA (no error budget value)")
 
         print(
             f"\nEvaluated {len(results)} SLOs, {breach_count} in breach"

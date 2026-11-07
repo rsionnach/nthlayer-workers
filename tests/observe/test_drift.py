@@ -434,7 +434,7 @@ async def test_budgeted_slos_is_empty_when_the_service_has_no_budget(monkeypatch
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["unreachable", "error_status", "null_data"])
+@pytest.mark.parametrize("failure", ["unreachable", "error_status", "null_data", "not_an_object"])
 async def test_budgeted_slos_raises_when_prometheus_cannot_answer(monkeypatch, failure):
     """"No budget" and "could not ask" must stay distinguishable: the worker
     skips the service on either, but warns only on the second."""
@@ -446,6 +446,8 @@ async def test_budgeted_slos_raises_when_prometheus_cannot_answer(monkeypatch, f
         # A success status with no data body, which must not escape as an
         # AttributeError out of the worker's process_cycle.
         "null_data": {"status": "success", "data": None},
+        # Valid JSON that is not an object, e.g. from a proxy in front.
+        "not_an_object": [],
     }[failure]
     _prometheus_returning(monkeypatch, response, [])
 

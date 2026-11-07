@@ -400,8 +400,9 @@ async def evaluate_slos(
                     # logging, so stdlib shows nothing below it; the CLI also
                     # lists the SLO as NO DATA.
                     logger.warning(
-                        "No error budget series for %s/%s; not evaluated "
-                        "(generate skips a budget whose objective or latency "
+                        "No error budget value for %s/%s; not evaluated "
+                        "(Prometheus did not answer, or the series is missing: "
+                        "generate skips a budget whose objective or latency "
                         "bound it cannot trust, and before 4.1.0 wrote only "
                         "availability budgets)",
                         slo.service, slo.slo_name,
