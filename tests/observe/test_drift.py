@@ -434,16 +434,19 @@ async def test_budgeted_slos_is_empty_when_the_service_has_no_budget(monkeypatch
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["unreachable", "error_status"])
+@pytest.mark.parametrize("failure", ["unreachable", "error_status", "null_data"])
 async def test_budgeted_slos_raises_when_prometheus_cannot_answer(monkeypatch, failure):
     """"No budget" and "could not ask" must stay distinguishable: the worker
     skips the service on either, but warns only on the second."""
     import httpx
 
-    response = (
-        httpx.ConnectError("refused") if failure == "unreachable"
-        else {"status": "error", "errorType": "bad_data", "error": "parse error"}
-    )
+    response = {
+        "unreachable": httpx.ConnectError("refused"),
+        "error_status": {"status": "error", "errorType": "bad_data", "error": "parse error"},
+        # A success status with no data body, which must not escape as an
+        # AttributeError out of the worker's process_cycle.
+        "null_data": {"status": "success", "data": None},
+    }[failure]
     _prometheus_returning(monkeypatch, response, [])
 
     with pytest.raises(DriftAnalysisError):

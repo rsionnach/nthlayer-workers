@@ -395,8 +395,10 @@ async def evaluate_slos(
                     # scrape gap but a budget generate chose not to write (an
                     # objective or latency bound it cannot trust), or rules
                     # older than generate 4.1.0, and the SLO is then never
-                    # evaluated. An operator needs to see that.
-                    logger.info(
+                    # evaluated. WARNING because workers configures no
+                    # logging, so stdlib shows nothing below it; the CLI also
+                    # lists the SLO as NO DATA.
+                    logger.warning(
                         "No error budget series for %s/%s; not evaluated "
                         "(generate skips a budget whose objective or latency "
                         "bound it cannot trust, and before 4.1.0 wrote only "

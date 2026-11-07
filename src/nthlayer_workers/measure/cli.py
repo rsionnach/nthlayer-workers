@@ -113,6 +113,24 @@ def _build_adapter(config: MeasureConfig):
 # status, calibrate, overrides, tiering — remain.
 
 
+def unevaluated_slos(slos, results):
+    """The SLOs a run produced no verdict for, as ``(not_evaluable, no_data)``.
+
+    ``not_evaluable``: kinds with no error budget, never queried (ruling D5,
+    opensrm-zo0o; E3 no_data_source). ``no_data``: budgeted SLOs whose query
+    returned nothing, because the series is missing (a budget generate
+    skipped, or pre-4.1.0 rules) or Prometheus did not answer. Both are
+    listed by evaluate-once so neither can vanish from a run unseen.
+    """
+    evaluated = {(r.service, r.slo_name) for r in results}
+    not_evaluable = [s for s in slos if s.query_kind == "not_evaluable"]
+    no_data = [
+        s for s in slos
+        if s.query_kind == "error_budget" and (s.service, s.slo_name) not in evaluated
+    ]
+    return not_evaluable, no_data
+
+
 def cmd_evaluate_once(args: argparse.Namespace) -> None:
     """One-shot Prometheus SLO evaluation — evaluate all SLOs, write verdicts, exit."""
     from nthlayer_common.verdicts import SQLiteVerdictStore
@@ -212,15 +230,15 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
                         v.metadata.custom["slack_thread_ts"] = thread_ts
                         verdict_store.put(v)
 
-        # Ruling D5 (opensrm-zo0o): kinds with no error budget are reported,
-        # not queried, and get no verdict (E3 no_data_source).
-        not_evaluable = [s for s in slos if s.query_kind == "not_evaluable"]
+        not_evaluable, no_data = unevaluated_slos(slos, results)
         for s in not_evaluable:
             print(f"  {s.service}/{s.slo_name}: NOT EVALUABLE (no_data_source)")
+        for s in no_data:
+            print(f"  {s.service}/{s.slo_name}: NO DATA (no error budget series)")
 
         print(
             f"\nEvaluated {len(results)} SLOs, {breach_count} in breach"
-            f", {len(not_evaluable)} not evaluable."
+            f", {len(not_evaluable)} not evaluable, {len(no_data)} with no data."
         )
         return results
 

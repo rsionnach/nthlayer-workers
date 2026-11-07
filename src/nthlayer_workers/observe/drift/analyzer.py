@@ -175,11 +175,16 @@ class DriftAnalyzer:
             raise DriftAnalysisError(f"Failed to query Prometheus: {e}") from e
         if result.get("status") != "success":
             raise DriftAnalysisError(f"Prometheus query failed: {result.get('error', 'Unknown')}")
-        return {
-            series["metric"]["slo"]
-            for series in result.get("data", {}).get("result", [])
-            if "slo" in series.get("metric", {})
-        }
+        try:
+            return {
+                series["metric"]["slo"]
+                for series in result["data"]["result"]
+                if "slo" in series.get("metric", {})
+            }
+        except (KeyError, TypeError, AttributeError) as e:
+            # A success status with a malformed body must still read as
+            # "could not ask", not escape process_cycle.
+            raise DriftAnalysisError(f"Malformed Prometheus response: {e}") from e
 
     async def _query_budget_history(
         self,

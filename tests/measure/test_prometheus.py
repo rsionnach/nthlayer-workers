@@ -963,7 +963,7 @@ async def test_a_missing_budget_is_reported_not_hidden(verdict_store, caplog):
         r.args[1]: r.levelno for r in caplog.records
         if r.name == "nthlayer_workers.measure.adapters.prometheus" and r.msg.startswith("No ")
     }
-    assert levels == {"latency": logging.INFO, "rev": logging.DEBUG}
+    assert levels == {"latency": logging.WARNING, "rev": logging.DEBUG}
 
 
 # A v2 manifest that still declares calibration under judgment_slo. Error
@@ -1081,3 +1081,33 @@ def test_an_unnormalised_type_still_reads_the_budget():
 
     assert query == ERROR_BUDGET_REMAINING.selector(service="s", slo="checkout-avail")
     assert kind == "error_budget"
+
+
+@pytest.mark.asyncio
+async def test_evaluate_once_accounts_for_every_slo_it_gives_no_verdict(tmp_path, verdict_store):
+    """A run must account for every SLO: evaluated, not evaluable (D5), or
+    budgeted with no series. The third went unlisted, so a latency SLO whose
+    budget generate skipped vanished from the run (R5 correctness, zo0o)."""
+    from nthlayer_workers.measure.cli import unevaluated_slos
+
+    (tmp_path / "svc.yaml").write_text(
+        "apiVersion: srm/v1\nkind: ServiceReliabilityManifest\n"
+        "metadata: {name: svc, team: t, tier: critical}\n"
+        "spec:\n  type: api\n  slos:\n"
+        "    availability: {target: 99.9, window: 30d}\n"
+        "    latency: {target: 200, unit: ms, percentile: p99, window: 30d}\n"
+        "    throughput: {target: 1000, window: 30d}\n"
+    )
+    slos = load_specs(tmp_path).slos
+    budget_for = {ERROR_BUDGET_REMAINING.selector(service="svc", slo="availability"): 0.5}
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.side_effect = lambda _c, _u, promql: budget_for.get(promql)
+        results = await evaluate_slos("http://prom", slos, verdict_store)
+
+    not_evaluable, no_data = unevaluated_slos(slos, results)
+    assert [r.slo_name for r in results] == ["availability"]
+    assert [s.slo_name for s in not_evaluable] == ["throughput"]
+    assert [s.slo_name for s in no_data] == ["latency"]
