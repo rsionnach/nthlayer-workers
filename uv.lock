@@ -993,7 +993,7 @@ provides-extras = ["otel", "dev"]
 
 [[package]]
 name = "nthlayer-workers"
-version = "4.1.1"
+version = "4.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

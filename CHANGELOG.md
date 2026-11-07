@@ -6,6 +6,17 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [4.2.0](https://github.com/rsionnach/nthlayer-workers/compare/v4.1.1...v4.2.0) (2026-11-07)
+
+
+### Features
+
+* **measure:** evaluate every classical SLO from its error budget [opensrm-zo0o]; throughput, freshness, lag and custom SLOs are reported not evaluable. **Requires nthlayer-generate >= 4.1.0 recording rules**: on older rules latency and error_rate SLOs read no data (see docs/upgrading-4.0.md, section 4.2) ([0a4e93e](https://github.com/rsionnach/nthlayer-workers/commit/0a4e93e33c2b7a2794c67ac6330a9d8b95fb719b))
+
+
+### Bug Fixes
+
+
 ## [4.1.1](https://github.com/rsionnach/nthlayer-workers/compare/v4.1.0...v4.1.1) (2026-11-04)
 
 
