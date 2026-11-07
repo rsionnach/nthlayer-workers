@@ -6,6 +6,18 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [4.2.0](https://github.com/rsionnach/nthlayer-workers/compare/v4.1.1...v4.2.0) (2026-11-07)
+
+
+### Features
+
+* **measure:** evaluate every classical SLO from its error budget [opensrm-zo0o] ([0a4e93e](https://github.com/rsionnach/nthlayer-workers/commit/0a4e93e33c2b7a2794c67ac6330a9d8b95fb719b))
+
+
+### Bug Fixes
+
+* **measure:** report budget-less classical SLOs not evaluable (D5) [opensrm-zo0o] ([def4bb0](https://github.com/rsionnach/nthlayer-workers/commit/def4bb0bc9eaf0222a1ae5e04d7e75dad1dd7b97))
+
 ## [4.1.1](https://github.com/rsionnach/nthlayer-workers/compare/v4.1.0...v4.1.1) (2026-11-04)
 
 
