@@ -168,7 +168,20 @@ class ObserveDriftModule:
 
         analyzer = DriftAnalyzer(self.prometheus_url)
 
+        # Only SLOs with an error budget series can drift (opensrm-zo0o):
+        # judgment SLOs and the classical kinds generate writes no budget for
+        # would otherwise fail every cycle with a warning each.
+        budgeted: dict[str, set[str] | None] = {}
         for service, tier, slo_name, window in _drift_targets(manifests):
+            if service not in budgeted:
+                try:
+                    budgeted[service] = await analyzer.budgeted_slos(service)
+                except DriftAnalysisError:
+                    logger.warning("drift_budget_discovery_failed", service=service)
+                    budgeted[service] = None
+            names = budgeted[service]
+            if names is None or str(slo_name) not in names:
+                continue
             try:
                 result = await analyzer.analyze(service, tier, slo_name, window)
             except DriftAnalysisError:

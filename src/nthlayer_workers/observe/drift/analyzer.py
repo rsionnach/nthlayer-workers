@@ -150,6 +150,37 @@ class DriftAnalyzer:
             exit_code=exit_code,
         )
 
+    async def budgeted_slos(self, service: str) -> set[str]:
+        """Names of the service's SLOs that have an error budget series.
+
+        Generate decides which SLOs get a budget (opensrm-zo0o: availability,
+        latency and error_rate, minus objectives it cannot trust), so drift
+        asks for the series it wrote rather than re-deriving that rule from
+        the manifest, which in worker mode lacks the fields it needs.
+        Raises DriftAnalysisError when Prometheus cannot answer, so a caller
+        can tell "none" from "unknown".
+        """
+        import httpx
+
+        query = f"group by (slo) ({ERROR_BUDGET_REMAINING.selector(service=service)})"
+        auth = (self.username, self.password) if self.username and self.password else None
+        try:
+            async with httpx.AsyncClient(auth=auth, timeout=30.0) as client:
+                response = await client.get(
+                    f"{self.prometheus_url}/api/v1/query", params={"query": query}
+                )
+                response.raise_for_status()
+                result = response.json()
+        except (httpx.HTTPError, ValueError) as e:
+            raise DriftAnalysisError(f"Failed to query Prometheus: {e}") from e
+        if result.get("status") != "success":
+            raise DriftAnalysisError(f"Prometheus query failed: {result.get('error', 'Unknown')}")
+        return {
+            series["metric"]["slo"]
+            for series in result.get("data", {}).get("result", [])
+            if "slo" in series.get("metric", {})
+        }
+
     async def _query_budget_history(
         self,
         service: str,

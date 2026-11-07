@@ -62,11 +62,14 @@ async def fetch_metric_breaches(
 
     for service in services:
         # Check error budget: the worst across the service's SLOs, since
-        # generate writes one series per availability SLO (opensrm-h0at).
-        budget = await _query_instant(
+        # generate writes one series per classical SLO (opensrm-h0at,
+        # opensrm-zo0o). bottomk, not min: min aggregates the labels away,
+        # and the event must say WHICH SLO is overspent.
+        worst = await _query_instant_sample(
             client, prometheus_url,
-            f"min({ERROR_BUDGET_REMAINING.selector(service=service)})",
+            f"bottomk(1, {ERROR_BUDGET_REMAINING.selector(service=service)})",
         )
+        budget, budget_labels = worst if worst is not None else (None, {})
         if budget is not None and budget < 0.0:
             events.append(SitRepEvent(
                 id=f"prom-metric-{uuid.uuid4().hex[:8]}",
@@ -80,6 +83,7 @@ async def fetch_metric_breaches(
                     "metric": ERROR_BUDGET_REMAINING.metric,
                     "value": budget,
                     "breach": "error_budget_exhausted",
+                    "slo": budget_labels.get("slo"),
                 },
             ))
 
@@ -214,6 +218,16 @@ async def _query_instant(
     query: str,
 ) -> float | None:
     """Execute a PromQL instant query and return the scalar value."""
+    sample = await _query_instant_sample(client, prometheus_url, query)
+    return None if sample is None else sample[0]
+
+
+async def _query_instant_sample(
+    client: httpx.AsyncClient,
+    prometheus_url: str,
+    query: str,
+) -> tuple[float, dict[str, str]] | None:
+    """Execute a PromQL instant query; return the first sample's value and labels."""
     try:
         resp = await client.get(
             f"{prometheus_url}/api/v1/query",
@@ -227,8 +241,8 @@ async def _query_instant(
         val = float(results[0].get("value", [None, None])[1])
         if val != val:  # NaN
             return None
-        return val
-    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
+        return val, dict(results[0].get("metric") or {})
+    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError, AttributeError):
         return None
 
 

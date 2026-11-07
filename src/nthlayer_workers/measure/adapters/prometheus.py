@@ -45,12 +45,6 @@ class SLODefinition:
     # answer — the failure shape this whole bead is about.
     query_kind: str
     judgment_type: str | None = None
-    # The manifest's declared unit for a duration target. The parser
-    # preserves it verbatim, so `latency: {target: 2, unit: s}` and
-    # `{target: 2000, unit: ms}` both arrive as target=2000.0/2.0 with the
-    # unit that makes sense of them. Hard-coding milliseconds here compared
-    # a seconds SLO against a threshold 1000x too small (opensrm-fxln).
-    unit: str | None = None
 
 
 @dataclass
@@ -135,7 +129,6 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
                 window=slo.window or "7d",
                 query=query,
                 query_kind=query_kind,
-                unit=slo.unit,
             ))
 
     return LoadedSpecs(slos=slos, parse_failures=parse_failures)
@@ -146,13 +139,18 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
 
     Returns ``(query, query_kind)``. The kind is not decoration: it is how
     evaluate_slos knows whether the number coming back is a rate to invert,
-    a good-ratio SLI, seconds, or a signed error budget. Deriving it later
-    from the SLO's name or type cannot work — that is precisely what broke.
+    a good-ratio SLI, or a signed error budget. Deriving it later from the
+    SLO's name or type cannot work — that is precisely what broke.
 
-    Judgment SLOs get the interim raw-metric queries below. Availability-typed
-    classical SLOs read the error budget generate writes; everything else
-    falls back to the recording-rule convention. Always returns a query: an
-    SLO reaching evaluation with none would be dropped silently.
+    Judgment SLOs get the interim raw-metric queries below, or the
+    recording-rule convention when their type has no builder. Every
+    classical SLO reads the error budget generate writes for it: by ruling
+    Z1 (opensrm-zo0o) each one is good/total against its objective, so one
+    series and one breach rule cover them all. Generate writes no budget for
+    some (D5: throughput, freshness, lag and custom; and any whose objective
+    or latency bound it cannot trust), and those read no data. Always
+    returns a query: an SLO reaching evaluation with none would be dropped
+    silently.
     """
     name = slo.name
     if slo.judgment_type:
@@ -165,25 +163,15 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
         if builder is not None:
             kind = _JUDGMENT_QUERY_KINDS[slo.judgment_type]
             return builder(service, slo.window or "7d"), kind
-    if not slo.judgment_type and "availability" in (slo.slo_type or name).lower():
-        # The right-hand test is generate's, verbatim (manifest_builder.py
-        # `_build_standard_slo_rules`): keyed by type, falling back to the
-        # name only when no type is set. Substring and lower() because srm/v1
-        # and legacy pass an explicit `type:` through unnormalised (opensrm-hiw2). The
-        # left-hand `not judgment_type` stands in for generate only ever
-        # passing classical SLOs there; judgment SLOs are availability-shaped
-        # too, and one with no builder above keeps the fallback below. The
-        # selector filters to this SLO, as each series carries slo=<name>
-        # (opensrm-h0at).
+    if not slo.judgment_type:
+        # The selector filters to this SLO, as each series carries
+        # slo=<name> (opensrm-h0at). Keyed by name alone, not by kind:
+        # which SLOs have a budget is generate's decision, and reading the
+        # series it wrote is how measure follows it without a second copy of
+        # that rule.
         return (
             ERROR_BUDGET_REMAINING.selector(service=service, slo=name),
             "error_budget",
-        )
-    if name == "latency":
-        percentile = slo.percentile or "p99"
-        return (
-            f'slo:http_request_duration_seconds:{percentile}{{service="{service}"}}',
-            "latency_seconds",
         )
     return f'slo:{name}:ratio{{service="{service}"}}', "ratio"
 
@@ -232,54 +220,6 @@ def evaluation_custom_metadata(result: EvaluationResult) -> dict:
         "raw_breach": result.raw_breach,
         "consecutive": result.consecutive,
     }
-
-
-# Seconds per unit of a duration target. Prometheus latency queries return
-# seconds, so the target is converted TO seconds rather than the reverse.
-# Keys are matched case-insensitively after stripping; the spelled-out and
-# abbreviated forms are aliases because manifests are hand-written and
-# `unit: seconds` reaching the unknown-unit path would assume milliseconds —
-# a threshold 1000x too small that breaches every window.
-_DURATION_UNIT_SECONDS = {
-    "us": 0.000_001, "µs": 0.000_001, "microsecond": 0.000_001,
-    "microseconds": 0.000_001,
-    "ms": 0.001, "msec": 0.001, "millisecond": 0.001, "milliseconds": 0.001,
-    "s": 1.0, "sec": 1.0, "secs": 1.0, "second": 1.0, "seconds": 1.0,
-    "m": 60.0, "min": 60.0, "minute": 60.0, "minutes": 60.0,
-}
-
-# What a duration target means when the manifest declared no unit. The
-# schema's own latency example uses `ms`, and so does every manifest in the
-# ecosystem, so that is the assumption — but it IS an assumption, so it is
-# logged rather than applied silently. Refusing to evaluate instead would
-# drop the SLO, which is the failure this bead exists to remove.
-_DEFAULT_DURATION_UNIT = "ms"
-
-
-def _target_seconds(target: float, unit: str | None) -> float:
-    """Convert a duration target to seconds using its declared unit."""
-    if unit is None:
-        logger.warning(
-            "Latency target %s has no unit; assuming %s",
-            target,
-            _DEFAULT_DURATION_UNIT,
-        )
-        unit = _DEFAULT_DURATION_UNIT
-    # str() before strip(): parser/v1.py passes config.get("unit") through
-    # unvalidated, so `unit: 100` arrives as an int. Calling .strip() on it
-    # would raise out of evaluate_slos' loop and abort the cycle with
-    # verdicts already written for earlier SLOs — a partial cycle rather
-    # than a clean failure. Coercing routes it to the warning below.
-    scale = _DURATION_UNIT_SECONDS.get(str(unit).strip().lower())
-    if scale is None:
-        logger.warning(
-            "Unknown duration unit %r for target %s; assuming %s",
-            unit,
-            target,
-            _DEFAULT_DURATION_UNIT,
-        )
-        scale = _DURATION_UNIT_SECONDS[_DEFAULT_DURATION_UNIT]
-    return target * scale
 
 
 async def query_prometheus(
@@ -410,7 +350,20 @@ async def evaluate_slos(
         for slo in slos:
             current_value = await query_prometheus(client, prometheus_url, slo.query)
             if current_value is None:
-                logger.debug("No data for %s/%s, skipping", slo.service, slo.slo_name)
+                if slo.query_kind == "error_budget":
+                    # Not debug: for a classical SLO this is usually not a
+                    # scrape gap but a budget generate chose not to write
+                    # (D5, or an objective it cannot trust), and the SLO is
+                    # then never evaluated. An operator needs to see that.
+                    logger.info(
+                        "No error budget series for %s/%s; not evaluated "
+                        "(generate writes none for throughput, freshness, lag "
+                        "or custom SLOs, nor for an objective or latency bound "
+                        "it cannot trust)",
+                        slo.service, slo.slo_name,
+                    )
+                else:
+                    logger.debug("No data for %s/%s, skipping", slo.service, slo.slo_name)
                 continue
 
             # Dispatch on the kind of number the query returns, decided by
@@ -433,14 +386,11 @@ async def evaluate_slos(
                 # The error budget is signed — negative is overspent.
                 # The target is not consulted; it is baked into the rule.
                 raw_breach = current_value < 0.0
-            elif slo.query_kind == "latency_seconds":
-                # Query is seconds; the target is in whatever unit the
-                # manifest declared.
-                raw_breach = current_value > _target_seconds(slo.target, slo.unit)
             else:
-                # "ratio": a 0-1 good-ratio SLI against a 0-100 target, so it
-                # scales but does not invert — the same arithmetic as
-                # worker.py:242. Comparing the two conventions directly, as
+                # "ratio", only for a judgment type with no builder: the
+                # recording-rule convention's 0-1 good-ratio SLI against a
+                # 0-100 target, so it scales but does not invert — the same
+                # arithmetic as worker.py:242. Comparing the two conventions directly, as
                 # this branch used to, breaches every window.
                 raw_breach = current_value * 100 < slo.target
 

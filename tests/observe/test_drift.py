@@ -382,3 +382,69 @@ async def test_budget_history_queries_the_shared_error_budget_series(monkeypatch
         ERROR_BUDGET_REMAINING.selector(service="checkout", slo="checkout-availability")
     ]
     assert [v for _, v in data] == [0.8]
+
+
+# --- opensrm-zo0o: drift targets only SLOs with a budget series ---
+
+
+def _prometheus_returning(monkeypatch, response: dict | Exception, sent: list[str]):
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request.url.params["query"])
+        if isinstance(response, Exception):
+            raise response
+        return httpx.Response(200, json=response)
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
+    )
+
+
+@pytest.mark.asyncio
+async def test_budgeted_slos_are_the_slo_labels_of_the_written_series(monkeypatch):
+    from nthlayer_common.manifest import ERROR_BUDGET_REMAINING
+
+    sent: list[str] = []
+    # Prometheus HTTP API instant-query shape for `group by (slo) (...)`: one
+    # series per distinct slo label, carrying only that label, value 1.
+    _prometheus_returning(monkeypatch, {"status": "success", "data": {
+        "resultType": "vector",
+        "result": [
+            {"metric": {"slo": "checkout-availability"}, "value": [1730000000, "1"]},
+            {"metric": {"slo": "checkout-latency"}, "value": [1730000000, "1"]},
+        ],
+    }}, sent)
+
+    names = await DriftAnalyzer(prometheus_url="http://prom").budgeted_slos("checkout")
+
+    assert sent == [f"group by (slo) ({ERROR_BUDGET_REMAINING.selector(service='checkout')})"]
+    assert names == {"checkout-availability", "checkout-latency"}
+
+
+@pytest.mark.asyncio
+async def test_budgeted_slos_is_empty_when_the_service_has_no_budget(monkeypatch):
+    _prometheus_returning(monkeypatch, {"status": "success", "data": {
+        "resultType": "vector", "result": [],
+    }}, [])
+
+    assert await DriftAnalyzer(prometheus_url="http://prom").budgeted_slos("checkout") == set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["unreachable", "error_status"])
+async def test_budgeted_slos_raises_when_prometheus_cannot_answer(monkeypatch, failure):
+    """"No budget" and "could not ask" must stay distinguishable: the worker
+    skips the service on either, but warns only on the second."""
+    import httpx
+
+    response = (
+        httpx.ConnectError("refused") if failure == "unreachable"
+        else {"status": "error", "errorType": "bad_data", "error": "parse error"}
+    )
+    _prometheus_returning(monkeypatch, response, [])
+
+    with pytest.raises(DriftAnalysisError):
+        await DriftAnalyzer(prometheus_url="http://prom").budgeted_slos("checkout")
