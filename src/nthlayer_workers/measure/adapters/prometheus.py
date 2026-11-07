@@ -134,48 +134,6 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
     return LoadedSpecs(slos=slos, parse_failures=parse_failures)
 
 
-def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
-    """PromQL for an SLO, always synthesised, never taken from the manifest.
-
-    Returns ``(query, query_kind)``. The kind is not decoration: it is how
-    evaluate_slos knows whether the number coming back is a rate to invert,
-    a good-ratio SLI, or a signed error budget. Deriving it later from the
-    SLO's name or type cannot work — that is precisely what broke.
-
-    Judgment SLOs get the interim raw-metric queries below, or the
-    recording-rule convention when their type has no builder. A classical
-    SLO of a request-ratio kind reads the error budget generate writes for
-    it: by ruling Z1 (opensrm-zo0o) each one is good/total against its
-    objective, so one series and one breach rule cover them all. Every
-    other classical kind is ``not_evaluable`` with an empty query (ruling
-    D5): generate writes no budget for it, so there is nothing to ask
-    Prometheus, and evaluate_slos reports it rather than querying a series
-    nobody writes. Every other kind always gets a query: an SLO reaching
-    evaluation with none would be dropped silently.
-    """
-    name = slo.name
-    if slo.judgment_type:
-        # Keyed by judgment_type, not name: _JUDGMENT_SLO_QUERIES is a map of
-        # judgment KINDS. Only 2 of the 5 V2_JUDGMENT_SLO_TYPES have a builder;
-        # the rest fall through to the recording-rule convention below rather
-        # than yielding an empty query, which Prometheus 400s and which then
-        # reads as no-data (opensrm-fxln).
-        builder = _JUDGMENT_SLO_QUERIES.get(slo.judgment_type)
-        if builder is not None:
-            kind = _JUDGMENT_QUERY_KINDS[slo.judgment_type]
-            return builder(service, slo.window or "7d"), kind
-    if not slo.judgment_type:
-        if _classical_kind(slo) not in BUDGETED_KINDS:
-            return "", "not_evaluable"
-        # The selector filters to this SLO, as each series carries
-        # slo=<name> (opensrm-h0at).
-        return (
-            ERROR_BUDGET_REMAINING.selector(service=service, slo=name),
-            "error_budget",
-        )
-    return f'slo:{name}:ratio{{service="{service}"}}', "ratio"
-
-
 # The classical kinds generate writes an error budget for (ruling D5,
 # opensrm-zo0o). Throughput, freshness, lag and custom have none until
 # time-slice budgets exist (opensrm-vcxm).
@@ -204,6 +162,48 @@ def _classical_kind(slo: ManifestSLO) -> str | None:
         if needle in slo_type:
             return kind
     return None
+
+
+def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
+    """PromQL for an SLO, always synthesised, never taken from the manifest.
+
+    Returns ``(query, query_kind)``. The kind is not decoration: it is how
+    evaluate_slos knows whether the number coming back is a rate to invert,
+    a good-ratio SLI, or a signed error budget. Deriving it later from the
+    SLO's name or type cannot work — that is precisely what broke.
+
+    Judgment SLOs get the interim raw-metric queries below, or the
+    recording-rule convention when their type has no builder. A classical
+    SLO of a request-ratio kind reads the error budget generate writes for
+    it: by ruling Z1 (opensrm-zo0o) each one is good/total against its
+    objective, so one series and one breach rule cover them all. Every
+    other classical kind is ``not_evaluable`` with an empty query (ruling
+    D5): generate writes no budget for it, so there is nothing to ask
+    Prometheus, and evaluate_slos reports it rather than querying a series
+    nobody writes. Judgment SLOs always get a query: one reaching
+    evaluation with none would be dropped silently.
+    """
+    name = slo.name
+    if slo.judgment_type:
+        # Keyed by judgment_type, not name: _JUDGMENT_SLO_QUERIES is a map of
+        # judgment KINDS. Only 2 of the 5 V2_JUDGMENT_SLO_TYPES have a builder;
+        # the rest fall through to the recording-rule convention below rather
+        # than yielding an empty query, which Prometheus 400s and which then
+        # reads as no-data (opensrm-fxln).
+        builder = _JUDGMENT_SLO_QUERIES.get(slo.judgment_type)
+        if builder is not None:
+            kind = _JUDGMENT_QUERY_KINDS[slo.judgment_type]
+            return builder(service, slo.window or "7d"), kind
+    if not slo.judgment_type:
+        if _classical_kind(slo) not in BUDGETED_KINDS:
+            return "", "not_evaluable"
+        # The selector filters to this SLO, as each series carries
+        # slo=<name> (opensrm-h0at).
+        return (
+            ERROR_BUDGET_REMAINING.selector(service=service, slo=name),
+            "error_budget",
+        )
+    return f'slo:{name}:ratio{{service="{service}"}}', "ratio"
 
 
 # PromQL builders keyed by judgment TYPE (spec.judgment_type), not by the
@@ -433,8 +433,8 @@ async def evaluate_slos(
                 # "ratio", only for a judgment type with no builder: the
                 # recording-rule convention's 0-1 good-ratio SLI against a
                 # 0-100 target, so it scales but does not invert — the same
-                # arithmetic as worker.py:242. Comparing the two conventions directly, as
-                # this branch used to, breaches every window.
+                # arithmetic as worker.py:242. Comparing the two conventions
+                # directly, as this branch used to, breaches every window.
                 raw_breach = current_value * 100 < slo.target
 
             # Get consecutive breach count from verdict store

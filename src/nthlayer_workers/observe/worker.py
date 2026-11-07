@@ -171,6 +171,8 @@ class ObserveDriftModule:
         # Only SLOs with an error budget series can drift (opensrm-zo0o):
         # judgment SLOs and the classical kinds generate writes no budget for
         # would otherwise fail every cycle with a warning each.
+        # None = the lookup failed this cycle: skip the service. An empty set
+        # = it answered, and the service has no budget.
         budgeted: dict[str, set[str] | None] = {}
         for service, tier, slo_name, window in _drift_targets(manifests):
             if service not in budgeted:
