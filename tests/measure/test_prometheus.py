@@ -1053,6 +1053,56 @@ def test_v2_classical_slos_read_the_series_generate_writes(tmp_path):
             service="payment-api", slo=name
         ), name
         assert by_name[name].query_kind == "error_budget", name
+    # The same spec example's throughput SLO has no budget (ruling D5).
+    assert by_name["payment-api-throughput"].query == ""
+    assert by_name["payment-api-throughput"].query_kind == "not_evaluable"
+
+
+def test_evaluate_once_reports_the_slos_it_wrote_no_verdict_for(tmp_path):
+    """evaluate-once on the spec's v2 example, end to end: one SLO with a
+    budget gets a verdict, the two whose budget is missing are reported as no
+    data, and throughput as not evaluable (R5 provenance, zo0o). Checked
+    through the verdict store and unevaluated_slos' return, not printed text."""
+    import argparse
+
+    from nthlayer_common.verdicts import SQLiteVerdictStore, VerdictFilter
+
+    from nthlayer_workers.measure import cli
+
+    specs = tmp_path / "specs"
+    specs.mkdir()
+    (specs / "payment-api.yaml").write_text(_API_FULL_V2.read_text())
+    args = argparse.Namespace(
+        specs_dir=str(specs), hysteresis=3, verdict_store=str(tmp_path / "v.db"),
+        prometheus_url="http://prom", decision_store=None,
+    )
+    budget_for = {
+        ERROR_BUDGET_REMAINING.selector(service="payment-api", slo="payment-api-availability"): 0.5
+    }
+
+    reported = []
+    real = cli.unevaluated_slos
+
+    def capture(slos, results):
+        reported.append(real(slos, results))
+        return reported[-1]
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus",
+        side_effect=lambda _c, _u, promql: budget_for.get(promql),
+    ), patch.object(cli, "unevaluated_slos", side_effect=capture):
+        cli.cmd_evaluate_once(args)
+
+    assert len(reported) == 1
+    not_evaluable, no_data = reported[0]
+    assert [s.slo_name for s in not_evaluable] == ["payment-api-throughput"]
+    assert sorted(s.slo_name for s in no_data) == ["payment-api-error-rate", "payment-api-latency"]
+    store = SQLiteVerdictStore(args.verdict_store)
+    try:
+        written = store.query(VerdictFilter(producer_system="nthlayer-measure", limit=50))
+    finally:
+        store.close()
+    assert [v.metadata.custom["slo_name"] for v in written] == ["payment-api-availability"]
 
 
 def test_an_unbuilt_judgment_slo_does_not_read_the_error_budget():
