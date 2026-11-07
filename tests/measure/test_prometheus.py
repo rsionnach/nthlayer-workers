@@ -2,6 +2,7 @@
 """Tests for the Prometheus polling adapter with mocked HTTP responses."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -814,28 +815,6 @@ async def test_recording_rule_fallback_is_not_inverted(verdict_store):
     )
 
 
-@pytest.mark.asyncio
-async def test_latency_rule_follows_the_query_not_the_slo_name(verdict_store):
-    """Same name-vs-type gap the judgment branch closed, on the classical side.
-
-    The latency comparison keyed on `slo_name == "latency"`. A v2 SLO named
-    anything else — p99-latency, checkout-latency — fell to the ratio branch
-    and had its seconds compared against a 0-100 target.
-    """
-    slo = SLODefinition(
-        service="svc", slo_name="p99-latency", slo_type="traditional",
-        target=100.0, window="30d", query="q", query_kind="latency_seconds",
-    )
-
-    with patch(
-        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
-    ) as mock_query:
-        mock_query.return_value = 0.05  # 50ms, well inside a 100ms target
-        results = await evaluate_slos("http://prom", [slo], verdict_store)
-
-    assert results[0].raw_breach is False
-
-
 def test_query_for_reports_the_breach_rule_with_the_query():
     """_query_for's invariant, as a returned value rather than a comment."""
     # slo_type as the parsers set it: judgment SLOs are "availability"-shaped
@@ -845,15 +824,22 @@ def test_query_for_reports_the_breach_rule_with_the_query():
                        window="5m", judgment_type="reversal_rate")
     unbuilt = ManifestSLO(name="seg", target=98.0, slo_type="availability",
                           window="5m", judgment_type="segment_disparity")
-    latency = ManifestSLO(name="latency", target=100.0, slo_type="latency",
-                          window="30d")
-    avail = ManifestSLO(name="availability", target=99.9, slo_type="availability",
-                        window="30d")
-
     assert _query_for("s", rate)[1] == "judgment_rate"
     assert _query_for("s", unbuilt)[1] == "ratio"
-    assert _query_for("s", latency)[1] == "latency_seconds"
-    assert _query_for("s", avail)[1] == "error_budget"
+
+
+# slo_type as the parsers write it for each request-ratio kind.
+@pytest.mark.parametrize("kind", ["availability", "latency", "error_rate"])
+def test_every_request_ratio_slo_reads_its_own_error_budget(kind):
+    """Ruling Z1 (opensrm-zo0o): every request-ratio SLO is good/total against
+    its objective, so generate writes one budget series per SLO and measure
+    reads that series, filtered to the SLO by name, whatever its kind."""
+    slo = ManifestSLO(name=f"checkout-{kind}", target=99.0, slo_type=kind, window="30d")
+
+    query, query_kind = _query_for("checkout", slo)
+
+    assert query == ERROR_BUDGET_REMAINING.selector(service="checkout", slo=f"checkout-{kind}")
+    assert query_kind == "error_budget"
 
 
 @pytest.mark.asyncio
@@ -894,13 +880,13 @@ async def test_hysteresis_survives_a_realistic_number_of_slos(verdict_store):
 
 
 @pytest.mark.asyncio
-async def test_latency_target_is_read_in_its_declared_unit(tmp_path, verdict_store):
-    """load_specs -> evaluate_slos for latency, the round trip nothing covered.
+async def test_a_latency_slo_breaches_on_its_budget(tmp_path, verdict_store):
+    """load_specs -> evaluate_slos for latency, through the budget.
 
-    The branch hard-coded `target / 1000.0`, assuming milliseconds. The
-    target reaches it from the parser, which preserves whatever `unit` the
-    manifest declared — so a seconds-denominated SLO was compared against a
-    threshold a thousand times too small and breached every window.
+    Latency used to read a percentile in seconds and compare it with the
+    target converted by its unit. Under ruling Z1 the bound lives in
+    generate's good query and the objective in the budget, so measure reads
+    the signed budget and breaches below zero, as for availability.
     """
     (tmp_path / "svc.yaml").write_text(
         "apiVersion: srm/v1\nkind: ServiceReliabilityManifest\n"
@@ -909,16 +895,75 @@ async def test_latency_target_is_read_in_its_declared_unit(tmp_path, verdict_sto
         "    latency: {target: 2, unit: s, percentile: p99, window: 30d}\n"
     )
     slo = next(s for s in load_specs(tmp_path).slos if s.slo_name == "latency")
+    assert slo.query == ERROR_BUDGET_REMAINING.selector(service="svc", slo="latency")
 
     with patch(
         "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
     ) as mock_query:
-        mock_query.return_value = 1.5  # 1.5s, inside a 2s target
+        mock_query.return_value = -0.25  # overspent by a quarter
+        overspent = await evaluate_slos("http://prom", [slo], verdict_store)
+        mock_query.return_value = 0.4
+        healthy = await evaluate_slos("http://prom", [slo], verdict_store)
+
+    assert overspent[0].raw_breach is True
+    assert healthy[0].raw_breach is False
+
+
+# The kinds generate writes no budget for (D5): throughput, and the three its
+# classifier maps to no rules at all.
+@pytest.mark.parametrize("kind", ["throughput", "freshness", "lag", "custom"])
+def test_a_kind_with_no_budget_is_not_evaluable(kind):
+    """Ruling D5 (opensrm-zo0o): measure reports these not evaluable (E3's
+    no_data_source) rather than querying a series nobody writes."""
+    slo = ManifestSLO(name=f"orders-{kind}", target=99.0, slo_type=kind, window="30d")
+
+    assert _query_for("orders", slo) == ("", "not_evaluable")
+
+
+@pytest.mark.asyncio
+async def test_a_not_evaluable_slo_is_never_queried(verdict_store):
+    slo = SLODefinition(
+        service="svc", slo_name="freshness", slo_type="traditional",
+        target=99.0, window="30d", query="", query_kind="not_evaluable",
+    )
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
         results = await evaluate_slos("http://prom", [slo], verdict_store)
 
-    assert results[0].raw_breach is False, (
-        "a 2s target read as 2ms makes every response a breach"
+    mock_query.assert_not_called()
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_a_missing_budget_is_reported_not_hidden(verdict_store, caplog):
+    """Generate skips a budget whose objective or latency bound it cannot
+    trust, and rules older than generate 4.1.0 carry none for latency. Such
+    an SLO is never evaluated, so that is logged where an operator sees it,
+    unlike a judgment query's ordinary no-data, which stays at debug."""
+    classical = SLODefinition(
+        service="svc", slo_name="latency", slo_type="traditional",
+        target=99.0, window="30d", query="q", query_kind="error_budget",
     )
+    judgment = SLODefinition(
+        service="svc", slo_name="rev", slo_type="judgment", target=98.5,
+        window="7d", query="q", query_kind="judgment_rate",
+        judgment_type="reversal_rate",
+    )
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query, caplog.at_level(logging.DEBUG):
+        mock_query.return_value = None
+        results = await evaluate_slos("http://prom", [classical, judgment], verdict_store)
+
+    assert results == []
+    levels = {
+        r.args[1]: r.levelno for r in caplog.records
+        if r.name == "nthlayer_workers.measure.adapters.prometheus" and r.msg.startswith("No ")
+    }
+    assert levels == {"latency": logging.WARNING, "rev": logging.DEBUG}
 
 
 # A v2 manifest that still declares calibration under judgment_slo. Error
@@ -956,21 +1001,6 @@ def test_a_calibration_judgment_slo_is_a_load_failure(tmp_path):
     assert loaded.parse_failures == 1
 
 
-@pytest.mark.parametrize(
-    ("unit", "expected_seconds"),
-    [("s", 2.0), ("S", 2.0), ("sec", 2.0), ("seconds", 2.0), (" ms ", 0.002)],
-)
-def test_duration_units_are_matched_leniently(unit, expected_seconds):
-    """Manifests are hand-written; `unit: seconds` must not mean milliseconds.
-
-    An unmatched unit assumes ms, so every one of these spellings falling
-    through would give a threshold 1000x too small and breach every window.
-    """
-    from nthlayer_workers.measure.adapters.prometheus import _target_seconds
-
-    assert _target_seconds(2.0, unit) == pytest.approx(expected_seconds)
-
-
 @pytest.mark.parametrize("value", [0, -1])
 def test_evaluate_once_rejects_a_hysteresis_below_one(tmp_path, value, capsys):
     """`consecutive >= 0` is true before any window runs.
@@ -994,18 +1024,6 @@ def test_evaluate_once_rejects_a_hysteresis_below_one(tmp_path, value, capsys):
     assert exc.value.code == 2
 
 
-def test_a_non_string_unit_warns_rather_than_aborting_the_cycle():
-    """`unit: 100` reaches here as an int; the parser does not validate it.
-
-    Raising would propagate out of evaluate_slos' per-SLO loop and end the
-    run with verdicts already written for earlier SLOs — a partial cycle,
-    which is worse than a wrong-but-flagged threshold.
-    """
-    from nthlayer_workers.measure.adapters.prometheus import _target_seconds
-
-    assert _target_seconds(2.0, 100) == pytest.approx(0.002)  # assumes ms
-
-
 # --- opensrm-h0at: measure reads the error-budget series generate writes ---
 
 # The spec's own v2 example, not a fixture written for this test. CI checks
@@ -1017,27 +1035,74 @@ _API_FULL_V2 = (
 )
 
 
-def test_a_v2_availability_slo_reads_the_series_generate_writes(tmp_path):
-    """v2 names SLOs freely: this one is `payment-api-availability`.
+def test_v2_classical_slos_read_the_series_generate_writes(tmp_path):
+    """v2 names SLOs freely: `payment-api-availability`, not `availability`.
 
     measure keyed the error-budget branch on the NAME `availability`, so every
     such SLO fell through to `slo:payment-api-availability:ratio`, a series
-    nothing writes, and read as no data. generate writes the error budget for
-    every availability-typed SLO, labelled with the SLO's name.
+    nothing writes, and read as no data. generate labels each budget with the
+    SLO's name, and since opensrm-zo0o writes one for latency and error_rate
+    too, so every classical SLO here reads its own.
     """
     (tmp_path / "payment-api.yaml").write_text(_API_FULL_V2.read_text())
 
     by_name = {s.slo_name: s for s in load_specs(tmp_path).slos}
 
-    avail = by_name["payment-api-availability"]
-    assert avail.query == ERROR_BUDGET_REMAINING.selector(
-        service="payment-api", slo="payment-api-availability"
+    for name in ("payment-api-availability", "payment-api-latency", "payment-api-error-rate"):
+        assert by_name[name].query == ERROR_BUDGET_REMAINING.selector(
+            service="payment-api", slo=name
+        ), name
+        assert by_name[name].query_kind == "error_budget", name
+    # The same spec example's throughput SLO has no budget (ruling D5).
+    assert by_name["payment-api-throughput"].query == ""
+    assert by_name["payment-api-throughput"].query_kind == "not_evaluable"
+
+
+def test_evaluate_once_reports_the_slos_it_wrote_no_verdict_for(tmp_path):
+    """evaluate-once on the spec's v2 example, end to end: one SLO with a
+    budget gets a verdict, the two whose budget is missing are reported as no
+    data, and throughput as not evaluable (R5 provenance, zo0o). Checked
+    through the verdict store and unevaluated_slos' return, not printed text."""
+    import argparse
+
+    from nthlayer_common.verdicts import SQLiteVerdictStore, VerdictFilter
+
+    from nthlayer_workers.measure import cli
+
+    specs = tmp_path / "specs"
+    specs.mkdir()
+    (specs / "payment-api.yaml").write_text(_API_FULL_V2.read_text())
+    args = argparse.Namespace(
+        specs_dir=str(specs), hysteresis=3, verdict_store=str(tmp_path / "v.db"),
+        prometheus_url="http://prom", decision_store=None,
     )
-    assert avail.query_kind == "error_budget"
-    # The same manifest's non-availability SLOs keep their own queries.
-    for name in ("payment-api-latency", "payment-api-error-rate"):
-        assert ERROR_BUDGET_REMAINING.metric not in by_name[name].query, name
-        assert by_name[name].query_kind != "error_budget", name
+    budget_for = {
+        ERROR_BUDGET_REMAINING.selector(service="payment-api", slo="payment-api-availability"): 0.5
+    }
+
+    reported = []
+    real = cli.unevaluated_slos
+
+    def capture(slos, results):
+        reported.append(real(slos, results))
+        return reported[-1]
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus",
+        side_effect=lambda _c, _u, promql: budget_for.get(promql),
+    ), patch.object(cli, "unevaluated_slos", side_effect=capture):
+        cli.cmd_evaluate_once(args)
+
+    assert len(reported) == 1
+    not_evaluable, no_data = reported[0]
+    assert [s.slo_name for s in not_evaluable] == ["payment-api-throughput"]
+    assert sorted(s.slo_name for s in no_data) == ["payment-api-error-rate", "payment-api-latency"]
+    store = SQLiteVerdictStore(args.verdict_store)
+    try:
+        written = store.query(VerdictFilter(producer_system="nthlayer-measure", limit=50))
+    finally:
+        store.close()
+    assert [v.metadata.custom["slo_name"] for v in written] == ["payment-api-availability"]
 
 
 def test_an_unbuilt_judgment_slo_does_not_read_the_error_budget():
@@ -1053,13 +1118,12 @@ def test_an_unbuilt_judgment_slo_does_not_read_the_error_budget():
     assert kind == "ratio"
 
 
-def test_an_explicit_type_is_matched_as_generate_matches_it():
-    """measure must ask for every series generate writes, and generate's test
-    is case-insensitive (manifest_builder.py `_build_standard_slo_rules`,
-    `"availability" in slo_type.lower()`). The shape is not spec-valid: the
-    v1 schema has no SLO `type` field. It is reachable only because
-    parser/v1.py and parser/loader.py pass an explicit type through
-    unnormalised (opensrm-hiw2)."""
+def test_an_unnormalised_type_still_reads_the_budget():
+    """parser/v1.py and parser/loader.py pass an explicit `type:` through
+    unnormalised (opensrm-hiw2), so "Availability" can arrive. measure once
+    matched the type to choose the budget, so its spelling mattered; it now
+    sends every classical SLO to its budget, and must keep doing so for this
+    shape. Not spec-valid: the v1 schema has no SLO `type` field."""
     explicit = ManifestSLO(name="checkout-avail", target=99.9,
                            slo_type="Availability", window="30d")
 
@@ -1067,3 +1131,33 @@ def test_an_explicit_type_is_matched_as_generate_matches_it():
 
     assert query == ERROR_BUDGET_REMAINING.selector(service="s", slo="checkout-avail")
     assert kind == "error_budget"
+
+
+@pytest.mark.asyncio
+async def test_evaluate_once_accounts_for_every_slo_it_gives_no_verdict(tmp_path, verdict_store):
+    """A run must account for every SLO: evaluated, not evaluable (D5), or
+    budgeted with no series. The third went unlisted, so a latency SLO whose
+    budget generate skipped vanished from the run (R5 correctness, zo0o)."""
+    from nthlayer_workers.measure.cli import unevaluated_slos
+
+    (tmp_path / "svc.yaml").write_text(
+        "apiVersion: srm/v1\nkind: ServiceReliabilityManifest\n"
+        "metadata: {name: svc, team: t, tier: critical}\n"
+        "spec:\n  type: api\n  slos:\n"
+        "    availability: {target: 99.9, window: 30d}\n"
+        "    latency: {target: 200, unit: ms, percentile: p99, window: 30d}\n"
+        "    throughput: {target: 1000, window: 30d}\n"
+    )
+    slos = load_specs(tmp_path).slos
+    budget_for = {ERROR_BUDGET_REMAINING.selector(service="svc", slo="availability"): 0.5}
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.side_effect = lambda _c, _u, promql: budget_for.get(promql)
+        results = await evaluate_slos("http://prom", slos, verdict_store)
+
+    not_evaluable, no_data = unevaluated_slos(slos, results)
+    assert [r.slo_name for r in results] == ["availability"]
+    assert [s.slo_name for s in not_evaluable] == ["throughput"]
+    assert [s.slo_name for s in no_data] == ["latency"]

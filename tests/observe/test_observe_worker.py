@@ -306,6 +306,74 @@ class TestDriftCycle:
         client.submit_assessment.assert_not_awaited()
 
 
+class TestDriftTargetsHaveABudget:
+    """Drift reads the error budget, so it analyses only SLOs that have one
+    (opensrm-zo0o). It targeted every manifest SLO, judgment ones included,
+    and each SLO with no budget series failed every cycle with a warning."""
+
+    def _module(self, analyzer_cls, budgeted):
+        from nthlayer_workers.observe.drift import DriftAnalysisError
+
+        analyzer = AsyncMock()
+        # Only the call matters here; the analysis itself is tested elsewhere.
+        analyzer.analyze = AsyncMock(side_effect=DriftAnalysisError("no history"))
+        if isinstance(budgeted, Exception):
+            analyzer.budgeted_slos = AsyncMock(side_effect=budgeted)
+        else:
+            analyzer.budgeted_slos = AsyncMock(return_value=budgeted)
+        analyzer_cls.return_value = analyzer
+        client = AsyncMock()
+        client.get_manifests = AsyncMock(return_value=_manifest_response())
+        return ObserveDriftModule(client=client, prometheus_url="http://prom:9090"), analyzer
+
+    @patch("nthlayer_workers.observe.drift.DriftAnalyzer")
+    async def test_only_slos_with_a_budget_series_are_analysed(self, analyzer_cls):
+        module, analyzer = self._module(analyzer_cls, {"availability"})
+
+        await module.process_cycle()
+
+        analysed = [c.args[2] for c in analyzer.analyze.await_args_list]
+        assert analysed == ["availability"]  # not the judgment SLO reversal_rate
+
+    @patch("nthlayer_workers.observe.drift.DriftAnalyzer")
+    async def test_a_service_with_no_budget_is_not_analysed(self, analyzer_cls):
+        module, analyzer = self._module(analyzer_cls, set())
+
+        await module.process_cycle()
+
+        analyzer.analyze.assert_not_awaited()
+
+    @patch("nthlayer_workers.observe.drift.DriftAnalyzer")
+    async def test_discovery_failure_skips_the_service_with_one_warning(self, analyzer_cls):
+        from nthlayer_workers.observe.drift import DriftAnalysisError
+
+        module, analyzer = self._module(analyzer_cls, DriftAnalysisError("down"))
+
+        with patch("nthlayer_workers.observe.worker.logger") as log:
+            await module.process_cycle()
+
+        analyzer.analyze.assert_not_awaited()
+        # Asked once for the service, not once per SLO.
+        assert analyzer.budgeted_slos.await_count == 1
+        assert [c.args[0] for c in log.warning.call_args_list] == ["drift_budget_discovery_failed"]
+
+
+    @patch("nthlayer_workers.observe.drift.DriftAnalyzer")
+    async def test_an_unexpected_discovery_error_skips_only_that_service(self, analyzer_cls):
+        two_services = _manifest_response([
+            {"name": "svc-a", "tier": "critical", "slos": [{"name": "availability", "target": 99.9}]},
+            {"name": "svc-b", "tier": "critical", "slos": [{"name": "availability", "target": 99.9}]},
+        ])
+        module, analyzer = self._module(analyzer_cls, {"availability"})
+        module.client.get_manifests = AsyncMock(return_value=two_services)
+        analyzer.budgeted_slos = AsyncMock(side_effect=[RuntimeError("surprise"), {"availability"}])
+
+        await module.process_cycle()
+
+        analysed = [c.args[0] for c in analyzer.analyze.await_args_list]
+        assert analysed == ["svc-b"]
+
+
 # ---------------------------------------------------------------------------
 # ObserveTopologyModule
 # ---------------------------------------------------------------------------
@@ -419,6 +487,9 @@ class TestDriftCycleHappyPath:
             recommendation="Investigate trend",
             exit_code=1,
         ))
+        # Prometheus holds a budget for the classical SLO only; the judgment
+        # SLO beside it in the manifest has none (opensrm-zo0o).
+        mock_analyzer.budgeted_slos = AsyncMock(return_value={"availability"})
         mock_analyzer_cls.return_value = mock_analyzer
 
         client = AsyncMock()

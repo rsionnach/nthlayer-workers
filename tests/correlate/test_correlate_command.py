@@ -472,22 +472,29 @@ def test_trace_baseline_window_passed_through(specs_dir, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_metric_breaches_read_the_error_budget_series_generate_writes():
+async def test_metric_breaches_name_the_slo_whose_budget_is_overspent():
     """correlate queried slo:error_budget:ratio, which nothing writes, so it
-    never saw an exhausted budget. It has no SLO in hand, so it asks for the
-    service's worst budget across all its SLOs."""
+    never saw an exhausted budget (opensrm-h0at). It has no SLO in hand, so it
+    asks for the service's worst budget across its SLOs, and must say which
+    SLO that is: min() aggregated the slo label away (opensrm-zo0o)."""
     import httpx
 
     from nthlayer_workers.correlate.prometheus import fetch_metric_breaches
 
-    budget_query = f"min({ERROR_BUDGET_REMAINING.selector(service='checkout')})"
+    budget_query = f"bottomk(1, {ERROR_BUDGET_REMAINING.selector(service='checkout')})"
     sent: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         query = request.url.params["query"]
         sent.append(query)
-        # Prometheus HTTP API instant-query shape; an aggregation drops labels.
-        result = [{"metric": {}, "value": [1730000000, "-0.05"]}] if query == budget_query else []
+        # Prometheus HTTP API instant-query shape. bottomk returns the input
+        # series itself, so it keeps the labels generate writes on the
+        # budget (nthlayer-common ERROR_BUDGET_REMAINING.labels).
+        series = {
+            "__name__": ERROR_BUDGET_REMAINING.metric,
+            "service": "checkout", "slo": "checkout-latency", "objective": "99.0",
+        }
+        result = [{"metric": series, "value": [1730000000, "-0.05"]}] if query == budget_query else []
         return httpx.Response(
             200, json={"status": "success", "data": {"resultType": "vector", "result": result}}
         )
@@ -500,3 +507,4 @@ async def test_metric_breaches_read_the_error_budget_series_generate_writes():
     assert len(budget) == 1
     assert budget[0].payload["metric"] == ERROR_BUDGET_REMAINING.metric
     assert budget[0].payload["value"] == -0.05
+    assert budget[0].payload["slo"] == "checkout-latency"

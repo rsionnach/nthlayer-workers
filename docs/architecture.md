@@ -114,9 +114,14 @@ SLO assessment, drift, discovery, gate, portfolio, verification.
     `portfolio_status` (`service="__portfolio__"`,
     `parent_ids=slo_assessment_ids`).
   - `ObserveDriftModule.process_cycle()`: iterates
-    `_drift_targets(manifests)`, `DriftAnalyzer.analyze()` per
-    `(service, tier, slo_name, window)`, submits `drift_signal`
-    assessments.
+    `_drift_targets(manifests)`, keeps only the SLOs
+    `DriftAnalyzer.budgeted_slos(service)` finds a budget series for
+    (`group by (slo)` over the error budget, asked once per service; a
+    failed lookup skips the service with one warning), then
+    `DriftAnalyzer.analyze()` per `(service, tier, slo_name, window)` and
+    submits `drift_signal` assessments. Which SLOs have a budget is
+    generate's decision, read back from the series rather than re-derived
+    from the manifest [opensrm-zo0o].
   - `ObserveTopologyModule`: `DependencyDiscovery` +
     `PrometheusDepProvider`. `discovery.build_graph(service_names)`
     once → per-service `calculate_blast_radius` → submits
@@ -307,20 +312,32 @@ query_kind)`, the single query builder. The kind rides on
 `SLODefinition.query_kind` (no default — a wrong one is silent) and is
 what `evaluate_slos` dispatches its breach rule on: `judgment_rate`
 inverts a 0-1 rate to an SLI, `ratio` scales a good-ratio SLI without
-inverting, `judgment_duration` and `latency_seconds` compare durations,
-`error_budget` tests a signed budget against zero. Dispatching on the
-SLO's name or `slo_type` instead is what broke: the name is author-chosen
-in v2, and half the judgment taxonomy has no rate builder, so neither
-answers what units the value is in [opensrm-fxln]. Module-level `_JUDGMENT_SLO_QUERIES` lookup
-dict of lambdas keyed by **`spec.judgment_type`**, not by SLO name: in
-v2 `metadata.name` is author-chosen and independent of the type
-(`reversal_rate` / `high_confidence_failure` / `calibration` /
-`feedback_latency`). Only 4 of the 8 `JUDGMENT_SLO_TYPES` have a
-builder; the other 4 fall through to the `slo:{name}:ratio` recording-
-rule convention. They must NOT yield `""` — Prometheus 400s on an empty
-query and `query_prometheus` reads that as no-data, silently skipping
-the SLO (opensrm-fxln; the `_judgment_slo_query` wrapper that returned
-`""` was deleted there). Hysteresis reads each window's `raw_breach`
+inverting, `error_budget` tests a signed budget against zero, and
+`not_evaluable` is skipped. Dispatching
+on the SLO's name or `slo_type` instead is what broke: the name is
+author-chosen in v2, and most of the judgment taxonomy has no rate
+builder, so neither answers what units the value is in [opensrm-fxln].
+**Every request-ratio classical SLO is `error_budget`** (ruling Z1,
+opensrm-zo0o): availability, latency and error_rate (`BUDGETED_KINDS`) read
+`slo:error_budget_remaining:ratio{service, slo}` from nthlayer-common's
+`ERROR_BUDGET_REMAINING`, which generate writes per SLO. The other classical
+kinds are `not_evaluable` with an empty query (ruling D5, E3's
+`no_data_source`): `evaluate_slos` never queries them and `evaluate-once`
+lists them. `_classical_kind` is a copy of generate's `_slo_kind` so both
+agree on which SLOs have a budget (opensrm-ltlw moves it to common). The
+latency-seconds and classical ratio branches are gone; a budgeted SLO whose
+series is missing (generate's guard skipped it, or pre-4.1.0 rules) is
+logged as a warning, listed by `evaluate-once` as NO DATA, and not
+evaluated. Module-level `_JUDGMENT_SLO_QUERIES`
+lookup dict of lambdas keyed by **`spec.judgment_type`**, not by SLO
+name: in v2 `metadata.name` is author-chosen and independent of the type.
+Only 2 of the 5 judgment SLO types (`reversal_rate`,
+`high_confidence_failure`) have a builder; the other 3 fall through to
+the `slo:{name}:ratio` recording-rule convention, the only remaining use
+of `ratio`. They must NOT yield `""` — Prometheus 400s on an empty query
+and `query_prometheus` reads that as no-data, silently skipping the SLO
+(opensrm-fxln; the `_judgment_slo_query` wrapper that returned `""` was
+deleted there). Hysteresis reads each window's `raw_breach`
 back out of the verdict blob built by `evaluation_custom_metadata` —
 one definition shared by the CLI writer and
 `count_consecutive_breaches`, which previously re-derived breach as
@@ -335,13 +352,7 @@ than a full cycle once a run covered 20 SLOs and capped `consecutive` at
 measure writes the service into `subject.ref` and leaves
 `subject.service` None, so that filter matches nothing, and populating
 it now would silently shorten history for every SLO already running.
-Duration targets convert via `_target_seconds` using the manifest's
-declared `unit`, which the parser preserves; a missing or unknown unit
-logs a warning and assumes `ms` rather than dropping the SLO.
-`calibration` +
-`feedback_latency` are
-window-agnostic (gauge metrics) so their lambdas use a `_window`
-underscore param. The module logs through `logging.getLogger`, NOT
+The module logs through `logging.getLogger`, NOT
 structlog — %-style args only; kwargs would TypeError (load-bearing
 fact per opensrm-y7dd R5 Pass 3).
 

@@ -33,6 +33,46 @@ command flushes its events as it exits, and with the collector unreachable it
 waits up to `OTEL_EXPORTER_OTLP_TIMEOUT` (10s by default) to do so; set it
 lower where that matters, e.g. in scripts.
 
+## 4.2: every classical SLO is evaluated from its error budget
+
+From 4.2 (opensrm-zo0o, ruling Z1) `nthlayer-measure` evaluates every
+classical SLO from `slo:error_budget_remaining:ratio{service, slo}`, the
+series nthlayer-generate writes, and breaches when it goes negative. Before,
+only availability SLOs read it; a latency SLO named `latency` compared a
+percentile in seconds with its target, and every other classical SLO read
+`slo:<name>:ratio`, which nothing wrote for error_rate, throughput, freshness,
+lag or custom, so they were never evaluated.
+
+**Deploy nthlayer-generate 4.1.0's recording rules first.** Earlier
+generate releases write a budget for availability SLOs only, so with them a
+latency or error_rate SLO now reads no data and is not evaluated, where
+workers 4.1 evaluated a latency SLO from its percentile. Budgets also read low for their
+first window after the rules are deployed, as generate's upgrade note
+explains.
+
+Throughput, freshness, lag and custom SLOs have no budget (D5,
+opensrm-vcxm), so measure no longer queries anything for them: `evaluate-once`
+lists each as `NOT EVALUABLE (no_data_source)`, writes no verdict for it, and
+counts them in its closing summary. A request-ratio SLO whose budget series
+is missing is logged as a warning (`No error budget value for <service>/<slo>;
+not evaluated`) and skipped. That is expected when generate's guard skipped
+its budget (generate's README lists when); otherwise generate 4.1.0's rules
+are not deployed.
+
+Two other readers of the budget change with it:
+
+- **correlate** reports the service's worst budget with
+  `bottomk(1, ...)` rather than `min(...)`, and its `error_budget_exhausted`
+  event payload gains `slo`, naming the overspent SLO.
+- **drift** (worker mode) analyses only SLOs Prometheus holds a budget series
+  for. Judgment SLOs and budget-less classical SLOs no longer log
+  `drift_analysis_failed` every cycle; if the lookup itself fails, it logs
+  `drift_budget_discovery_failed` once per service and skips that service for
+  the cycle.
+
+The `latency_seconds` query kind, its duration-unit table and
+`SLODefinition.unit` in `measure/adapters/prometheus.py` are removed.
+
 ## Breaking changes
 
 ### `gen_ai.decision.evaluated` → per-dimension grader events + a summary
