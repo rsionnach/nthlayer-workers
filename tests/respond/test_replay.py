@@ -73,7 +73,9 @@ async def test_replay_remediation_approval(tmp_path):
 
 
 async def test_replay_autonomy_reduction(tmp_path):
-    """Agent model update triggers autonomy reduction -> RESOLVED."""
+    """Agent model update: the model recommends an autonomy reduction, the
+    pipeline resolves, and nothing is reduced (respond has no reduction path,
+    opensrm-5d71). The scenario's expected_outcomes agree with the run."""
     scenario_path = os.path.join(
         os.path.dirname(__file__),
         "..",
@@ -87,6 +89,8 @@ async def test_replay_autonomy_reduction(tmp_path):
     assert result["final_state"] == "resolved"
     assert result["verdict_count"] >= 5
     assert result["remediation_executed"] is True
+    assert result["autonomy_reduced"] is False
+    assert result["checks"] == []
 
 
 async def test_replay_crash_recovery(tmp_path):

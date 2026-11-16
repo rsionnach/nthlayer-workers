@@ -265,3 +265,49 @@ async def test_post_execute_no_autonomy_reduction_no_tag(triage_agent, verdict_s
     with structlog.testing.capture_logs() as logs:
         await triage_agent._post_execute(context, result)
     assert _not_applied(logs) == []
+
+
+def _model_update_context(verdict_store, incident_id: str, tagged: int) -> IncidentContext:
+    """An incident whose ``tagged`` trigger verdicts all carry agent_model_update."""
+    ids = []
+    for n in range(tagged):
+        v = verdict_create(
+            subject={"type": "correlation", "service": "api", "ref": f"cg-mu-{n}", "summary": "Model drift"},
+            judgment={"action": "flag", "confidence": 0.9, "reasoning": "drift", "tags": ["agent_model_update"]},
+            producer={"system": "nthlayer-correlate"},
+        )
+        verdict_store.put(v)
+        ids.append(v.id)
+    return IncidentContext(
+        id=incident_id,
+        state=IncidentState.TRIGGERED,
+        created_at="2026-03-19T10:00:00Z",
+        updated_at="2026-03-19T10:00:00Z",
+        trigger_source="nthlayer-correlate",
+        trigger_verdict_ids=ids,
+        topology={},
+    )
+
+
+def _triage_result(severity: int):
+    from nthlayer_workers.respond.types import TriageResult
+    return TriageResult(
+        severity=severity, blast_radius=[], affected_slos=[], assigned_team=None,
+        reasoning="model update",
+    )
+
+
+async def test_post_execute_reports_once_for_several_tagged_verdicts(triage_agent, verdict_store):
+    """One report per incident, however many trigger verdicts carry the tag."""
+    context = _model_update_context(verdict_store, "INC-2026-0013", tagged=2)
+    with structlog.testing.capture_logs() as logs:
+        await triage_agent._post_execute(context, _triage_result(1))
+    assert len(_not_applied(logs)) == 1
+
+
+async def test_post_execute_reports_at_severity_two(triage_agent, verdict_store):
+    """Severity 2 is inside the condition (severity <= 2)."""
+    context = _model_update_context(verdict_store, "INC-2026-0014", tagged=1)
+    with structlog.testing.capture_logs() as logs:
+        await triage_agent._post_execute(context, _triage_result(2))
+    assert len(_not_applied(logs)) == 1

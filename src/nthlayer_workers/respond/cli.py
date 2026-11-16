@@ -446,8 +446,10 @@ async def replay_command(
 
     # Build results
     remediation_executed = False
+    autonomy_reduced = False
     if result_ctx.remediation is not None:
         remediation_executed = result_ctx.remediation.executed
+        autonomy_reduced = result_ctx.remediation.autonomy_reduced
 
     results = {
         "incident_id": result_ctx.id,
@@ -455,6 +457,7 @@ async def replay_command(
         "verdict_count": len(result_ctx.verdict_chain),
         "verdict_chain": list(result_ctx.verdict_chain),
         "remediation_executed": remediation_executed,
+        "autonomy_reduced": autonomy_reduced,
         "context": result_ctx,
     }
 
@@ -482,6 +485,14 @@ async def replay_command(
             checks.append(
                 f"FAIL: remediation_executed expected={expected['remediation_executed']} "
                 f"got={results['remediation_executed']}"
+            )
+        if (
+            expected.get("autonomy_reduced") is not None
+            and results["autonomy_reduced"] != expected["autonomy_reduced"]
+        ):
+            checks.append(
+                f"FAIL: autonomy_reduced expected={expected['autonomy_reduced']} "
+                f"got={results['autonomy_reduced']}"
             )
         results["checks"] = checks
 
