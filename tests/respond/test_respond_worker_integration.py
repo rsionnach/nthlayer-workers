@@ -189,7 +189,6 @@ async def test_p3_e1_milestone_full_chain_to_core():
         "deployment_id": "test-dep",
         "config": {
             "root_cause_threshold": config.root_cause_threshold,
-            "arbiter_url": config.arbiter_url,
             "escalation_threshold": config.escalation_threshold,
         },
     }
@@ -325,7 +324,6 @@ async def test_p3_e1_fallback_path_full_chain():
         "deployment_id": "test-dep",
         "config": {
             "root_cause_threshold": config.root_cause_threshold,
-            "arbiter_url": config.arbiter_url,
             "escalation_threshold": config.escalation_threshold,
         },
     }

@@ -26,7 +26,6 @@ class RespondConfig:
     root_cause_threshold: float = 0.7
     # Safe actions
     cooldown_seconds: int = 300
-    arbiter_url: str = "http://localhost:8080"
     # Stores
     verdict_store_path: str = "verdicts.db"
     context_store_path: str = "respond-incidents.db"
@@ -116,7 +115,6 @@ def load_config(path: str) -> RespondConfig:
         remediation_timeout=agents.get("remediation", {}).get("timeout", 30),
         root_cause_threshold=agents.get("investigation", {}).get("root_cause_threshold", 0.7),
         cooldown_seconds=safe.get("cooldown_seconds", 300),
-        arbiter_url=safe.get("arbiter_url", "http://localhost:8080"),
         verdict_store_path=verdict.get("path", "verdicts.db"),
         context_store_path=ctx_store.get("path", "respond-incidents.db"),
         manifests_dir=topo.get("manifests_dir"),

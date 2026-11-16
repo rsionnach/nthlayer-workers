@@ -48,4 +48,4 @@ scenario:
     verdict_count: 5
     root_cause: "code-reviewer model update degraded judgment quality"
     remediation_executed: true
-    autonomy_reduced: true
+    autonomy_reduced: false

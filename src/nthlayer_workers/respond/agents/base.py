@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import urllib.error
-import urllib.request
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -479,44 +477,31 @@ class AgentBase(ABC):
         return f"DEGRADED: {role} — manual assessment required"
 
     # ------------------------------------------------------------------ #
-    # Transport: governance                                                #
+    # Governance                                                           #
     # ------------------------------------------------------------------ #
 
-    async def _request_autonomy_reduction(
+    def _autonomy_reduction_not_applied(
         self,
         agent_name: str,
-        arbiter_url: str,
         reason: str,
-    ) -> dict:
-        """POST to Arbiter's governance endpoint to reduce agent autonomy.
+        context: IncidentContext,
+    ) -> None:
+        """Record that a reduction of ``agent_name``'s autonomy was called for
+        and not carried out.
 
-        Uses urllib (stdlib) in asyncio.to_thread; retries up to 3 times.
+        Respond has no way to reduce an agent's autonomy: the Arbiter route it
+        used to POST to (``/api/v1/governance/reduce``) is retired and
+        nthlayer-core serves no replacement [opensrm-5d71]. The call sites
+        keep their conditions and report here, so the gap shows in the log
+        rather than as three failed requests.
         """
-        url = f"{arbiter_url}/api/v1/governance/reduce"
-        payload = json.dumps({
-            "agent": agent_name,
-            "reason": reason,
-        }).encode()
-
-        def _sync_post() -> dict:
-            req = urllib.request.Request(
-                url,
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            last_exc: Exception | None = None
-            for _ in range(3):
-                try:
-                    with urllib.request.urlopen(req, timeout=10) as resp:
-                        return json.loads(resp.read().decode())
-                except Exception as exc:  # noqa: BLE001
-                    last_exc = exc
-            raise RuntimeError(
-                f"Autonomy reduction request failed after 3 attempts: {last_exc}"
-            )
-
-        return await asyncio.to_thread(_sync_post)
+        log.warning(
+            "autonomy_reduction_not_applied",
+            agent=agent_name,
+            reason=reason,
+            incident_id=context.id,
+            requested_by=self.role.value,
+        )
 
     # ------------------------------------------------------------------ #
     # Utility                                                              #

@@ -16,7 +16,7 @@ def test_default_config():
     assert cfg.remediation_timeout == 30
     assert cfg.root_cause_threshold == 0.7
     assert cfg.cooldown_seconds == 300
-    assert cfg.arbiter_url == "http://localhost:8080"
+    assert not hasattr(cfg, "arbiter_url")  # retired [opensrm-5d71]
     assert cfg.verdict_store_path == "verdicts.db"
     assert cfg.context_store_path == "respond-incidents.db"
 
@@ -49,7 +49,9 @@ def test_load_config_from_yaml(tmp_path):
     assert cfg.triage_timeout == 10
     assert cfg.investigation_timeout == 45
     assert cfg.root_cause_threshold == 0.8
-    assert cfg.arbiter_url == "http://arbiter:9090"
+    # safe_actions.arbiter_url (still in the YAML above) is retired: it is
+    # ignored, and an old config keeps loading [opensrm-5d71].
+    assert not hasattr(cfg, "arbiter_url")
     assert cfg.verdict_store_path == "/tmp/verdicts.db"
     assert cfg.context_store_path == "/tmp/incidents.db"
 

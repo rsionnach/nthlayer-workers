@@ -38,7 +38,6 @@ def _make_coordinator(config: RespondConfig) -> tuple[Coordinator, SQLiteContext
     register_builtin_actions(registry)
     agent_config = {
         "root_cause_threshold": config.root_cause_threshold,
-        "arbiter_url": config.arbiter_url,
         "escalation_threshold": config.escalation_threshold,  # P3-E.1: capture-at-write-time
     }
     agents = {
@@ -199,7 +198,6 @@ def _build_replay_agents(
     """Create the agent map, optionally patching _call_model for --no-model replay."""
     agent_config = {
         "root_cause_threshold": config.root_cause_threshold,
-        "arbiter_url": config.arbiter_url,
         "escalation_threshold": config.escalation_threshold,  # P3-E.1: capture-at-write-time
     }
     agents_map: dict[AgentRole, Any] = {

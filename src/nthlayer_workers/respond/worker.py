@@ -222,7 +222,6 @@ class RespondModule:
 
         agent_config = {
             "root_cause_threshold": self.config.root_cause_threshold,
-            "arbiter_url": self.config.arbiter_url,
             "escalation_threshold": self.config.escalation_threshold,
         }
         kwargs = {

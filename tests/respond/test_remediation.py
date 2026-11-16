@@ -6,6 +6,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import structlog
 from nthlayer_common.verdicts import MemoryStore
 
 from nthlayer_workers.respond.agents.remediation import RemediationAgent
@@ -52,7 +53,7 @@ def agent(verdict_store, registry):
         model="test-model",
         max_tokens=256,
         verdict_store=verdict_store,
-        config={"arbiter_url": "http://arbiter.local"},
+        config={},
         safe_action_registry=registry,
     )
 
@@ -416,9 +417,13 @@ async def test_post_execute_execution_failure(agent, context):
 # _post_execute — autonomy reduction                                   #
 # ------------------------------------------------------------------ #
 
-@pytest.mark.asyncio
-async def test_post_execute_autonomy_reduction(agent, context):
-    """When autonomy_reduction is recommended, _request_autonomy_reduction is called."""
+def _not_applied(logs: list[dict]) -> list[dict]:
+    return [e for e in logs if e["event"] == "autonomy_reduction_not_applied"]
+
+
+def _recommending_result() -> RemediationResult:
+    """A result as parse_response leaves it when the model recommends a
+    reduction (the ``autonomy_reduction`` object of prompts/remediation.yaml)."""
     result = RemediationResult(
         proposed_action="scale_up",
         target="payment-api",
@@ -426,37 +431,48 @@ async def test_post_execute_autonomy_reduction(agent, context):
         requires_human_approval=False,
         reasoning="Execute and reduce autonomy.",
     )
-    # Inject autonomy_reduction metadata (as _post_execute expects it stored by parse_response)
     result.autonomy_reduction = {
         "recommended": True,
         "target_agent": "triage-agent",
-        "arbiter_url": "http://arbiter.local",
         "reason": "Multiple misclassifications detected",
     }
-
-    mock_exec = AsyncMock(return_value={"success": True, "detail": "ok", "timestamp": "t"})
-    agent._registry.execute = mock_exec
-
-    mock_autonomy = AsyncMock(return_value={
-        "previous_level": "high",
-        "new_level": "medium",
-    })
-    agent._request_autonomy_reduction = mock_autonomy
-
-    await agent._post_execute(context, result)
-
-    mock_autonomy.assert_called_once_with(
-        "triage-agent",
-        "http://arbiter.local",
-        "Multiple misclassifications detected",
-    )
-    assert result.autonomy_reduced is True
-    assert result.autonomy_target == "triage-agent"
+    return result
 
 
 @pytest.mark.asyncio
-async def test_post_execute_no_autonomy_reduction_when_not_recommended(agent, context):
-    """When autonomy_reduction.recommended=False, _request_autonomy_reduction is NOT called."""
+async def test_post_execute_reports_recommended_reduction_not_applied(agent, context):
+    """A recommended reduction is reported, not applied: no connection is
+    opened, autonomy_reduced stays False and the recommendation is kept
+    [opensrm-5d71]."""
+    result = _recommending_result()
+    agent._registry.execute = AsyncMock(
+        return_value={"success": True, "detail": "ok", "timestamp": "t"}
+    )
+
+    with (
+        patch("urllib.request.urlopen") as urlopen,
+        structlog.testing.capture_logs() as logs,
+    ):
+        await agent._post_execute(context, result)
+
+    urlopen.assert_not_called()
+    events = _not_applied(logs)
+    assert len(events) == 1
+    assert events[0]["agent"] == "triage-agent"
+    assert events[0]["reason"] == "Multiple misclassifications detected"
+    assert events[0]["incident_id"] == context.id
+    assert events[0]["requested_by"] == "remediation"
+    assert events[0]["log_level"] == "warning"
+    assert result.autonomy_reduced is False
+    assert result.autonomy_target is None
+    assert result.previous_autonomy_level is None
+    assert result.new_autonomy_level is None
+    assert result.autonomy_reduction["recommended"] is True
+
+
+@pytest.mark.asyncio
+async def test_post_execute_no_report_when_reduction_not_recommended(agent, context):
+    """When autonomy_reduction.recommended=False, nothing is reported."""
     result = RemediationResult(
         proposed_action="scale_up",
         target="payment-api",
@@ -465,56 +481,40 @@ async def test_post_execute_no_autonomy_reduction_when_not_recommended(agent, co
         reasoning="No autonomy reduction needed.",
     )
     result.autonomy_reduction = {"recommended": False}
+    agent._registry.execute = AsyncMock(
+        return_value={"success": True, "detail": "ok", "timestamp": "t"}
+    )
 
-    mock_exec = AsyncMock(return_value={"success": True, "detail": "ok", "timestamp": "t"})
-    agent._registry.execute = mock_exec
+    with structlog.testing.capture_logs() as logs:
+        await agent._post_execute(context, result)
 
-    mock_autonomy = AsyncMock()
-    agent._request_autonomy_reduction = mock_autonomy
-
-    await agent._post_execute(context, result)
-
-    mock_autonomy.assert_not_called()
+    assert _not_applied(logs) == []
     assert result.autonomy_reduced is False
 
 
 # ------------------------------------------------------------------ #
-# _post_execute — ordering: safe action BEFORE autonomy reduction     #
+# _post_execute — ordering: safe action BEFORE the reduction report   #
 # ------------------------------------------------------------------ #
 
 @pytest.mark.asyncio
 async def test_post_execute_ordering(agent, context):
-    """Safe action executes BEFORE autonomy reduction."""
+    """The safe action executes BEFORE the reduction is reported."""
     call_order: list[str] = []
-
-    result = RemediationResult(
-        proposed_action="scale_up",
-        target="payment-api",
-        risk_assessment="Low",
-        requires_human_approval=False,
-        reasoning="Execute both.",
-    )
-    result.autonomy_reduction = {
-        "recommended": True,
-        "target_agent": "investigation-agent",
-        "arbiter_url": "http://arbiter.local",
-        "reason": "Drift detected",
-    }
+    result = _recommending_result()
 
     async def fake_execute(name, target, ctx):
         call_order.append("execute")
         return {"success": True, "detail": "done", "timestamp": "t"}
 
-    async def fake_autonomy(agent_name, url, reason):
-        call_order.append("autonomy_reduction")
-        return {"previous_level": "high", "new_level": "low"}
+    def fake_report(agent_name, reason, context):
+        call_order.append("autonomy_reduction_not_applied")
 
     agent._registry.execute = fake_execute
-    agent._request_autonomy_reduction = fake_autonomy
+    agent._autonomy_reduction_not_applied = fake_report
 
     await agent._post_execute(context, result)
 
-    assert call_order == ["execute", "autonomy_reduction"]
+    assert call_order == ["execute", "autonomy_reduction_not_applied"]
 
 
 # ------------------------------------------------------------------ #
@@ -563,7 +563,7 @@ def bare_agent(verdict_store, tmp_path):
         model="test-model",
         max_tokens=256,
         verdict_store=verdict_store,
-        config={"arbiter_url": "http://arbiter.local"},
+        config={},
         safe_action_registry=make_registry(tmp_path, with_builtins=False),
     )
 
@@ -661,7 +661,7 @@ def agent_no_registry(verdict_store):
         model="test-model",
         max_tokens=256,
         verdict_store=verdict_store,
-        config={"arbiter_url": "http://arbiter.local"},
+        config={},
         safe_action_registry=None,
     )
 
