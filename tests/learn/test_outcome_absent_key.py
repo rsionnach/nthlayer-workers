@@ -133,18 +133,19 @@ class TestMeasureVerdictsAreResolved:
         assert (await module.get_state())["cursor"] == verdict["created_at"]
 
 
-# Each value is a way a stored verdict can lack a status; core reads all of
+# Each case is a way a stored verdict can lack a status; core reads all of
 # them as pending (see the module docstring).
-_NO_STATUS = {
-    "absent": {},
-    "null_outcome": {"outcome": None},
-    "empty_outcome": {"outcome": {}},
-    "null_status": {"outcome": {"status": None}},
-}
+_NO_STATUS = [
+    pytest.param({}, id="absent"),
+    pytest.param({"outcome": None}, id="null_outcome"),
+    pytest.param({"outcome": {}}, id="empty_outcome"),
+    pytest.param({"outcome": {"status": None}}, id="null_status"),
+]
+_NO_STATUS_SHAPES = [case.values[0] for case in _NO_STATUS]
 
 
 class TestOutcomeStatusReader:
-    @pytest.mark.parametrize("extra", _NO_STATUS.values(), ids=_NO_STATUS.keys())
+    @pytest.mark.parametrize("extra", _NO_STATUS)
     def test_missing_status_reads_as_pending(self, extra):
         assert _outcome_status({"id": "v", **extra}) == "pending"
 
@@ -152,7 +153,7 @@ class TestOutcomeStatusReader:
     def test_written_status_is_returned(self, status):
         assert _outcome_status({"id": "v", "outcome": {"status": status}}) == status
 
-    @pytest.mark.parametrize("extra", _NO_STATUS.values(), ids=_NO_STATUS.keys())
+    @pytest.mark.parametrize("extra", _NO_STATUS)
     async def test_missing_status_enters_resolution(self, extra):
         very_old = (datetime.now(UTC) - timedelta(days=10)).isoformat()
         verdict = {"id": "vrd-x", "created_at": very_old, "type": "quality_breach",
@@ -231,7 +232,7 @@ class TestDescendantAndChainReads:
         client.resolve_outcome.assert_awaited_once()
         assert client.resolve_outcome.call_args[0][1]["outcome_status"] == "confirmed"
 
-    @pytest.mark.parametrize("extra", _NO_STATUS.values(), ids=_NO_STATUS.keys())
+    @pytest.mark.parametrize("extra", _NO_STATUS)
     def test_timeline_keeps_a_missing_status_as_none(self, extra):
         """The timeline reports what the verdict carries; it does not crash on
         a null outcome and does not invent a status."""
@@ -254,9 +255,9 @@ class TestDescendantAndChainReads:
                      "affected_services": ["svc"], "correlation_groups": []},
         }
         chain = [
-            {"id": f"v-{name}", "created_at": "2026-01-01T00:10:00+00:00",
+            {"id": f"v-{n}", "created_at": "2026-01-01T00:10:00+00:00",
              "type": "quality_breach", "service": "svc", **extra}
-            for name, extra in _NO_STATUS.items()
+            for n, extra in enumerate(_NO_STATUS_SHAPES)
         ] + [{"id": "v-done", "created_at": "2026-01-01T00:20:00+00:00", "type": "approval",
               "service": "svc", "outcome": {"status": "confirmed"}}]
         client = AsyncMock()
