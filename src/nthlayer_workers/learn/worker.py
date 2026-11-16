@@ -28,6 +28,39 @@ _OUTCOME_SCORES = {
     "partial": 0.5,
 }
 
+_PENDING = "pending"
+
+# Verdict types that record a resolution rather than a judgment. Core builds
+# an outcome_resolution verdict with no ``outcome`` key (POST
+# /verdicts/{id}/outcome), so it would otherwise read as pending and an expiry
+# would resolve the resolution [opensrm-eel4].
+_RESOLUTION_RECORD_TYPES = frozenset({"outcome_resolution"})
+
+
+def _raw_outcome_status(verdict: dict) -> Any:
+    """``outcome.status`` as stored, or None when the verdict carries none.
+
+    A verdict may have no ``outcome`` key (measure's quality_breach and
+    autonomy_change verdicts), a null ``outcome`` or an ``outcome`` without a
+    status; none of these may raise.
+    """
+    outcome = verdict.get("outcome")
+    if not isinstance(outcome, dict):
+        return None
+    return outcome.get("status")
+
+
+def _outcome_status(verdict: dict) -> Any:
+    """The verdict's outcome status, with a missing one read as pending.
+
+    This is how core reads it (``Store.update_verdict_outcome`` coalesces an
+    absent ``outcome.status`` to pending), and core stores a verdict as sent,
+    so learn must agree or it never resolves a verdict whose producer wrote no
+    outcome [opensrm-eel4].
+    """
+    status = _raw_outcome_status(verdict)
+    return _PENDING if status is None else status
+
 
 # ---------------------------------------------------------------------------
 # LearnOutcomeModule — continuous verdict outcome resolution
@@ -80,8 +113,9 @@ class LearnOutcomeModule:
             return
 
         for verdict in result.data:
-            outcome = verdict.get("outcome", {})
-            if outcome.get("status") != "pending":
+            if verdict.get("type") in _RESOLUTION_RECORD_TYPES:
+                continue
+            if _outcome_status(verdict) != _PENDING:
                 continue
 
             try:
@@ -121,8 +155,7 @@ class LearnOutcomeModule:
             has_overridden = None
             for desc in descendants.data:
                 desc_type = desc.get("type", "")
-                desc_outcome = desc.get("outcome", {}).get("status")
-                if desc_outcome == "overridden" and has_overridden is None:
+                if _outcome_status(desc) == "overridden" and has_overridden is None:
                     has_overridden = desc
                 if desc_type in ("execution", "outcome_resolution") and has_execution is None:
                     has_execution = desc
@@ -281,7 +314,7 @@ class LearnRetrospectiveModule:
         # Compute metrics
         resolved_count = sum(
             1 for v in chain
-            if v.get("outcome", {}).get("status") not in (None, "pending")
+            if _outcome_status(v) != _PENDING
         )
         pending_count = len(chain) - resolved_count
 
@@ -396,7 +429,7 @@ def _build_chain_timeline(chain: list[dict]) -> list[dict]:
             "type": v.get("type", "unknown"),
             "service": v.get("service", "unknown"),
             "id": v.get("id"),
-            "outcome": v.get("outcome", {}).get("status"),
+            "outcome": _raw_outcome_status(v),
         })
     return entries
 
