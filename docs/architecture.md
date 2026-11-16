@@ -864,6 +864,13 @@ opensrm-jmy.6.
   4. score_outcome_divergence: confidence vs observed outcome.
   5. expiry: >7d pending → "expired".
 
+  "Pending" is read as core reads it: a verdict with no `outcome` key, a
+  null `outcome` or no `outcome.status` is pending (`_outcome_status`,
+  opensrm-eel4). Measure's `quality_breach` and `autonomy_change` verdicts
+  carry no `outcome`, and would otherwise never be resolved.
+  `outcome_resolution` verdicts, which core also stores without one, are
+  resolution records and are skipped.
+
   Emits `calibration_signal` assessment on resolution (NOT on expiry
   — absence of signal is not a quality signal). `calibration_signal`
   data: `{verdict_id, verdict_type, expressed_confidence,
@@ -970,6 +977,8 @@ tests/
   learn/
     test_learn_worker.py         # Both LearnOutcomeModule +
                                  # LearnRetrospectiveModule
+    test_outcome_absent_key.py   # opensrm-eel4: real measure verdicts
+                                 # (no outcome key) through learn
     test_recommendations.py      # 22 tests, opensrm-jmy.2
     test_retrospective_financial.py  # 10 tests, opensrm-jmy.1
 ```
