@@ -62,6 +62,19 @@ def _outcome_status(verdict: dict) -> Any:
     return _PENDING if status is None else status
 
 
+def _resolves(descendant: dict, verdict_id: str) -> bool:
+    """Whether ``descendant`` is the resolution record of ``verdict_id`` itself.
+
+    Core's lineage is transitive, so the descendants of a verdict include the
+    resolution records of its children. Expiring an autonomy_change must not
+    read as a confirmation of the quality_breach above it [opensrm-eel4].
+    """
+    if descendant.get("type") not in _RESOLUTION_RECORD_TYPES:
+        return False
+    parent_ids = descendant.get("parent_ids")
+    return isinstance(parent_ids, list) and verdict_id in parent_ids
+
+
 # ---------------------------------------------------------------------------
 # LearnOutcomeModule — continuous verdict outcome resolution
 # ---------------------------------------------------------------------------
@@ -157,7 +170,10 @@ class LearnOutcomeModule:
                 desc_type = desc.get("type", "")
                 if _outcome_status(desc) == "overridden" and has_overridden is None:
                     has_overridden = desc
-                if desc_type in ("execution", "outcome_resolution") and has_execution is None:
+                if has_execution is None and (
+                    desc_type == "execution"
+                    or _resolves(desc, verdict_id)
+                ):
                     has_execution = desc
 
             # Overridden takes priority (Path 4: divergence)

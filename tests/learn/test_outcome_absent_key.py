@@ -215,6 +215,109 @@ class TestOutcomeResolutionRecordsAreNotCandidates:
         assert client.resolve_outcome.call_args[0][0] == breach["id"]
 
 
+class _FakeCore:
+    """The two core behaviours the lineage path depends on.
+
+    - ``descendants_of`` is transitive: nthlayer-core ``store.py``
+      ``_populate_lineage`` copies every ancestor row of the parent, and
+      ``descendants_of`` orders by hop distance.
+    - ``POST /verdicts/{id}/outcome`` (``server.py`` ``post_verdict_outcome``)
+      stores a child ``out-<id>`` of type ``outcome_resolution`` and never
+      mutates the original.
+    """
+
+    def __init__(self, verdicts: list[dict]):
+        self.verdicts = {v["id"]: v for v in verdicts}
+        self.resolutions: dict[str, str] = {}
+
+    def _hops(self, descendant: dict, ancestor_id: str, depth: int = 1) -> int | None:
+        parents = [p for p in descendant.get("parent_ids") or [] if p in self.verdicts]
+        if ancestor_id in parents:
+            return depth
+        found = [self._hops(self.verdicts[p], ancestor_id, depth + 1) for p in parents]
+        return min((h for h in found if h is not None), default=None)
+
+    async def get_descendants(self, verdict_id: str) -> APIResult:
+        hops = {v["id"]: self._hops(v, verdict_id) for v in self.verdicts.values()}
+        ids = sorted((i for i, h in hops.items() if h is not None), key=lambda i: hops[i])
+        return _ok([self.verdicts[i] for i in ids])
+
+    async def resolve_outcome(self, verdict_id: str, body: dict) -> APIResult:
+        original = self.verdicts[verdict_id]
+        self.resolutions[verdict_id] = body["outcome_status"]
+        record = {
+            "id": f"out-{verdict_id}",
+            "type": "outcome_resolution",
+            "service": original.get("service"),
+            "created_at": datetime.now(UTC).isoformat(),
+            "parent_ids": [verdict_id],
+            "chain_depth": 1,
+            "pipeline_latency_ms": None,
+            "outcome_status": body["outcome_status"],
+            "resolution": body.get("resolution"),
+            "reasoning": None,
+        }
+        self.verdicts[record["id"]] = record
+        return _ok({"id": record["id"]}, status_code=201)
+
+    def client(self, page: list[dict]) -> AsyncMock:
+        client = AsyncMock()
+        client.get_verdicts = AsyncMock(return_value=_ok(page))
+        client.get_descendants = AsyncMock(side_effect=self.get_descendants)
+        client.resolve_outcome = AsyncMock(side_effect=self.resolve_outcome)
+        client.submit_assessment = AsyncMock(return_value=_ok(status_code=201))
+        return client
+
+
+class TestResolutionRecordOfAChildIsNotAConfirmation:
+    async def test_expiring_the_autonomy_change_does_not_confirm_its_breach(self):
+        """Measure's autonomy_change names its quality_breach in parent_ids.
+        Core returns the page newest first, so the autonomy_change is expired
+        first and its resolution record becomes a descendant of the breach."""
+        verdicts = await _measure_verdicts()
+        breach = _aged(verdicts["quality_breach"], days=10, minutes=1)
+        change = _aged(verdicts["autonomy_change"], days=10)
+        assert change["parent_ids"] == [breach["id"]]
+        core = _FakeCore([breach, change])
+        client = core.client([change, breach])
+
+        await LearnOutcomeModule(client=client, expiry_threshold_days=7).process_cycle()
+
+        assert core.resolutions == {change["id"]: "expired", breach["id"]: "expired"}
+        client.submit_assessment.assert_not_awaited()
+
+    async def test_a_verdicts_own_resolution_record_still_resolves_it(self):
+        """Unchanged by this bead: a verdict whose own ``out-<id>`` child
+        exists is read as resolved by lineage. (That learn then posts the
+        resolution again is opensrm-lpbi.)"""
+        verdict = _aged((await _measure_verdicts())["quality_breach"], hours=2)
+        core = _FakeCore([verdict])
+        await core.resolve_outcome(verdict["id"], {"outcome_status": "confirmed"})
+        client = core.client([verdict])
+
+        await LearnOutcomeModule(client=client).process_cycle()
+
+        client.resolve_outcome.assert_awaited_once()
+        verdict_id, resolution = client.resolve_outcome.call_args[0]
+        assert verdict_id == verdict["id"]
+        assert resolution["path"] == "lineage"
+
+    async def test_execution_under_a_child_still_confirms_the_ancestor(self):
+        """Transitive confirmation by a real downstream action is kept."""
+        verdicts = await _measure_verdicts()
+        breach = _aged(verdicts["quality_breach"], hours=3)
+        change = _aged(verdicts["autonomy_change"], hours=3)
+        execution = {"id": "vrd-exec", "type": "execution", "service": "fraud-detect",
+                     "created_at": datetime.now(UTC).isoformat(),
+                     "parent_ids": [change["id"]], "outcome": {"status": "confirmed"}}
+        core = _FakeCore([breach, change, execution])
+        client = core.client([breach])
+
+        await LearnOutcomeModule(client=client).process_cycle()
+
+        assert core.resolutions == {breach["id"]: "confirmed"}
+
+
 class TestDescendantAndChainReads:
     async def test_descendant_with_null_outcome_does_not_block_lineage(self):
         """A descendant stored with ``outcome: null`` is read as pending, and
