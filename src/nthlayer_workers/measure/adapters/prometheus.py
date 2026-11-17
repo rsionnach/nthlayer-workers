@@ -422,9 +422,12 @@ async def evaluate_slos(
                         slo.service, slo.slo_name,
                     )
                 else:
-                    # Debug, by the opensrm-zo0o ruling: a judgment rate
-                    # with no decisions in its window is ordinary. The CLI
-                    # still lists the SLO as NO DATA, so it is not lost.
+                    # Debug, by the opensrm-zo0o ruling: a judgment query
+                    # with nothing to read is often ordinary (no decisions
+                    # in the window, or no reversal yet), though it is also
+                    # what an exporter that does not write the series looks
+                    # like. The CLI lists the SLO as NO DATA either way, so
+                    # it is not lost.
                     logger.debug("No data for %s/%s, skipping", slo.service, slo.slo_name)
                 continue
 
