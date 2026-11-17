@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from nthlayer_common.api_client import APIResult
 from nthlayer_common.verdicts import MemoryStore
 
@@ -34,6 +35,7 @@ from nthlayer_workers.respond.types import (
     IncidentState,
     TriageResult,
 )
+from nthlayer_workers.respond.worker import RespondModule
 from nthlayer_workers.respond.worker_helpers import open_from_breach, open_from_snapshot
 from tests.measure.test_measure_worker import _manifest_with_judgment_slos
 
@@ -129,11 +131,42 @@ class TestIncidentService:
         ctx = open_from_snapshot(snap, RespondConfig())
         assert ctx.service == "fraud-detect"
 
-    def test_snapshot_without_a_domain_service_is_unknown(self):
-        """The placeholder the incident's id, topology and case already use."""
+    def test_snapshot_without_a_domain_service_takes_the_first_affected(self):
         ctx = open_from_snapshot(_snapshot({}), RespondConfig())
+        assert ctx.service == "fraud-detect"
+
+    def test_snapshot_naming_no_service_at_all_is_unknown(self):
+        snap = _snapshot({})
+        snap["data"]["affected_services"] = []
+        ctx = open_from_snapshot(snap, RespondConfig())
         assert ctx.service == "unknown"
-        assert ctx.topology["services"][0]["name"] == "fraud-detect"
+
+    @pytest.mark.parametrize(
+        "domain",
+        [
+            pytest.param({"service": "fraud-detect", "environment": "production"}, id="domain"),
+            pytest.param({}, id="no_domain_service"),
+        ],
+    )
+    async def test_case_and_verdicts_carry_the_same_service(self, domain):
+        """The worker opens the case and the agents stamp the verdicts from one
+        resolution of the incident's service."""
+        client = AsyncMock()
+        client.get_manifests = AsyncMock(return_value=_ok([]))
+        cases: list[dict] = []
+
+        async def _create_case(case):
+            cases.append(case)
+            return _ok(status_code=201)
+
+        client.create_case = AsyncMock(side_effect=_create_case)
+        module = RespondModule(client=client, config=RespondConfig())
+
+        incident_id = await module._open_incident_from_snapshot(_snapshot(domain))
+
+        ctx = module._incidents[incident_id]
+        assert len(cases) == 1
+        assert cases[0]["service"] == ctx.service == "fraud-detect"
 
 
 class TestVerdictService:

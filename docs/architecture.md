@@ -663,8 +663,9 @@ per core (no lease; multi-instance HA is v2). Pre-designed split:
   (`trigger_source="nthlayer-measure-fallback"`,
   `metadata.fallback_reason="no_correlation_snapshot"`).
   Both set `IncidentContext.service` (the snapshot's
-  `data.domain.service`, the breach's `service`; `"unknown"` when
-  neither names one), which `_emit_verdict` stamps on every respond
+  `data.domain.service`, else its first affected service; the breach's
+  `service`; `"unknown"` when none is named; the worker opens the case
+  with the same value), which `_emit_verdict` stamps on every respond
   verdict (opensrm-dm33).
 - `_make_incident_id(service) -> "INC-{SERVICE}-YYYYMMDD-HHMMSS-{uuid8}"`
   (uuid suffix disambiguates same-second opens).

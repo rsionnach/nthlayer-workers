@@ -475,7 +475,7 @@ class RespondModule:
                 snapshot_id=snap.get("id"),
             )
             return ctx.id
-        service = data.get("domain", {}).get("service") or affected[0]
+        service = ctx.service
         environment = data.get("domain", {}).get("environment") or "production"
         briefing = (
             data.get("nl_summary", {}).get("summary")
