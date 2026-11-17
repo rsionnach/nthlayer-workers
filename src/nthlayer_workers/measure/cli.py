@@ -405,18 +405,28 @@ def cmd_calibrate(args: argparse.Namespace) -> None:
         print(json.dumps(result, indent=2))
         return
 
+    slo = None
+    if args.agent:
+        from nthlayer_common.manifest import ManifestLoadError
+
+        from nthlayer_workers.measure.manifest import load_manifest
+
+        for ac in config.agents:
+            if ac.name == args.agent and ac.manifest:
+                # A manifest that is configured but cannot be read is an
+                # error, not a report without a target [opensrm-n4v1].
+                try:
+                    slo = load_manifest(Path(ac.manifest))
+                except (FileNotFoundError, ManifestLoadError) as exc:
+                    print(f"Error: manifest for agent '{args.agent}': {exc}", file=sys.stderr)
+                    sys.exit(1)
+                break
+
     store = _build_store(config)
 
     async def _run():
         if args.agent:
             from nthlayer_workers.measure.calibration.slos import JudgmentSLOChecker
-            from nthlayer_workers.measure.manifest import load_manifest
-
-            slo = None
-            for ac in config.agents:
-                if ac.name == args.agent and ac.manifest:
-                    slo = load_manifest(Path(ac.manifest))
-                    break
 
             checker = JudgmentSLOChecker(store, slo=slo)
             report = await checker.check(args.agent, window_days=args.window_days)
