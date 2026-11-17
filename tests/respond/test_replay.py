@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 
+import yaml
+
 from nthlayer_workers.respond.cli import replay_command
 
 # All replay tests use --no-model mode (mock responses from YAML).
@@ -73,7 +75,9 @@ async def test_replay_remediation_approval(tmp_path):
 
 
 async def test_replay_autonomy_reduction(tmp_path):
-    """Agent model update triggers autonomy reduction -> RESOLVED."""
+    """Agent model update: the model recommends an autonomy reduction, the
+    pipeline resolves, and nothing is reduced (respond has no reduction path,
+    opensrm-5d71). The scenario's expected_outcomes agree with the run."""
     scenario_path = os.path.join(
         os.path.dirname(__file__),
         "..",
@@ -87,6 +91,37 @@ async def test_replay_autonomy_reduction(tmp_path):
     assert result["final_state"] == "resolved"
     assert result["verdict_count"] >= 5
     assert result["remediation_executed"] is True
+    assert result["autonomy_reduced"] is False
+    assert result["checks"] == []
+
+
+async def test_replay_flags_an_autonomy_reduced_mismatch(tmp_path):
+    """The scenario's expected_outcomes.autonomy_reduced binds: the same
+    scenario with that one expectation flipped yields exactly one failed
+    check (the unmodified scenario yields none, above)."""
+    scenario_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "scenarios",
+        "synthetic",
+        "autonomy-reduction.yaml",
+    )
+    with open(scenario_path) as f:
+        scenario = yaml.safe_load(f)
+    outcomes = scenario["scenario"]["expected_outcomes"]
+    assert outcomes["autonomy_reduced"] is False
+    outcomes["autonomy_reduced"] = True
+    flipped = tmp_path / "autonomy-reduction-flipped.yaml"
+    flipped.write_text(yaml.safe_dump(scenario))
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+
+    result = await replay_command(
+        str(flipped), config_path=None, no_model=True, work_dir=str(work_dir)
+    )
+
+    assert result["autonomy_reduced"] is False
+    assert len(result["checks"]) == 1
 
 
 async def test_replay_crash_recovery(tmp_path):

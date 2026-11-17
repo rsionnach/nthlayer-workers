@@ -98,14 +98,16 @@ class TriageAgent(AgentBase):
         return context
 
     # ------------------------------------------------------------------ #
-    # Post-execute hook: autonomy reduction                               #
+    # Post-execute hook: model-update signal                              #
     # ------------------------------------------------------------------ #
 
     async def _post_execute(
         self, context: IncidentContext, result: Any
     ) -> IncidentContext:
-        """Trigger autonomy reduction when a model-update signal is present
-        and severity is low enough that the update may have distorted judgment.
+        """Report that triage's autonomy should be reduced when a model-update
+        signal is present and severity is low enough that the update may have
+        distorted judgment. Nothing is reduced: respond has no reduction path
+        (see ``AgentBase._autonomy_reduction_not_applied``).
 
         Condition: any trigger verdict carries tag "agent_model_update"
         AND result.severity <= 2.
@@ -118,14 +120,13 @@ class TriageAgent(AgentBase):
                 v = self._verdict_store.get(vid)
                 tags = (v.judgment.tags or []) if v is not None else []
                 if "agent_model_update" in tags:
-                    arbiter_url: str = self._config.get("arbiter_url", "")
-                    await self._request_autonomy_reduction(
+                    self._autonomy_reduction_not_applied(
                         agent_name="triage",
-                        arbiter_url=arbiter_url,
                         reason=(
                             f"Trigger verdict {vid} flagged agent_model_update; "
                             f"incident {context.id} severity={result.severity}"
                         ),
+                        context=context,
                     )
                     break
             except Exception:  # noqa: BLE001

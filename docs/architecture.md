@@ -725,9 +725,12 @@ Per-agent subclasses (`triage.py`, `investigation.py`,
   topology to trigger service + 1 hop. `parse_response` accepts both
   `assigned_team` and `team_assignment` field names, clamps severity
   0-4. `_post_execute` hook: when any trigger verdict has tag
-  `agent_model_update` AND `result.severity <= 2`, calls
-  `_request_autonomy_reduction(agent_name="triage",
-  arbiter_url=config["arbiter_url"])`.
+  `agent_model_update` AND `result.severity <= 2`, logs
+  `autonomy_reduction_not_applied` (agent `triage`). Respond reduces
+  nothing: the Arbiter route it used to POST to is retired and core
+  serves no replacement (opensrm-5d71). RemediationAgent reports a
+  model-recommended reduction the same way; `autonomy_reduced` stays
+  False.
 - **InvestigationAgent**: `role=INVESTIGATION`, `default_timeout=60`,
   `response_model=InvestigationResponse` (P3-E.2). Reads
   nthlayer-correlate correlation verdicts from verdict store via

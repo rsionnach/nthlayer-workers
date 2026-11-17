@@ -1,9 +1,10 @@
 # tests/test_triage.py
 """Tests for triage agent."""
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
+import structlog
 from nthlayer_common.verdicts import create as verdict_create
 
 from nthlayer_workers.respond.agents.triage import TriageAgent
@@ -16,7 +17,7 @@ def triage_agent(verdict_store):
         model="test-model",
         max_tokens=100,
         verdict_store=verdict_store,
-        config={"arbiter_url": "http://localhost:8080"},
+        config={},
     )
 
 
@@ -160,9 +161,14 @@ def test_parse_response_severity_negative_clamped(triage_agent, sitrep_context):
     assert result.severity == 0
 
 
-async def test_post_execute_triggers_autonomy_reduction(triage_agent, verdict_store):
-    """_post_execute calls _request_autonomy_reduction when trigger verdict
-    has 'agent_model_update' tag AND severity <= 2."""
+def _not_applied(logs: list[dict]) -> list[dict]:
+    return [e for e in logs if e["event"] == "autonomy_reduction_not_applied"]
+
+
+async def test_post_execute_reports_autonomy_reduction_not_applied(triage_agent, verdict_store):
+    """_post_execute reports a reduction it cannot apply when a trigger verdict
+    has the 'agent_model_update' tag AND severity <= 2, and opens no
+    connection [opensrm-5d71]."""
     v = verdict_create(
         subject={"type": "correlation", "service": "api", "ref": "cg-002", "summary": "Model drift"},
         judgment={"action": "flag", "confidence": 0.9, "reasoning": "drift", "tags": ["agent_model_update"]},
@@ -186,15 +192,23 @@ async def test_post_execute_triggers_autonomy_reduction(triage_agent, verdict_st
         assigned_team=None,
         reasoning="low severity model update",
     )
-    with patch.object(triage_agent, "_request_autonomy_reduction", new_callable=AsyncMock, return_value={"status": "ok"}) as mock_reduce:
-        await triage_agent._post_execute(context, result)
-    mock_reduce.assert_called_once()
-    call_args = mock_reduce.call_args
-    assert call_args.kwargs["arbiter_url"] == "http://localhost:8080"
+    with (
+        patch("urllib.request.urlopen") as urlopen,
+        structlog.testing.capture_logs() as logs,
+    ):
+        returned = await triage_agent._post_execute(context, result)
+    urlopen.assert_not_called()
+    assert returned is context
+    events = _not_applied(logs)
+    assert len(events) == 1
+    assert events[0]["agent"] == "triage"
+    assert events[0]["incident_id"] == "INC-2026-0010"
+    assert events[0]["requested_by"] == "triage"
+    assert events[0]["log_level"] == "warning"
 
 
 async def test_post_execute_no_autonomy_reduction_high_severity(triage_agent, verdict_store):
-    """_post_execute does NOT call _request_autonomy_reduction when severity > 2."""
+    """_post_execute reports nothing when severity > 2."""
     v = verdict_create(
         subject={"type": "correlation", "service": "api", "ref": "cg-003", "summary": "Model drift"},
         judgment={"action": "flag", "confidence": 0.9, "reasoning": "drift", "tags": ["agent_model_update"]},
@@ -218,13 +232,13 @@ async def test_post_execute_no_autonomy_reduction_high_severity(triage_agent, ve
         assigned_team=None,
         reasoning="high severity — not a model update scenario",
     )
-    with patch.object(triage_agent, "_request_autonomy_reduction", new_callable=AsyncMock) as mock_reduce:
+    with structlog.testing.capture_logs() as logs:
         await triage_agent._post_execute(context, result)
-    mock_reduce.assert_not_called()
+    assert _not_applied(logs) == []
 
 
 async def test_post_execute_no_autonomy_reduction_no_tag(triage_agent, verdict_store):
-    """_post_execute does NOT call _request_autonomy_reduction when tag absent."""
+    """_post_execute reports nothing when the tag is absent."""
     v = verdict_create(
         subject={"type": "correlation", "service": "api", "ref": "cg-004", "summary": "Normal alert"},
         judgment={"action": "flag", "confidence": 0.9, "reasoning": "normal"},
@@ -248,6 +262,52 @@ async def test_post_execute_no_autonomy_reduction_no_tag(triage_agent, verdict_s
         assigned_team=None,
         reasoning="low severity, no model update tag",
     )
-    with patch.object(triage_agent, "_request_autonomy_reduction", new_callable=AsyncMock) as mock_reduce:
+    with structlog.testing.capture_logs() as logs:
         await triage_agent._post_execute(context, result)
-    mock_reduce.assert_not_called()
+    assert _not_applied(logs) == []
+
+
+def _model_update_context(verdict_store, incident_id: str, tagged: int) -> IncidentContext:
+    """An incident whose ``tagged`` trigger verdicts all carry agent_model_update."""
+    ids = []
+    for n in range(tagged):
+        v = verdict_create(
+            subject={"type": "correlation", "service": "api", "ref": f"cg-mu-{n}", "summary": "Model drift"},
+            judgment={"action": "flag", "confidence": 0.9, "reasoning": "drift", "tags": ["agent_model_update"]},
+            producer={"system": "nthlayer-correlate"},
+        )
+        verdict_store.put(v)
+        ids.append(v.id)
+    return IncidentContext(
+        id=incident_id,
+        state=IncidentState.TRIGGERED,
+        created_at="2026-03-19T10:00:00Z",
+        updated_at="2026-03-19T10:00:00Z",
+        trigger_source="nthlayer-correlate",
+        trigger_verdict_ids=ids,
+        topology={},
+    )
+
+
+def _triage_result(severity: int):
+    from nthlayer_workers.respond.types import TriageResult
+    return TriageResult(
+        severity=severity, blast_radius=[], affected_slos=[], assigned_team=None,
+        reasoning="model update",
+    )
+
+
+async def test_post_execute_reports_once_for_several_tagged_verdicts(triage_agent, verdict_store):
+    """One report per incident, however many trigger verdicts carry the tag."""
+    context = _model_update_context(verdict_store, "INC-2026-0013", tagged=2)
+    with structlog.testing.capture_logs() as logs:
+        await triage_agent._post_execute(context, _triage_result(1))
+    assert len(_not_applied(logs)) == 1
+
+
+async def test_post_execute_reports_at_severity_two(triage_agent, verdict_store):
+    """Severity 2 is inside the condition (severity <= 2)."""
+    context = _model_update_context(verdict_store, "INC-2026-0014", tagged=1)
+    with structlog.testing.capture_logs() as logs:
+        await triage_agent._post_execute(context, _triage_result(2))
+    assert len(_not_applied(logs)) == 1

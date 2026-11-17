@@ -222,7 +222,7 @@ class RemediationAgent(AgentBase):
 
         Strict ordering:
         1. Execute safe action (if not requires_human_approval and action is set)
-        2. Autonomy reduction (if recommended)
+        2. Autonomy reduction (if recommended): reported, not applied
         """
         # Step 1: Execute safe action. When registry is None (worker mode
         # pending P3-E.3) parse_response has already forced
@@ -243,24 +243,15 @@ class RemediationAgent(AgentBase):
                 result.executed = False
                 result.execution_result = str(exc)
 
-        # Step 2: Autonomy reduction (if recommended by model)
+        # Step 2: Autonomy reduction (if recommended by model). Reported, not
+        # applied: respond has no reduction path, so autonomy_reduced stays
+        # False and the recommendation stays on result.autonomy_reduction.
         autonomy_reduction: dict = result.autonomy_reduction or {}
         if autonomy_reduction.get("recommended"):
-            target_agent: str = autonomy_reduction.get("target_agent", "")
-            arbiter_url: str = self._config.get("arbiter_url", "")
-            reason: str = autonomy_reduction.get("reason", "")
-
-            try:
-                gov_response = await self._request_autonomy_reduction(
-                    target_agent, arbiter_url, reason
-                )
-                result.autonomy_reduced = True
-                result.autonomy_target = target_agent
-                result.previous_autonomy_level = gov_response.get("previous_level")
-                result.new_autonomy_level = gov_response.get("new_level")
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "RemediationAgent: autonomy reduction request failed: %s", exc
-                )
+            self._autonomy_reduction_not_applied(
+                agent_name=autonomy_reduction.get("target_agent", ""),
+                reason=autonomy_reduction.get("reason", ""),
+                context=context,
+            )
 
         return context
