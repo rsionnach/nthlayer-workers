@@ -6,6 +6,19 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [4.2.1](https://github.com/rsionnach/nthlayer-workers/compare/v4.2.0...v4.2.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* **learn:** read a verdict with no outcome as pending, as core does [opensrm-eel4] ([f2b3bb5](https://github.com/rsionnach/nthlayer-workers/commit/f2b3bb5906b60f4a186419d50f7506de861f87b4))
+* **respond:** stop POSTing to the retired Arbiter route [opensrm-5d71] ([ad47bbb](https://github.com/rsionnach/nthlayer-workers/commit/ad47bbbe21e8d59cdd4558e22b6a4395c38fe99f))
+
+
+### Documentation
+
+* **learn:** say what learn reads as pending [opensrm-eel4] ([cb929cc](https://github.com/rsionnach/nthlayer-workers/commit/cb929cceb656837706158fc52239b8bb340ee79e))
+
 ## [4.2.0](https://github.com/rsionnach/nthlayer-workers/compare/v4.1.1...v4.2.0) (2026-11-07)
 
 
