@@ -1312,3 +1312,31 @@ async def test_a_judgment_slo_with_no_data_is_reported_not_dropped(specs_dir, ve
     assert results == []
     _, no_data = unevaluated_slos([reversal], results)
     assert [s.slo_name for s in no_data] == ["reversal_rate"]
+
+
+@pytest.mark.asyncio
+async def test_an_unbuilt_judgment_slo_with_no_data_is_reported_too(verdict_store):
+    """no_data covers every queried kind, so a judgment type with no builder
+    (the recording-rule `ratio` kind) is listed as well when its series is
+    absent (R5 edge cases, opensrm-vgub)."""
+    from nthlayer_workers.measure.cli import unevaluated_slos
+
+    unbuilt = ManifestSLO(name="seg", target=98.0, slo_type="judgment",
+                          window="5m", judgment_type="segment_disparity")
+    query, kind = _query_for("svc", unbuilt)
+    slo = SLODefinition(
+        service="svc", slo_name="seg", slo_type="judgment", target=98.0,
+        window="5m", query=query, query_kind=kind, judgment_type="segment_disparity",
+    )
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.return_value = None
+        results = await evaluate_slos("http://prom", [slo], verdict_store)
+
+    assert kind == "ratio"
+    assert results == []
+    not_evaluable, no_data = unevaluated_slos([slo], results)
+    assert not_evaluable == []
+    assert [s.slo_name for s in no_data] == ["seg"]

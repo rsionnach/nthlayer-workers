@@ -121,8 +121,10 @@ def unevaluated_slos(slos, results):
     and returned nothing, because the series is missing or Prometheus did not
     answer. For a budgeted SLO that is a budget generate skipped, or
     pre-4.1.0 rules; for a judgment SLO, an exporter that does not write the
-    series its query reads (opensrm-vgub). Both are listed by evaluate-once
-    so no SLO can vanish from a run unseen.
+    series its query reads (opensrm-vgub), or a service with no reversal
+    yet: a labelled counter does not exist before its first increment, so
+    the rate's numerator is empty, not zero. Both are listed by
+    evaluate-once so no SLO can vanish from a run unseen.
     """
     evaluated = {(r.service, r.slo_name) for r in results}
     not_evaluable = [s for s in slos if s.query_kind == "not_evaluable"]

@@ -87,6 +87,12 @@ counters exist, a `reversal_rate` SLO returns no value and gets no verdict.
 `NO DATA`, judgment SLOs included, and counts them in its closing summary;
 before, only classical SLOs with a missing error budget were listed.
 
+`NO DATA` on a `reversal_rate` SLO has a second, harmless cause: a service
+that has counted decisions but no reversal yet. Prometheus has no
+`nthlayer_reversals_total` series for it until the first reversal, so the
+rate is empty, not zero. That was already so under the old names; it is
+only visible now.
+
 Not changed: the worker (`nthlayer-workers serve`) evaluates the query
 written in the manifest, so it reads whatever series that query names. The
 `high_confidence_failure` query still reads the `gen_ai_*` counters; A1
