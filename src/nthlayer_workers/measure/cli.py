@@ -135,6 +135,22 @@ def unevaluated_slos(slos, results):
     return not_evaluable, no_data
 
 
+# Why a queried SLO has no value, as a code, and the words evaluate-once
+# prints for each. The code is chosen by query kind: an error budget that is
+# missing is a different operator problem from a judgment query that matched
+# no series, and the listing has to say which.
+_NO_DATA_REASON_BY_KIND = {"error_budget": "no_error_budget_value"}
+_NO_DATA_TEXT = {
+    "no_error_budget_value": "no error budget value",
+    "no_query_value": "no value for its query",
+}
+
+
+def no_data_reason(slo) -> str:
+    """The reason code for an SLO in ``unevaluated_slos``' ``no_data``."""
+    return _NO_DATA_REASON_BY_KIND.get(slo.query_kind, "no_query_value")
+
+
 def cmd_evaluate_once(args: argparse.Namespace) -> None:
     """One-shot Prometheus SLO evaluation — evaluate all SLOs, write verdicts, exit."""
     from nthlayer_common.verdicts import SQLiteVerdictStore
@@ -238,8 +254,7 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
         for s in not_evaluable:
             print(f"  {s.service}/{s.slo_name}: NOT EVALUABLE (no_data_source)")
         for s in no_data:
-            what = "error budget value" if s.query_kind == "error_budget" else "value for its query"
-            print(f"  {s.service}/{s.slo_name}: NO DATA (no {what})")
+            print(f"  {s.service}/{s.slo_name}: NO DATA ({_NO_DATA_TEXT[no_data_reason(s)]})")
 
         print(
             f"\nEvaluated {len(results)} SLOs, {breach_count} in breach"

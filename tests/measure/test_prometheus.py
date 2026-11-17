@@ -1340,3 +1340,38 @@ async def test_an_unbuilt_judgment_slo_with_no_data_is_reported_too(verdict_stor
     not_evaluable, no_data = unevaluated_slos([slo], results)
     assert not_evaluable == []
     assert [s.slo_name for s in no_data] == ["seg"]
+
+
+@pytest.mark.parametrize(
+    ("query_kind", "reason"),
+    [
+        ("error_budget", "no_error_budget_value"),
+        ("judgment_rate", "no_query_value"),
+        ("ratio", "no_query_value"),
+    ],
+)
+def test_the_no_data_reason_follows_the_query_kind(query_kind, reason):
+    """evaluate-once says WHY an SLO has no data, and the two causes are
+    different operator problems: a missing error budget is generate's rules,
+    a judgment query with no value is the exporter (R5 provenance,
+    opensrm-vgub). Checked as the reason code, not the printed words."""
+    from nthlayer_workers.measure.cli import no_data_reason
+
+    slo = SLODefinition(
+        service="svc", slo_name="s", slo_type="judgment", target=98.0,
+        window="5m", query="q", query_kind=query_kind,
+    )
+
+    assert no_data_reason(slo) == reason
+
+
+def test_every_no_data_reason_has_words_to_print():
+    """The listing looks the words up by reason code, so a code with no entry
+    would be a KeyError in the middle of a run's report."""
+    from nthlayer_workers.measure.cli import (
+        _NO_DATA_REASON_BY_KIND,
+        _NO_DATA_TEXT,
+    )
+
+    reasons = set(_NO_DATA_REASON_BY_KIND.values()) | {"no_query_value"}
+    assert set(_NO_DATA_TEXT) == reasons
