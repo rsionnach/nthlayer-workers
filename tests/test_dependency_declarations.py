@@ -10,12 +10,11 @@ is installed and under test — left the full 1958-test suite GREEN, while the
 identical mutation went red in all four siblings that had this file. workers is
 the repo 3.0.0 actually broke, so it was the worst one to be missing it.
 
-The OTHER half of nthlayer-core's pair is still absent here: it has a
-tests/smoke/test_resolved_dependencies.py that reads the BUILT artifact's own
-metadata and is decisive in the release container, where deps come from PyPI
-rather than the sibling checkout. This repo's tests/release-smoke/ holds only
-test_cli.py and test_imports.py. That remains opensrm-p62o — do not read this
-file's presence as covering the container case.
+The OTHER half of nthlayer-core's pair is
+tests/release-smoke/test_resolved_dependencies.py [opensrm-p62o]: it reads the
+BUILT artifact's own metadata and is decisive in the release container, where
+deps come from PyPI rather than the sibling checkout. This file does not cover
+the container case; that one does.
 
 The full account of why both exist is nthlayer-core CLAUDE.md hard rule 10
 [opensrm-p3bm]. The short version: `tool.uv.sources` points nthlayer-common at
@@ -209,12 +208,9 @@ def test_ceiling_excludes_the_next_major(name):
 
     test_declared_range_has_an_upper_bound accepts any bounding operator, so
     `<4.0.0` and `<9.0.0` pass every other check in this file identically while
-    declaring support for five majors nothing has run. (In the four siblings
-    that have a test_resolved_dependencies.py — under tests/smoke/ in core,
-    bench and override-adapter, tests/release-smoke/ in generate — their
-    EXPECTED_MAJORS does not close this either: it pins the INSTALLED major.
-    There is no EXPECTED_MAJORS in THIS repo at all; that half is
-    opensrm-p62o.) Measured
+    declaring support for five majors nothing has run. (EXPECTED_MAJORS in
+    tests/release-smoke/test_resolved_dependencies.py does not close this
+    either: it pins the INSTALLED major.) Measured
     against the live range:
 
         next-major probe 4.0.0 vs `<4.0.0` -> excluded (correct)
@@ -234,7 +230,8 @@ def test_ceiling_excludes_the_next_major(name):
     It deliberately does NOT assert anything about the range's upper edge
     WITHIN the current major: `<3.5.0` would pass here, and whether a declared
     range may stop short of the next major is a policy question rule 10 does
-    not answer. Left to opensrm-p62o rather than decided here.
+    not answer. opensrm-p62o added the container guard without ruling on it,
+    so it is still undecided.
     """
     specifier = _siblings()[name].specifier
     next_major = Version(f"{Version(version(name)).major + 1}.0.0")

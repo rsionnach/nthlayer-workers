@@ -37,7 +37,7 @@ jobs:
             -v "$GITHUB_WORKSPACE/tests/release-smoke:/smoke:ro" \
             -w /smoke \
             python:3.11-slim \
-            bash -c "set -e; pip install --quiet --no-cache-dir /dist/*.whl pytest && pytest -q /smoke"
+            bash -c "set -e; pip install --quiet --no-cache-dir /dist/*.whl pytest 'packaging>=22' && pytest -q /smoke"
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
