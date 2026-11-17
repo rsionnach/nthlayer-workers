@@ -1,16 +1,21 @@
 """The calibrate report's judgment SLO, read through nthlayer-common's loader
 [opensrm-n4v1].
 
-Fixture provenance: the v2 manifests are built from the spec's own files
-(``opensrm/spec/v2/examples``): the ``services/ai-gate.yaml`` service with the
-standalone JudgmentSLO documents of ``judgment-slos/`` as its ``judgment_slo``
-entries, which is the entry shape nthlayer-common's v2 parser requires
-(``parser/v2.py`` ``_parse_judgment_slo``: ``metadata.name``, ``spec.*``). The
-srm/v1 manifest has the shape of the shipped ``nthlayer/demo/specs/fraud-detect.yaml``.
+Fixture provenance: the v2 manifest is the spec's ai-gate service
+(``opensrm/spec/v2/examples/services/ai-gate.yaml``: metadata, owner, service)
+carrying the spec's standalone JudgmentSLO documents
+(``opensrm/spec/v2/examples/judgment-slos/01-reversal-rate.yaml`` and
+``02-high-confidence-failure.yaml``) as its ``judgment_slo`` entries, which is
+the entry shape nthlayer-common's v2 parser requires (``parser/v2.py``
+``_parse_judgment_slo``: ``metadata.name``, ``spec.*``). Copied from opensrm
+0f5b1ed; they live here, not read from the sibling checkout, so the suite
+does not depend on the workspace layout. The srm/v1 manifest has the shape of
+the shipped ``nthlayer/demo/specs/fraud-detect.yaml``.
 """
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import pytest
@@ -19,19 +24,68 @@ from nthlayer_common.manifest import ManifestLoadError
 
 from nthlayer_workers.measure.manifest import JudgmentSLO, load_manifest
 
-_SPEC_EXAMPLES = Path(__file__).resolve().parents[3] / "opensrm" / "spec" / "v2" / "examples"
+# opensrm/spec/v2/examples/services/ai-gate.yaml, without its classical SLOs
+# and with no judgment_slo block.
+_AI_GATE_SERVICE: dict = {
+    "apiVersion": "opensrm.nthlayer.io/v2",
+    "kind": "ServiceManifest",
+    "metadata": {
+        "name": "refund-approver",
+        "namespace": "default",
+        "annotations": {"backstage.io/component-ref": "component:default/refund-approver"},
+        "labels": {"domain": "commerce", "tier": "critical"},
+    },
+    "spec": {
+        "owner": {
+            "group": "group:default/trust-and-safety",
+            "escalation": "group:default/sre-on-call",
+            "technical_contact": "user:default/sam.okoro",
+        },
+        "service": {
+            "name": "refund-approver",
+            "type": "ai-gate",
+            "description": "Decides whether a customer refund request is auto-approved, "
+                           "declined, or routed to a human reviewer",
+        },
+    },
+}
+
+# opensrm/spec/v2/examples/judgment-slos/01-reversal-rate.yaml
+_REVERSAL_RATE_SLO: dict = {
+    "apiVersion": "opensrm.nthlayer.io/v2",
+    "kind": "JudgmentSLO",
+    "metadata": {"name": "triage-agent-reversal-rate", "namespace": "default"},
+    "spec": {
+        "service": "triage-agent",
+        "judgment_type": "reversal_rate",
+        "measurement": {"window": "7d", "source": "lineage"},
+        "target": {"maximum_reversal_rate": 0.05},
+        "breach_actions": [
+            {"notify": "group:default/sre-payments"},
+            {"create_case": {"priority": "P2"}},
+        ],
+    },
+}
+
+# opensrm/spec/v2/examples/judgment-slos/02-high-confidence-failure.yaml
+_HIGH_CONFIDENCE_FAILURE_SLO: dict = {
+    "apiVersion": "opensrm.nthlayer.io/v2",
+    "kind": "JudgmentSLO",
+    "metadata": {"name": "investigation-agent-hcf", "namespace": "default"},
+    "spec": {
+        "service": "investigation-agent",
+        "judgment_type": "high_confidence_failure",
+        "measurement": {"confidence_threshold": 0.9, "window": "30d"},
+        "target": {"maximum_failure_rate": 0.02},
+    },
+}
 
 
-def _spec_doc(relative: str) -> dict:
-    src = _SPEC_EXAMPLES / relative
-    assert src.is_file(), src
-    return yaml.safe_load(src.read_text())
-
-
-def _v2_manifest(tmp_path: Path, judgment_docs: list[str]) -> Path:
-    """The spec's ai-gate service carrying the named spec JudgmentSLO documents."""
-    doc = _spec_doc("services/ai-gate.yaml")
-    doc["spec"]["judgment_slo"] = [_spec_doc(f"judgment-slos/{name}") for name in judgment_docs]
+def _v2_manifest(tmp_path: Path, judgment_slos: list[dict]) -> Path:
+    """The spec's ai-gate service carrying the given judgment_slo entries."""
+    doc = copy.deepcopy(_AI_GATE_SERVICE)
+    if judgment_slos:
+        doc["spec"]["judgment_slo"] = copy.deepcopy(judgment_slos)
     path = tmp_path / "ai-gate.yaml"
     path.write_text(yaml.safe_dump(doc))
     return path
@@ -77,47 +131,35 @@ spec:
 
 class TestV2:
     def test_reversal_rate_target_is_the_declared_ceiling(self, tmp_path):
-        declared = _spec_doc("judgment-slos/01-reversal-rate.yaml")["spec"]["target"]
-        path = _v2_manifest(tmp_path, ["01-reversal-rate.yaml", "02-high-confidence-failure.yaml"])
+        path = _v2_manifest(tmp_path, [_REVERSAL_RATE_SLO, _HIGH_CONFIDENCE_FAILURE_SLO])
 
         slo = load_manifest(path)
 
-        assert slo == JudgmentSLO(
-            agent_name=_spec_doc("services/ai-gate.yaml")["metadata"]["name"],
-            reversal_rate_target=declared["maximum_reversal_rate"],
-        )
+        assert slo == JudgmentSLO(agent_name="refund-approver", reversal_rate_target=0.05)
 
     def test_target_carries_no_float_noise(self, tmp_path):
         """The report tests ``reversal_rate <= target``: a rate exactly at the
         declared ceiling must be compliant, so the ceiling must come back
         exactly, not as 0.050000000000000044."""
-        slo = load_manifest(_v2_manifest(tmp_path, ["01-reversal-rate.yaml"]))
+        slo = load_manifest(_v2_manifest(tmp_path, [_REVERSAL_RATE_SLO]))
         assert slo.reversal_rate_target == 0.05
         assert slo.reversal_rate_target >= 1 / 20
 
     def test_manifest_without_a_reversal_rate_slo_is_none(self, tmp_path):
-        path = _v2_manifest(tmp_path, ["02-high-confidence-failure.yaml"])
-        assert load_manifest(path) is None
+        assert load_manifest(_v2_manifest(tmp_path, [_HIGH_CONFIDENCE_FAILURE_SLO])) is None
 
-    def test_manifest_without_judgment_slos_is_none(self):
-        src = _SPEC_EXAMPLES / "judgment-thresholds" / "all-five-types.yaml"
-        assert src.is_file(), src
-        assert load_manifest(src) is None
+    def test_manifest_without_judgment_slos_is_none(self, tmp_path):
+        assert load_manifest(_v2_manifest(tmp_path, [])) is None
 
     def test_two_reversal_rate_slos_are_refused(self, tmp_path):
-        doc = _spec_doc("services/ai-gate.yaml")
-        first = _spec_doc("judgment-slos/01-reversal-rate.yaml")
-        second = _spec_doc("judgment-slos/01-reversal-rate.yaml")
+        second = copy.deepcopy(_REVERSAL_RATE_SLO)
         second["metadata"]["name"] = "second-reversal-rate"
-        doc["spec"]["judgment_slo"] = [first, second]
-        path = tmp_path / "two.yaml"
-        path.write_text(yaml.safe_dump(doc))
 
         with pytest.raises(ManifestLoadError):
-            load_manifest(path)
+            load_manifest(_v2_manifest(tmp_path, [_REVERSAL_RATE_SLO, second]))
 
     def test_quality_threshold_has_no_manifest_source(self, tmp_path):
-        slo = load_manifest(_v2_manifest(tmp_path, ["01-reversal-rate.yaml"]))
+        slo = load_manifest(_v2_manifest(tmp_path, [_REVERSAL_RATE_SLO]))
         assert slo.quality_threshold is None
 
 
@@ -151,6 +193,6 @@ class TestOtherFormats:
 
 
 def test_judgment_slo_is_frozen(tmp_path):
-    slo = load_manifest(_v2_manifest(tmp_path, ["01-reversal-rate.yaml"]))
+    slo = load_manifest(_v2_manifest(tmp_path, [_REVERSAL_RATE_SLO]))
     with pytest.raises(AttributeError):
         slo.reversal_rate_target = 0.10  # type: ignore[misc]
