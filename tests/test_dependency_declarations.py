@@ -26,7 +26,7 @@ The guarded set is DISCOVERED from project.dependencies, never hand-listed. A
 hand-maintained roster can fall behind pyproject, and a roster that empties
 turns every parametrised assertion below into skips with exit 0 — the same
 class of bug this file exists to catch, one coordinate over.
-test_at_least_one_sibling_is_guarded is the non-vacuity floor.
+The module-scope `assert SIBLINGS` is the non-vacuity floor.
 """
 from __future__ import annotations
 
@@ -95,28 +95,19 @@ def _siblings() -> dict[str, Requirement]:
     }
 
 
-# Evaluated at collection time. If it is ever empty the parametrised tests below
-# skip rather than fail, which test_at_least_one_sibling_is_guarded prevents.
+# Evaluated at collection time. Non-vacuity floor for every parametrised test
+# here: an empty parametrise list SKIPS and exits 0, so without the assert the
+# file could go quiet instead of red. At module scope, so an empty roster is a
+# collection ERROR rather than one failing test beside a row of skips; this is
+# the form the gate's round-0 check (unguarded_parametrize) reads
+# [opensrm-p62o]. It replaced test_at_least_one_sibling_is_guarded, which a
+# module-scope assert makes unreachable.
 SIBLINGS = sorted(_siblings())
-
-
-def test_at_least_one_sibling_is_guarded():
-    """Non-vacuity floor for every parametrised test here.
-
-    An empty parametrise list SKIPS and exits 0, so without this the file could
-    go quiet instead of red.
-
-    No literal skip count here on purpose. This docstring said `1 skipped` and
-    the module docstring said `3`, both marked "(measured)", while the real
-    figure was 4 — it is simply the number of SIBLINGS-parametrised tests, so it
-    goes stale every time one is added, and it drifted three times inside a
-    single review of this file. The count is not the point; going quiet is.
-    """
-    assert SIBLINGS, (
-        f"no dependency under '{SIBLING_PREFIX}' or named '{FRONT_DOOR}' "
-        f"found in {PYPROJECT.name}; "
-        f"every check in this file would silently skip"
-    )
+assert SIBLINGS, (
+    f"no dependency under '{SIBLING_PREFIX}' or named '{FRONT_DOOR}' "
+    f"found in {PYPROJECT.name}; "
+    f"every check in this file would silently skip"
+)
 
 
 def test_no_sibling_is_declared_twice():
@@ -228,10 +219,8 @@ def test_ceiling_excludes_the_next_major(name):
     [opensrm-ir5m, from the opensrm-p62o review].
 
     It deliberately does NOT assert anything about the range's upper edge
-    WITHIN the current major: `<3.5.0` would pass here, and whether a declared
-    range may stop short of the next major is a policy question rule 10 does
-    not answer. opensrm-p62o added the container guard without ruling on it,
-    so it is still undecided.
+    WITHIN the current major: `<3.5.0` would pass here. That edge is
+    test_declared_ceiling_is_exactly_the_next_major's.
     """
     specifier = _siblings()[name].specifier
     next_major = Version(f"{Version(version(name)).major + 1}.0.0")

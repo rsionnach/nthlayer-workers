@@ -78,24 +78,19 @@ def _sibling_requirements() -> dict[str, Requirement]:
     }
 
 
-# Evaluated at collection time, from the installed artifact's metadata. Empty
-# would make the parametrised tests skip rather than fail, which
-# test_at_least_one_sibling_was_discovered prevents.
+# Evaluated at collection time, from the installed artifact's metadata.
+# Non-vacuity floor: an empty parametrise list SKIPS and exits 0, and a guard
+# against silent drift must not be able to go silent itself. At module scope,
+# so an empty roster is a collection ERROR and the container's pytest exits
+# non-zero. If it fires, the artifact's metadata lost its sibling requirements:
+# a packaging fault, not a version fault. (nthlayer-core's copy uses a test
+# function for this; the gate's round-0 check reads the module-scope form.)
 SIBLINGS = sorted(_sibling_requirements())
-
-
-def test_at_least_one_sibling_was_discovered():
-    """Non-vacuity floor. An empty parametrise list is `1 skipped`, exit 0.
-
-    A guard against silent drift must not be able to go silent itself. If this
-    fails, the artifact's metadata lost its sibling requirements: a packaging
-    fault, not a version fault.
-    """
-    assert SIBLINGS, (
-        f"{DISTRIBUTION} declares no unconditional dependency under "
-        f"'{SIBLING_PREFIX}' or named '{FRONT_DOOR}'; every version check here "
-        f"would silently skip"
-    )
+assert SIBLINGS, (
+    f"{DISTRIBUTION} declares no unconditional dependency under "
+    f"'{SIBLING_PREFIX}' or named '{FRONT_DOOR}'; every version check here "
+    f"would silently skip"
+)
 
 
 @pytest.mark.parametrize("name", SIBLINGS)
