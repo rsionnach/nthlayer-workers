@@ -717,7 +717,8 @@ string → dataclass) is reused without rewrite.
 `_emit_verdict` sets the verdict's top-level `service` and
 `subject.service` from `context.service`, so core's `service` column is
 set and `GET /verdicts?service=` returns the respond chain
-(opensrm-dm33). A context restored from state saved before the field
+(opensrm-dm33). The coordinator's own approve / approval-failed
+verdicts do the same. A context restored from state saved before the field
 existed has `service=None`, and its verdicts carry none.
 
 `_emit_verdict` accepts `metadata: dict | None = None` kwarg forwarded
