@@ -285,7 +285,14 @@ surfaces `LoadedSpecs.parse_failures` on stderr via
 `nthlayer_workers.cli_output.warn_parse_failures`, and writes each
 verdict's `metadata.custom` through
 `prometheus.evaluation_custom_metadata` — the same definition
-`count_consecutive_breaches` reads back [opensrm-fxln]. The legacy
+`count_consecutive_breaches` reads back [opensrm-fxln].
+`calibrate --agent` reads the agent's configured manifest through
+nthlayer-common's loader (`measure/manifest.py`, opensrm-n4v1): the
+reversal-rate judgment SLO's declared ceiling becomes the report's
+target. A manifest the loader rejects (the published opensrm/v1 schema
+is migrate-only), a missing file, or two reversal-rate SLOs exits 1.
+No manifest format declares a quality threshold, so the report's
+false-accept rate, precision and recall are null. The legacy
 `serve` / `api-serve` /
 `governance {show, restore}` subcommands (and the `_build_pipeline`
 helper they shared) were retired under opensrm-t5yr —

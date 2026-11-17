@@ -32,9 +32,6 @@ def _slo_with_quality_threshold(threshold: float = 0.5) -> JudgmentSLO:
     return JudgmentSLO(
         agent_name="agent-a",
         reversal_rate_target=0.05,
-        reversal_rate_window_days=30,
-        high_confidence_failure_target=0.02,
-        confidence_threshold=0.9,
         quality_threshold=threshold,
     )
 
@@ -102,9 +99,6 @@ async def test_windowed_compliance(store):
     slo = JudgmentSLO(
         agent_name="agent-a",
         reversal_rate_target=0.6,
-        reversal_rate_window_days=30,
-        high_confidence_failure_target=0.02,
-        confidence_threshold=0.9,
     )
 
     checker = JudgmentSLOChecker(store, slo=slo)
@@ -157,9 +151,6 @@ async def test_slo_report_with_manifest_target(store):
     slo = JudgmentSLO(
         agent_name="agent-a",
         reversal_rate_target=0.05,
-        reversal_rate_window_days=30,
-        high_confidence_failure_target=0.02,
-        confidence_threshold=0.9,
     )
 
     checker = JudgmentSLOChecker(store, slo=slo)
