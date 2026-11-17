@@ -84,7 +84,7 @@ def _sibling_requirements() -> dict[str, Requirement]:
 # so an empty roster is a collection ERROR and the container's pytest exits
 # non-zero. If it fires, the artifact's metadata lost its sibling requirements:
 # a packaging fault, not a version fault. (nthlayer-core's copy uses a test
-# function for this; the gate's round-0 check reads the module-scope form.)
+# function for this, which fails beside a row of skips instead.)
 SIBLINGS = sorted(_sibling_requirements())
 assert SIBLINGS, (
     f"{DISTRIBUTION} declares no unconditional dependency under "

@@ -29,7 +29,8 @@ jobs:
       # Smoke gate: install the freshly-built wheel into a clean
       # python:3.11-slim container and run tests/release-smoke/. Catches
       # stale __all__ exports, MANIFEST.in gaps, missing runtime
-      # deps, broken entry points. Failure blocks publish.
+      # deps, broken entry points, and a wrong nthlayer-common major
+      # resolved from PyPI. Failure blocks publish.
       - name: Smoke test in clean Docker container
         run: |
           docker run --rm \

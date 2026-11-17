@@ -87,7 +87,7 @@ Ecosystem testing conventions: [../nthlayer/docs/testing.md](../nthlayer/docs/te
 - **Docker smoke gate** between `twine check` and PyPI publish: a
   `python:3.11-slim` container mounts `dist/` and
   `tests/release-smoke/` read-only, installs the freshly-built wheel +
-  pytest, runs the smoke suite. Failure blocks publish. The suite's
+  pytest + packaging, runs the smoke suite. Failure blocks publish. The suite's
   `test_resolved_dependencies.py` checks which `nthlayer-common` major
   PyPI resolved against `EXPECTED_MAJORS`; a deliberate major upgrade
   must change that constant.

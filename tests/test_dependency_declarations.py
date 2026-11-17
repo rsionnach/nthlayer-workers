@@ -98,8 +98,7 @@ def _siblings() -> dict[str, Requirement]:
 # Evaluated at collection time. Non-vacuity floor for every parametrised test
 # here: an empty parametrise list SKIPS and exits 0, so without the assert the
 # file could go quiet instead of red. At module scope, so an empty roster is a
-# collection ERROR rather than one failing test beside a row of skips; this is
-# the form the gate's round-0 check (unguarded_parametrize) reads
+# collection ERROR rather than one failing test beside a row of skips
 # [opensrm-p62o]. It replaced test_at_least_one_sibling_is_guarded, which a
 # module-scope assert makes unreachable.
 SIBLINGS = sorted(_siblings())
@@ -201,8 +200,7 @@ def test_ceiling_excludes_the_next_major(name):
     `<4.0.0` and `<9.0.0` pass every other check in this file identically while
     declaring support for five majors nothing has run. (EXPECTED_MAJORS in
     tests/release-smoke/test_resolved_dependencies.py does not close this
-    either: it pins the INSTALLED major.) Measured
-    against the live range:
+    either: it pins the INSTALLED major.) Measured against the live range:
 
         next-major probe 4.0.0 vs `<4.0.0` -> excluded (correct)
         next-major probe 4.0.0 vs `<9.0.0` -> ADMITTED (the hole)
