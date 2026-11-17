@@ -8,7 +8,7 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -135,20 +135,49 @@ def unevaluated_slos(slos, results):
     return not_evaluable, no_data
 
 
-# Why a queried SLO has no value, as a code, and the words evaluate-once
-# prints for each. The code is chosen by query kind: an error budget that is
-# missing is a different operator problem from a judgment query that matched
-# no series, and the listing has to say which.
+# Why a queried SLO has no value, as a code. The code is chosen by query
+# kind: an error budget that is missing is a different operator problem from
+# a judgment query that matched no series, and the listing has to say which.
 _NO_DATA_REASON_BY_KIND = {"error_budget": "no_error_budget_value"}
-_NO_DATA_TEXT = {
-    "no_error_budget_value": "no error budget value",
-    "no_query_value": "no value for its query",
-}
 
 
 def no_data_reason(slo) -> str:
     """The reason code for an SLO in ``unevaluated_slos``' ``no_data``."""
     return _NO_DATA_REASON_BY_KIND.get(slo.query_kind, "no_query_value")
+
+
+@dataclass(frozen=True)
+class UnevaluatedSLO:
+    """One line of evaluate-once's account of the SLOs it gave no verdict."""
+
+    service: str
+    slo_name: str
+    status: str  # "not_evaluable" | "no_data"
+    reason: str  # "no_data_source" | "no_error_budget_value" | "no_query_value"
+
+
+# The words evaluate-once prints for each status and reason code.
+_STATUS_TEXT = {"not_evaluable": "NOT EVALUABLE", "no_data": "NO DATA"}
+_REASON_TEXT = {
+    "no_data_source": "no_data_source",
+    "no_error_budget_value": "no error budget value",
+    "no_query_value": "no value for its query",
+}
+
+
+def unevaluated_report(slos, results) -> list[UnevaluatedSLO]:
+    """``unevaluated_slos`` as the records evaluate-once lists, in its order:
+    the not-evaluable SLOs, then those with no data. The listing prints these
+    and nothing else, so what a run reports can be checked without reading
+    its output."""
+    not_evaluable, no_data = unevaluated_slos(slos, results)
+    return [
+        UnevaluatedSLO(s.service, s.slo_name, "not_evaluable", "no_data_source")
+        for s in not_evaluable
+    ] + [
+        UnevaluatedSLO(s.service, s.slo_name, "no_data", no_data_reason(s))
+        for s in no_data
+    ]
 
 
 def cmd_evaluate_once(args: argparse.Namespace) -> None:
@@ -250,15 +279,18 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
                         v.metadata.custom["slack_thread_ts"] = thread_ts
                         verdict_store.put(v)
 
-        not_evaluable, no_data = unevaluated_slos(slos, results)
-        for s in not_evaluable:
-            print(f"  {s.service}/{s.slo_name}: NOT EVALUABLE (no_data_source)")
-        for s in no_data:
-            print(f"  {s.service}/{s.slo_name}: NO DATA ({_NO_DATA_TEXT[no_data_reason(s)]})")
+        report = unevaluated_report(slos, results)
+        for u in report:
+            print(
+                f"  {u.service}/{u.slo_name}: "
+                f"{_STATUS_TEXT[u.status]} ({_REASON_TEXT[u.reason]})"
+            )
 
+        not_evaluable_count = sum(u.status == "not_evaluable" for u in report)
         print(
             f"\nEvaluated {len(results)} SLOs, {breach_count} in breach"
-            f", {len(not_evaluable)} not evaluable, {len(no_data)} with no data."
+            f", {not_evaluable_count} not evaluable"
+            f", {len(report) - not_evaluable_count} with no data."
         )
         return results
 

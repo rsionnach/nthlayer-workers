@@ -1365,13 +1365,75 @@ def test_the_no_data_reason_follows_the_query_kind(query_kind, reason):
     assert no_data_reason(slo) == reason
 
 
-def test_every_no_data_reason_has_words_to_print():
-    """The listing looks the words up by reason code, so a code with no entry
-    would be a KeyError in the middle of a run's report."""
+def test_every_status_and_reason_has_words_to_print():
+    """The listing looks the words up by code, so a code with no entry would
+    be a KeyError in the middle of a run's report."""
     from nthlayer_workers.measure.cli import (
         _NO_DATA_REASON_BY_KIND,
-        _NO_DATA_TEXT,
+        _REASON_TEXT,
+        _STATUS_TEXT,
     )
 
-    reasons = set(_NO_DATA_REASON_BY_KIND.values()) | {"no_query_value"}
-    assert set(_NO_DATA_TEXT) == reasons
+    reasons = set(_NO_DATA_REASON_BY_KIND.values()) | {"no_query_value", "no_data_source"}
+    assert set(_REASON_TEXT) == reasons
+    assert set(_STATUS_TEXT) == {"not_evaluable", "no_data"}
+
+
+def test_evaluate_once_lists_each_unevaluated_slo_with_its_reason(tmp_path):
+    """evaluate-once end to end on the srm/v1 sample: with Prometheus
+    answering nothing, the run's account names every SLO, its status and why.
+    The listing prints exactly these records, so they are what is checked
+    (R5 provenance, opensrm-vgub)."""
+    import argparse
+
+    from nthlayer_workers.measure import cli
+    from nthlayer_workers.measure.cli import UnevaluatedSLO
+
+    specs = tmp_path / "specs"
+    specs.mkdir()
+    (specs / "fraud-detect.yaml").write_text(SAMPLE_SPEC)
+    args = argparse.Namespace(
+        specs_dir=str(specs), hysteresis=3, verdict_store=str(tmp_path / "v.db"),
+        prometheus_url="http://prom", decision_store=None,
+    )
+
+    reported = []
+    real = cli.unevaluated_report
+
+    def capture(slos, results):
+        reported.append(real(slos, results))
+        return reported[-1]
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus",
+        return_value=None,
+    ), patch.object(cli, "unevaluated_report", side_effect=capture):
+        cli.cmd_evaluate_once(args)
+
+    assert len(reported) == 1
+    assert sorted(reported[0], key=lambda u: u.slo_name) == [
+        UnevaluatedSLO("fraud-detect", "availability", "no_data", "no_error_budget_value"),
+        UnevaluatedSLO("fraud-detect", "latency", "no_data", "no_error_budget_value"),
+        UnevaluatedSLO("fraud-detect", "reversal_rate", "no_data", "no_query_value"),
+    ]
+
+
+def test_the_unevaluated_report_lists_not_evaluable_slos_first():
+    """A not-evaluable SLO (ruling D5) keeps its own status and reason, and
+    comes before the no-data ones, as the listing always had it."""
+    from nthlayer_workers.measure.cli import UnevaluatedSLO, unevaluated_report
+
+    def slo(name, kind):
+        return SLODefinition(
+            service="svc", slo_name=name, slo_type="traditional", target=99.0,
+            window="30d", query="", query_kind=kind,
+        )
+
+    report = unevaluated_report(
+        [slo("budgeted", "error_budget"), slo("throughput", "not_evaluable")], []
+    )
+
+    assert report == [
+        UnevaluatedSLO("svc", "throughput", "not_evaluable", "no_data_source"),
+        UnevaluatedSLO("svc", "budgeted", "no_data", "no_error_budget_value"),
+    ]
