@@ -68,7 +68,7 @@ def _sibling_requirements() -> dict[str, Requirement]:
     Marker-guarded requirements are dropped: they apply only on some
     interpreters or extras, so "the installed version satisfies this" is not a
     claim that holds environment-independently. Every sibling in
-    EXPECTED_MAJORS is unconditional, and the `name in declared` assertion below
+    EXPECTED_MAJORS is unconditional, and the module-scope roster assert below
     fails loudly if one ever stops being.
     """
     return {
@@ -90,6 +90,15 @@ assert SIBLINGS, (
     f"{DISTRIBUTION} declares no unconditional dependency under "
     f"'{SIBLING_PREFIX}' or named '{FRONT_DOOR}'; every version check here "
     f"would silently skip"
+)
+# The other direction. A sibling in EXPECTED_MAJORS that gains a marker, or is
+# dropped from the dependencies, leaves SIBLINGS while another sibling keeps it
+# non-empty, and its major would then go unchecked with nothing red
+# [opensrm-p62o edge-cases review].
+assert set(EXPECTED_MAJORS) <= set(SIBLINGS), (
+    f"EXPECTED_MAJORS names {sorted(set(EXPECTED_MAJORS) - set(SIBLINGS))}, "
+    f"which {DISTRIBUTION}'s metadata does not declare unconditionally, so "
+    f"nothing here would check which major of it resolves"
 )
 
 
