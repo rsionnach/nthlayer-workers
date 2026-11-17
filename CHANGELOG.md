@@ -6,6 +6,14 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [4.2.2](https://github.com/rsionnach/nthlayer-workers/compare/v4.2.1...v4.2.2) (2026-11-17)
+
+
+### Bug Fixes
+
+* **measure:** read the calibrate manifest through common [opensrm-n4v1] ([2fe37fd](https://github.com/rsionnach/nthlayer-workers/commit/2fe37fde1130634740ea3dc9038164b321bebe65))
+* **respond:** stamp the incident's service on respond verdicts [opensrm-dm33] ([890be9e](https://github.com/rsionnach/nthlayer-workers/commit/890be9ea70d7e2e601a625ede728c04202bb1c14))
+
 ## [4.2.1](https://github.com/rsionnach/nthlayer-workers/compare/v4.2.0...v4.2.1) (2026-11-17)
 
 
