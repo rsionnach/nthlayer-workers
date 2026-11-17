@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -1037,13 +1036,125 @@ def test_evaluate_once_rejects_a_hysteresis_below_one(tmp_path, value, capsys):
 
 # --- opensrm-h0at: measure reads the error-budget series generate writes ---
 
-# The spec's own v2 example, not a fixture written for this test. CI checks
-# opensrm out as a sibling (test.yml), as for measure/thresholds/test_phase.py;
-# a missing file fails here, it does not skip.
-_API_FULL_V2 = (
-    Path(__file__).resolve().parents[3]
-    / "opensrm" / "spec" / "v2" / "examples" / "migration" / "api-full-v2.yaml"
-)
+# The spec's own v2 example, not a fixture written for this test:
+# opensrm/spec/v2/examples/migration/api-full-v2.yaml, copied from opensrm
+# 0530688 with its comment lines removed (the parsed document is identical).
+# It lives here, not read from the sibling checkout, so the suite does not
+# depend on the workspace layout (as tests/measure/test_manifest.py does).
+_API_FULL_V2 = """\
+apiVersion: opensrm.nthlayer.io/v2
+kind: ServiceManifest
+metadata:
+  name: payment-api
+  namespace: default
+  annotations:
+    backstage.io/component-ref: "component:default/payment-api"
+    backstage.io/techdocs-ref: "dir:."
+    opensrm.nthlayer.io/runbook: "https://wiki.example.com/payment-api-runbook"
+    opensrm.nthlayer.io/documentation: "https://docs.example.com/payment-api"
+    pagerduty.com/service-id: "PXXXXXX"
+    slack.com/channel: "#payments-team"
+  labels:
+    domain: commerce
+    cost-center: engineering
+    tier: critical
+spec:
+  owner:
+    group: "group:default/payments"
+    escalation: "group:default/payments-oncall"
+    technical_contact: "user:default/payments-lead"
+  service:
+    name: payment-api
+    type: api
+    description: "Handles payment processing for checkout"
+  slo:
+    - apiVersion: openslo/v1
+      kind: SLO
+      metadata:
+        name: payment-api-availability
+      spec:
+        service: payment-api
+        objectives:
+          - displayName: "99.95% availability over 30 days"
+            target: 0.9995
+    - apiVersion: openslo/v1
+      kind: SLO
+      metadata:
+        name: payment-api-latency
+      spec:
+        service: payment-api
+        objectives:
+          - displayName: "99% of requests under 200ms p99 over 30 days"
+            target: 0.99
+    - apiVersion: openslo/v1
+      kind: SLO
+      metadata:
+        name: payment-api-error-rate
+      spec:
+        service: payment-api
+        objectives:
+          - displayName: "Error rate under 0.1% over 7 days"
+            target: 0.999
+    - apiVersion: openslo/v1
+      kind: SLO
+      metadata:
+        name: payment-api-throughput
+      spec:
+        service: payment-api
+        objectives:
+          - displayName: "Sustains 1000 rps over a 1 hour window"
+            target: 0.99
+  contracts:
+    - name: payment-api
+      api_ref:
+        openapi: "./api/payment-api.yaml"
+      promise:
+        availability: 0.9995
+        latency_p99: 300ms
+        throughput: 5000rps
+      contract_owner: "group:default/payments"
+  dependencies:
+    - service: "resource:default/postgresql"
+      expected_availability: 0.9995
+      fallback:
+        type: fail_closed
+        description: "v1 critical: true — no payment can be recorded without the store"
+    - service: "resource:default/redis"
+      fallback:
+        type: graceful_degradation
+        description: "v1 critical: false — fall through to the store on cache miss"
+    - service: "component:default/user-service"
+      expected_availability: 0.999
+      expected_latency_p99: 100ms
+      fallback:
+        type: fail_closed
+        description: "v1 critical: true — cannot authorise without the payer identity"
+    - service: "component:external/stripe-api"
+      expected_availability: 0.9999
+      fallback:
+        type: fail_closed
+        description: "v1 critical: true, type: external — no upstream processor, no payment"
+  instrumentation:
+    required_metrics:
+      - name: http_server_request_duration_seconds
+        type: histogram
+        labels: [service, method, status_code]
+      - name: http_server_requests_total
+        type: counter
+        labels: [service, method, status_code]
+      - name: http_server_active_requests
+        type: gauge
+        labels: [service]
+      - name: payment_transactions_total
+        type: counter
+        labels: [service, status_code]
+      - name: payment_transaction_amount_sum
+        type: counter
+        labels: [service]
+    required_logs:
+      - format: structured
+        required_fields: [timestamp, level, service, trace_id]
+"""
 
 
 def test_v2_classical_slos_read_the_series_generate_writes(tmp_path):
@@ -1055,7 +1166,7 @@ def test_v2_classical_slos_read_the_series_generate_writes(tmp_path):
     SLO's name, and since opensrm-zo0o writes one for latency and error_rate
     too, so every classical SLO here reads its own.
     """
-    (tmp_path / "payment-api.yaml").write_text(_API_FULL_V2.read_text())
+    (tmp_path / "payment-api.yaml").write_text(_API_FULL_V2)
 
     by_name = {s.slo_name: s for s in load_specs(tmp_path).slos}
 
@@ -1082,7 +1193,7 @@ def test_evaluate_once_reports_the_slos_it_wrote_no_verdict_for(tmp_path):
 
     specs = tmp_path / "specs"
     specs.mkdir()
-    (specs / "payment-api.yaml").write_text(_API_FULL_V2.read_text())
+    (specs / "payment-api.yaml").write_text(_API_FULL_V2)
     args = argparse.Namespace(
         specs_dir=str(specs), hysteresis=3, verdict_store=str(tmp_path / "v.db"),
         prometheus_url="http://prom", decision_store=None,
