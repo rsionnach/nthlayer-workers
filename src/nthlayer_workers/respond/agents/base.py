@@ -192,6 +192,7 @@ class AgentBase(ABC):
                 "type": self.role.value,
                 "ref": context.id,
                 "summary": subject_summary,
+                "service": context.service,
             },
             judgment=judgment,
             producer={"system": "nthlayer-respond", "model": self._model},
@@ -201,6 +202,9 @@ class AgentBase(ABC):
         # for respond agents — both are the role label, but verdict_type is
         # the queryable typed column whereas subject.type is a display field.
         v.verdict_type = self.role.value
+        # The incident's service, on the top-level field core stores in its
+        # service column and filters on [opensrm-dm33].
+        v.service = context.service
 
         # Wire lineage (existing) + parent_ids (P3-E.1: cross-module ancestry)
         v.lineage.context = list(context.trigger_verdict_ids)

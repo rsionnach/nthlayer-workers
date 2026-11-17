@@ -172,6 +172,7 @@ class Coordinator:
                     "type": "remediation",
                     "ref": context.id,
                     "summary": f"approved: {action} on {target}",
+                    "service": context.service,
                 },
                 judgment={
                     "action": "approve",
@@ -187,6 +188,7 @@ class Coordinator:
             # flow, so the verdict's nature is "remediation". The approve
             # vs deny distinction lives in judgment.action.
             v.verdict_type = "remediation"
+            v.service = context.service  # opensrm-dm33, as AgentBase._emit_verdict
             self._verdict_store.put(v)
             context.verdict_chain.append(v.id)
 
@@ -202,6 +204,7 @@ class Coordinator:
                     "type": "remediation",
                     "ref": context.id,
                     "summary": f"approval failed: {action} on {target}",
+                    "service": context.service,
                 },
                 judgment={
                     "action": "escalate",
@@ -214,6 +217,7 @@ class Coordinator:
             # See approval-success branch above for the rationale on
             # remediation vs approval/denial typing.
             v.verdict_type = "remediation"
+            v.service = context.service  # opensrm-dm33, as AgentBase._emit_verdict
             self._verdict_store.put(v)
             context.verdict_chain.append(v.id)
 

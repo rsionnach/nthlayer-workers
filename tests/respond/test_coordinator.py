@@ -967,3 +967,60 @@ async def test_next_step_logic():
     # 3 -> None (done)
     ctx.last_completed_step_index = 3
     assert Coordinator._next_step(ctx) is None
+
+
+# ------------------------------------------------------------------ #
+# opensrm-dm33: the coordinator's own verdicts carry the service      #
+# ------------------------------------------------------------------ #
+
+
+async def _await_approval(make_coordinator, triggered_context, registry):
+    async def remediation_needs_approval(ctx):
+        ctx.remediation = RemediationResult(
+            proposed_action="rollback",
+            target="payment-api",
+            requires_human_approval=True,
+            reasoning="needs approval",
+        )
+        ctx.verdict_chain.append("vrd-remediation")
+        return ctx
+
+    coord = make_coordinator(
+        {AgentRole.REMEDIATION: make_mock_agent(
+            AgentRole.REMEDIATION, side_effect=remediation_needs_approval
+        )},
+        safe_action_registry=registry,
+    )
+    triggered_context.service = "payment-api"
+    await coord.run(triggered_context)
+    return coord
+
+
+async def test_approve_success_verdict_carries_the_incident_service(
+    make_coordinator, context_store, verdict_store, triggered_context
+):
+    registry = AsyncMock()
+    registry.execute = AsyncMock(return_value={"success": True, "detail": "rolled back"})
+    coord = await _await_approval(make_coordinator, triggered_context, registry)
+
+    result = await coord.approve(triggered_context.id, approved_by="rob@nthlayer.com")
+
+    assert result.state == IncidentState.RESOLVED
+    v = verdict_store.get(result.verdict_chain[-1])
+    assert v.service == "payment-api"
+    assert v.subject.service == "payment-api"
+
+
+async def test_approve_failure_verdict_carries_the_incident_service(
+    make_coordinator, context_store, verdict_store, triggered_context
+):
+    registry = AsyncMock()
+    registry.execute = AsyncMock(side_effect=RuntimeError("rollback failed"))
+    coord = await _await_approval(make_coordinator, triggered_context, registry)
+
+    result = await coord.approve(triggered_context.id, approved_by="rob@nthlayer.com")
+
+    assert result.state == IncidentState.ESCALATED
+    v = verdict_store.get(result.verdict_chain[-1])
+    assert v.service == "payment-api"
+    assert v.subject.service == "payment-api"

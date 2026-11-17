@@ -48,7 +48,14 @@ def open_from_snapshot(
     """
     data = snap.get("data") or {}
     domain = data.get("domain") or {}
-    service = domain.get("service") or "unknown"
+    # The incident's service: the correlator's grouping anchor, else the first
+    # affected service, else the placeholder. The worker creates the case with
+    # this same value (context.service), so a case and its verdicts agree.
+    service = (
+        domain.get("service")
+        or next(iter(data.get("affected_services") or []), None)
+        or "unknown"
+    )
 
     # parent_ids are the underlying breach verdict ids; trigger_ids prepends
     # the snapshot id but downstream case-creation anchors on the breach so
@@ -81,6 +88,7 @@ def open_from_snapshot(
         trigger_verdict_ids=trigger_ids,
         topology={"services": [{"name": s, "tier": tiers.get(s, "standard")} for s in affected]},
         metadata=metadata,
+        service=service,
     )
 
 
@@ -118,6 +126,7 @@ def open_from_breach(
         trigger_verdict_ids=[breach["id"]],
         topology={"services": [{"name": service, "tier": tiers.get(service, "standard")}]},
         metadata=metadata,
+        service=service,
     )
 
 

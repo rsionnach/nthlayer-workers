@@ -662,6 +662,11 @@ per core (no lease; multi-instance HA is v2). Pre-designed split:
 - `open_from_breach(breach, config, *, tiers) -> IncidentContext`
   (`trigger_source="nthlayer-measure-fallback"`,
   `metadata.fallback_reason="no_correlation_snapshot"`).
+  Both set `IncidentContext.service` (the snapshot's
+  `data.domain.service`, else its first affected service; the breach's
+  `service`; `"unknown"` when none is named; the worker opens the case
+  with the same value), which `_emit_verdict` stamps on every respond
+  verdict (opensrm-dm33).
 - `_make_incident_id(service) -> "INC-{SERVICE}-YYYYMMDD-HHMMSS-{uuid8}"`
   (uuid suffix disambiguates same-second opens).
 - `filter_after(records, cursor)`: records with `created_at > cursor`.
@@ -709,6 +714,13 @@ max_retries=3)`: calls `structured_call_with_usage` via
 `caller="respond.{role.value}"`), returns
 `result.data.model_dump_json()` so existing `parse_response` (JSON
 string → dataclass) is reused without rewrite.
+
+`_emit_verdict` sets the verdict's top-level `service` and
+`subject.service` from `context.service`, so core's `service` column is
+set and `GET /verdicts?service=` returns the respond chain
+(opensrm-dm33). The coordinator's own approve / approval-failed
+verdicts do the same. A context restored from state saved before the field
+existed has `service=None`, and its verdicts carry none.
 
 `_emit_verdict` accepts `metadata: dict | None = None` kwarg forwarded
 to `verdict_create` unchanged — subclasses attach role-specific

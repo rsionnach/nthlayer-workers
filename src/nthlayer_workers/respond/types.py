@@ -107,3 +107,8 @@ class IncidentContext:
     last_completed_step_index: int | None = None  # pipeline step 0-3
     error: str | None = None
     metadata: dict = field(default_factory=dict)
+    # The service the incident was opened for. Stamped on every verdict the
+    # respond agents emit, so core's service column is set and a query by
+    # service returns the respond chain [opensrm-dm33]. None when the
+    # trigger named no service (and for contexts saved before this field).
+    service: str | None = None

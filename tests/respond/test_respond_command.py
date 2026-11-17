@@ -98,6 +98,8 @@ def test_respond_command_builds_incident_from_verdict(specs_dir, tmp_path):
     assert ctx_arg.trigger_verdict_ids == [corr.id]
     assert ctx_arg.trigger_source == "nthlayer-correlate"
     assert "FRAUD-DETECT" in ctx_arg.id
+    # The incident's service is the trigger verdict's subject.ref [opensrm-dm33]
+    assert ctx_arg.service == "fraud-detect"
 
 
 def test_respond_command_missing_verdict(tmp_path):

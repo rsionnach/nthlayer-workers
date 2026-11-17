@@ -300,6 +300,7 @@ def _build_incident_context(
             created_at=now, updated_at=now,
             trigger_source="pagerduty", trigger_verdict_ids=[],
             topology=topology, metadata={"alert": alert},
+            service=alert.get("service"),
         )
     else:
         raise ValueError(f"Unknown trigger source: {trigger_source!r}")
@@ -738,6 +739,7 @@ def cmd_respond(args) -> None:
             "severity": severity,
             "service_context": service_context,
         },
+        service=trigger_service,
     )
 
     # Load config and run pipeline

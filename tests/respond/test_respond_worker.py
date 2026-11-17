@@ -164,6 +164,7 @@ async def test_state_roundtrip_preserves_all_fields(fake_client, config):
         verdict_chain=["vrd-triage-1", "vrd-investigation-1"],
     )
     ctx.metadata = {"escalation_pending": False, "blast_radius": ["a", "b"]}
+    ctx.service = "fraud-detect"
     src._incidents[ctx.id] = ctx
 
     state = await src.get_state()
@@ -178,6 +179,8 @@ async def test_state_roundtrip_preserves_all_fields(fake_client, config):
     # CRITICAL: verdict_chain preserved
     assert restored.verdict_chain == ["vrd-triage-1", "vrd-investigation-1"]
     assert restored.metadata.get("blast_radius") == ["a", "b"]
+    # opensrm-dm33: without it, post-restart verdicts lose their service
+    assert restored.service == "fraud-detect"
 
 
 async def test_restore_state_skips_corrupt_incident(fake_client, config):
