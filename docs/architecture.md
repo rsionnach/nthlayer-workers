@@ -960,7 +960,9 @@ Test layout broadly mirrors `src/` per-module:
 tests/
   test_runner.py                 # ModuleRunner tests
   release-smoke/                 # Walks every module via pkgutil,
-                                 # asserts every __all__ resolves
+                                 # asserts every __all__ resolves;
+                                 # pins the resolved nthlayer-common
+                                 # major (EXPECTED_MAJORS)
   observe/
     test_observe_worker.py       # All three modules + helpers
     test_gate_adapter.py

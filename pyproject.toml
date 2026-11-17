@@ -45,9 +45,10 @@ dependencies = [
     # tests/test_dependency_declarations.py guards THIS declaration as of
     # [opensrm-ir5m] — ported from nthlayer-core once a mutation showed the
     # range could be reverted to >=2.1.2,<3.0.0 with all 1958 tests still
-    # green. Still missing, and tracked as opensrm-p62o: the EXPECTED_MAJORS
-    # half, which reads the BUILT wheel's own metadata in the release
-    # container, where deps come from PyPI instead of the sibling checkout.
+    # green. The EXPECTED_MAJORS half followed in [opensrm-p62o]:
+    # tests/release-smoke/test_resolved_dependencies.py reads the BUILT wheel's
+    # own metadata in the release container, where deps come from PyPI instead
+    # of the sibling checkout. A major upgrade must change EXPECTED_MAJORS too.
     # WHY 5.5.0 (opensrm-wo62.1): the version this repo is now built and tested
     # against (nthlayer-core rule 10: the floor is the installed sibling). Bump
     # it on every nthlayer-common minor release: the floor guard fails until you

@@ -10,12 +10,11 @@ is installed and under test — left the full 1958-test suite GREEN, while the
 identical mutation went red in all four siblings that had this file. workers is
 the repo 3.0.0 actually broke, so it was the worst one to be missing it.
 
-The OTHER half of nthlayer-core's pair is still absent here: it has a
-tests/smoke/test_resolved_dependencies.py that reads the BUILT artifact's own
-metadata and is decisive in the release container, where deps come from PyPI
-rather than the sibling checkout. This repo's tests/release-smoke/ holds only
-test_cli.py and test_imports.py. That remains opensrm-p62o — do not read this
-file's presence as covering the container case.
+The OTHER half of nthlayer-core's pair is
+tests/release-smoke/test_resolved_dependencies.py [opensrm-p62o]: it reads the
+BUILT artifact's own metadata and is decisive in the release container, where
+deps come from PyPI rather than the sibling checkout. This file does not cover
+the container case; that one does.
 
 The full account of why both exist is nthlayer-core CLAUDE.md hard rule 10
 [opensrm-p3bm]. The short version: `tool.uv.sources` points nthlayer-common at
@@ -27,7 +26,7 @@ The guarded set is DISCOVERED from project.dependencies, never hand-listed. A
 hand-maintained roster can fall behind pyproject, and a roster that empties
 turns every parametrised assertion below into skips with exit 0 — the same
 class of bug this file exists to catch, one coordinate over.
-test_at_least_one_sibling_is_guarded is the non-vacuity floor.
+The module-scope `assert SIBLINGS` is the non-vacuity floor.
 """
 from __future__ import annotations
 
@@ -96,28 +95,18 @@ def _siblings() -> dict[str, Requirement]:
     }
 
 
-# Evaluated at collection time. If it is ever empty the parametrised tests below
-# skip rather than fail, which test_at_least_one_sibling_is_guarded prevents.
+# Evaluated at collection time. Non-vacuity floor for every parametrised test
+# here: an empty parametrise list SKIPS and exits 0, so without the assert the
+# file could go quiet instead of red. At module scope, so an empty roster is a
+# collection ERROR rather than one failing test beside a row of skips
+# [opensrm-p62o]. It replaced test_at_least_one_sibling_is_guarded, which a
+# module-scope assert makes unreachable.
 SIBLINGS = sorted(_siblings())
-
-
-def test_at_least_one_sibling_is_guarded():
-    """Non-vacuity floor for every parametrised test here.
-
-    An empty parametrise list SKIPS and exits 0, so without this the file could
-    go quiet instead of red.
-
-    No literal skip count here on purpose. This docstring said `1 skipped` and
-    the module docstring said `3`, both marked "(measured)", while the real
-    figure was 4 — it is simply the number of SIBLINGS-parametrised tests, so it
-    goes stale every time one is added, and it drifted three times inside a
-    single review of this file. The count is not the point; going quiet is.
-    """
-    assert SIBLINGS, (
-        f"no dependency under '{SIBLING_PREFIX}' or named '{FRONT_DOOR}' "
-        f"found in {PYPROJECT.name}; "
-        f"every check in this file would silently skip"
-    )
+assert SIBLINGS, (
+    f"no dependency under '{SIBLING_PREFIX}' or named '{FRONT_DOOR}' "
+    f"found in {PYPROJECT.name}; "
+    f"every check in this file would silently skip"
+)
 
 
 def test_no_sibling_is_declared_twice():
@@ -209,13 +198,9 @@ def test_ceiling_excludes_the_next_major(name):
 
     test_declared_range_has_an_upper_bound accepts any bounding operator, so
     `<4.0.0` and `<9.0.0` pass every other check in this file identically while
-    declaring support for five majors nothing has run. (In the four siblings
-    that have a test_resolved_dependencies.py — under tests/smoke/ in core,
-    bench and override-adapter, tests/release-smoke/ in generate — their
-    EXPECTED_MAJORS does not close this either: it pins the INSTALLED major.
-    There is no EXPECTED_MAJORS in THIS repo at all; that half is
-    opensrm-p62o.) Measured
-    against the live range:
+    declaring support for five majors nothing has run. (EXPECTED_MAJORS in
+    tests/release-smoke/test_resolved_dependencies.py does not close this
+    either: it pins the INSTALLED major.) Measured against the live range:
 
         next-major probe 4.0.0 vs `<4.0.0` -> excluded (correct)
         next-major probe 4.0.0 vs `<9.0.0` -> ADMITTED (the hole)
@@ -232,9 +217,8 @@ def test_ceiling_excludes_the_next_major(name):
     [opensrm-ir5m, from the opensrm-p62o review].
 
     It deliberately does NOT assert anything about the range's upper edge
-    WITHIN the current major: `<3.5.0` would pass here, and whether a declared
-    range may stop short of the next major is a policy question rule 10 does
-    not answer. Left to opensrm-p62o rather than decided here.
+    WITHIN the current major: `<3.5.0` would pass here. That edge is
+    test_declared_ceiling_is_exactly_the_next_major's.
     """
     specifier = _siblings()[name].specifier
     next_major = Version(f"{Version(version(name)).major + 1}.0.0")
