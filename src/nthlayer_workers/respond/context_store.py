@@ -116,6 +116,7 @@ def incident_context_from_dict(data: dict) -> IncidentContext:
         last_completed_step_index=data.get("last_completed_step_index"),
         error=data.get("error"),
         metadata=data.get("metadata", {}),
+        service=data.get("service"),
     )
 
 

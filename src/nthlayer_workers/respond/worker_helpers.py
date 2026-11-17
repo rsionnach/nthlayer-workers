@@ -81,6 +81,7 @@ def open_from_snapshot(
         trigger_verdict_ids=trigger_ids,
         topology={"services": [{"name": s, "tier": tiers.get(s, "standard")} for s in affected]},
         metadata=metadata,
+        service=service,
     )
 
 
@@ -118,6 +119,7 @@ def open_from_breach(
         trigger_verdict_ids=[breach["id"]],
         topology={"services": [{"name": service, "tier": tiers.get(service, "standard")}]},
         metadata=metadata,
+        service=service,
     )
 
 
