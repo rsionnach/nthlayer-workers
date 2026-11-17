@@ -117,16 +117,18 @@ def unevaluated_slos(slos, results):
     """The SLOs a run produced no verdict for, as ``(not_evaluable, no_data)``.
 
     ``not_evaluable``: kinds with no error budget, never queried (ruling D5,
-    opensrm-zo0o; E3 no_data_source). ``no_data``: budgeted SLOs whose query
-    returned nothing, because the series is missing (a budget generate
-    skipped, or pre-4.1.0 rules) or Prometheus did not answer. Both are
-    listed by evaluate-once so neither can vanish from a run unseen.
+    opensrm-zo0o; E3 no_data_source). ``no_data``: every SLO that WAS queried
+    and returned nothing, because the series is missing or Prometheus did not
+    answer. For a budgeted SLO that is a budget generate skipped, or
+    pre-4.1.0 rules; for a judgment SLO, an exporter that does not write the
+    series its query reads (opensrm-vgub). Both are listed by evaluate-once
+    so no SLO can vanish from a run unseen.
     """
     evaluated = {(r.service, r.slo_name) for r in results}
     not_evaluable = [s for s in slos if s.query_kind == "not_evaluable"]
     no_data = [
         s for s in slos
-        if s.query_kind == "error_budget" and (s.service, s.slo_name) not in evaluated
+        if s.query_kind != "not_evaluable" and (s.service, s.slo_name) not in evaluated
     ]
     return not_evaluable, no_data
 
@@ -234,7 +236,8 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
         for s in not_evaluable:
             print(f"  {s.service}/{s.slo_name}: NOT EVALUABLE (no_data_source)")
         for s in no_data:
-            print(f"  {s.service}/{s.slo_name}: NO DATA (no error budget value)")
+            what = "error budget value" if s.query_kind == "error_budget" else "value for its query"
+            print(f"  {s.service}/{s.slo_name}: NO DATA (no {what})")
 
         print(
             f"\nEvaluated {len(results)} SLOs, {breach_count} in breach"

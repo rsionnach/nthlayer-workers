@@ -338,6 +338,13 @@ logged as a warning, listed by `evaluate-once` as NO DATA, and not
 evaluated. Module-level `_JUDGMENT_SLO_QUERIES`
 lookup dict of lambdas keyed by **`spec.judgment_type`**, not by SLO
 name: in v2 `metadata.name` is author-chosen and independent of the type.
+`reversal_rate` reads A1 §4.5's `nthlayer_reversals_total` /
+`nthlayer_decisions_total` (`REVERSALS_SERIES`, `DECISIONS_SERIES`), with no
+fallback to the `gen_ai_*` names it read before [opensrm-vgub];
+`high_confidence_failure` still reads the `gen_ai_*` counters until the
+outcome join exists (opensrm-r860, then opensrm-9v3o). A queried SLO of any
+kind that returns nothing is in `unevaluated_slos`' `no_data` and listed by
+`evaluate-once` as NO DATA; a judgment SLO's is logged at debug only.
 Only 2 of the 5 judgment SLO types (`reversal_rate`,
 `high_confidence_failure`) have a builder; the other 3 fall through to
 the `slo:{name}:ratio` recording-rule convention, the only remaining use

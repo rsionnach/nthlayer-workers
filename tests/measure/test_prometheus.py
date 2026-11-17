@@ -95,8 +95,8 @@ def test_load_specs_keeps_the_canonical_target_convention(specs_dir):
 def test_load_specs_builds_promql(specs_dir):
     slos = load_specs(specs_dir).slos
     rev = next(s for s in slos if s.slo_name == "reversal_rate")
-    assert "gen_ai_overrides_total" in rev.query
-    assert "gen_ai_decisions_total" in rev.query
+    assert "nthlayer_reversals_total" in rev.query
+    assert "nthlayer_decisions_total" in rev.query
     assert "fraud-detect" in rev.query
 
 
@@ -112,10 +112,21 @@ def test_load_specs_empty_dir(tmp_path):
 
 
 def test_judgment_query_builder_reversal_rate():
+    # Series names from OpenSRM's Telemetry Addendum A1 §4.5 (the "Name"
+    # column for Decisions and Reversals), not from the builder: reversals
+    # over decisions, each filtered on N3's `service` label (opensrm-vgub).
     q = _JUDGMENT_SLO_QUERIES["reversal_rate"]("fraud-detect", "5m")
-    assert "gen_ai_overrides_total" in q
-    assert 'service="fraud-detect"' in q
-    assert "[5m]" in q
+    assert q == (
+        'sum(increase(nthlayer_reversals_total{service="fraud-detect"}[5m]))'
+        " / "
+        'sum(increase(nthlayer_decisions_total{service="fraud-detect"}[5m]))'
+    )
+
+
+def test_reversal_rate_reads_no_gen_ai_series():
+    # A1 §4.5 N1: a series OpenSRM defines MUST NOT use the gen_ai_ prefix.
+    q = _JUDGMENT_SLO_QUERIES["reversal_rate"]("fraud-detect", "7d")
+    assert "gen_ai_" not in q
 
 
 def test_judgment_query_builder_high_confidence_failure():
@@ -151,7 +162,7 @@ def test_judgment_type_not_slo_name_selects_the_builder():
         window="5m",
         judgment_type="reversal_rate",
     )
-    assert "gen_ai_overrides_total" in _query_for("fraud-detect", slo)[0]
+    assert "nthlayer_reversals_total" in _query_for("fraud-detect", slo)[0]
 
 
 # --- query_firing_alerts tests ---
@@ -1161,3 +1172,32 @@ async def test_evaluate_once_accounts_for_every_slo_it_gives_no_verdict(tmp_path
     assert [r.slo_name for r in results] == ["availability"]
     assert [s.slo_name for s in not_evaluable] == ["throughput"]
     assert [s.slo_name for s in no_data] == ["latency"]
+
+
+@pytest.mark.asyncio
+async def test_a_judgment_slo_with_no_data_is_reported_not_dropped(specs_dir, verdict_store):
+    """A judgment SLO whose series nothing exports must be accounted for, as a
+    budgeted one is. It was left out of no_data, so an exporter still writing
+    the pre-A1 gen_ai_* counters would have lost its reversal_rate evaluation
+    with nothing in the run's report (opensrm-vgub). The log line for it
+    stays at debug (test_a_missing_budget_is_reported_not_hidden)."""
+    from nthlayer_workers.measure.cli import unevaluated_slos
+
+    slos = load_specs(specs_dir).slos
+    reversal = next(s for s in slos if s.judgment_type == "reversal_rate")
+    # The exporter this models answers only the old names: nothing matches.
+    old_names = {
+        'sum(increase(gen_ai_overrides_total{service="fraud-detect"}[7d]))'
+        " / "
+        'sum(increase(gen_ai_decisions_total{service="fraud-detect"}[7d]))': 0.02,
+    }
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.side_effect = lambda _c, _u, promql: old_names.get(promql)
+        results = await evaluate_slos("http://prom", [reversal], verdict_store)
+
+    assert results == []
+    _, no_data = unevaluated_slos([reversal], results)
+    assert [s.slo_name for s in no_data] == ["reversal_rate"]
