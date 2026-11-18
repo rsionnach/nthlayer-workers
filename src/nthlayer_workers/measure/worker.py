@@ -188,6 +188,19 @@ class MeasureModule:
         result = await self.client.get_manifests()
         if not result.ok or not result.data:
             return
+        if not isinstance(result.data, list):
+            # A body that is not a list of manifests at all: an error object
+            # or a page of text from something that is not core. Treated as
+            # a failed fetch, so it ends the cycle before a provider is
+            # built and before a due threshold run is spent. Iterating it
+            # instead would walk a dict's keys or a string's characters as
+            # if they were manifests, and a number would raise
+            # (opensrm-jarh).
+            body_type = type(result.data).__name__
+            if f"body:{body_type}" not in self._manifest_problems:
+                self._manifest_problems.add(f"body:{body_type}")
+                logger.warning("measure_manifests_not_a_list", type=body_type)
+            return
 
         manifests = result.data
         provider = PrometheusProvider(self.prometheus_url)
@@ -616,7 +629,8 @@ def _judgment_slos(manifests: list, seen_problems: set[str]) -> list[tuple[str, 
 
     nthlayer-core serves a list of dicts today (catalogue.to_dict_list), so
     none of these is a shape core produces; the guard is for a response
-    that is not what core sends.
+    that is not what core sends. A response that is not a list at all never
+    gets here: process_cycle ends the cycle on it.
     """
     found: list[tuple[str, dict]] = []
     for i, m in enumerate(manifests):

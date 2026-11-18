@@ -225,7 +225,9 @@ SLO assessment, drift, discovery, gate, portfolio, verification.
    empty catalogue would fire again and step the one-way ratchet twice), and
    an empty response does not spend a due threshold run [opensrm-jarh].
    Cleaning up a deleted service waits for an explicit signal from core
-   (opensrm-wogg).
+   (opensrm-wogg). A successful response whose body is not a list at all
+   (an error object or text from something that is not core) is treated the
+   same way, with one `measure_manifests_not_a_list` warning per body type.
 2. `_judgment_slos` reads the response for the SLO phase. An entry of the
    wrong shape (a manifest that is not a dict or has no string `name`, a
    `slos` that is not a list, an SLO that is not a dict) is skipped with one

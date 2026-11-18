@@ -199,6 +199,49 @@ def test_find_slo_passes_over_a_malformed_entry(bad, where):
         assert MeasureModule._find_slo(manifests, "other", "reversal_rate") is None
 
 
+# --- a body that is not a list at all ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("body", "body_type"),
+    [
+        pytest.param({"error": "bad_gateway", "detail": {"upstream": "core"}}, "dict", id="error-object"),
+        pytest.param("<html><body>502 Bad Gateway</body></html>", "str", id="text"),
+        pytest.param(1, "int", id="number"),
+        pytest.param(True, "bool", id="true"),
+        pytest.param(0.5, "float", id="float"),
+    ],
+)
+async def test_a_body_that_is_not_a_list_ends_the_cycle_and_changes_nothing(body, body_type):
+    """Whole-response shapes, as the entries above are per-entry ones: what a
+    proxy or a wrong server answers with 200. None is a body core sends.
+
+    Each is treated as a failed fetch. Walked as a list of manifests, an
+    error object's keys or a page's characters were logged as skipped
+    entries and a due threshold run was spent on them; a number raised out
+    of the cycle (R5 edge cases, opensrm-jarh).
+    """
+    module, prov, assessments, verdicts = _module([[_manifest()], body, body])
+    await _cycle(module, prov)
+    before = await module.get_state()
+    submitted_before = (list(assessments), list(verdicts))
+
+    with structlog.testing.capture_logs() as logs:
+        first = await _cycle(module, prov)
+        second = await _cycle(module, prov)
+
+    assert await module.get_state() == before
+    assert (assessments, verdicts) == submitted_before
+    # Ended before a provider was built, so before the threshold phase could
+    # take its turn: threshold_last_run is part of the state compared above.
+    assert (first.call_count, second.call_count) == (0, 0)
+    # Said once for the two cycles, and not as a list of skipped entries.
+    assert [(e["event"], e["log_level"], e["type"]) for e in logs
+            if e["event"].startswith("measure_manifest")] == [
+        ("measure_manifests_not_a_list", "warning", body_type)
+    ]
+
+
 # --- 2. an empty successful response changes nothing ------------------------
 
 
