@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -95,8 +94,8 @@ def test_load_specs_keeps_the_canonical_target_convention(specs_dir):
 def test_load_specs_builds_promql(specs_dir):
     slos = load_specs(specs_dir).slos
     rev = next(s for s in slos if s.slo_name == "reversal_rate")
-    assert "gen_ai_overrides_total" in rev.query
-    assert "gen_ai_decisions_total" in rev.query
+    assert "nthlayer_reversals_total" in rev.query
+    assert "nthlayer_decisions_total" in rev.query
     assert "fraud-detect" in rev.query
 
 
@@ -112,10 +111,21 @@ def test_load_specs_empty_dir(tmp_path):
 
 
 def test_judgment_query_builder_reversal_rate():
+    # Series names from OpenSRM's Telemetry Addendum A1 §4.5 (the "Name"
+    # column for Decisions and Reversals), not from the builder: reversals
+    # over decisions, each filtered on N3's `service` label (opensrm-vgub).
     q = _JUDGMENT_SLO_QUERIES["reversal_rate"]("fraud-detect", "5m")
-    assert "gen_ai_overrides_total" in q
-    assert 'service="fraud-detect"' in q
-    assert "[5m]" in q
+    assert q == (
+        'sum(increase(nthlayer_reversals_total{service="fraud-detect"}[5m]))'
+        " / "
+        'sum(increase(nthlayer_decisions_total{service="fraud-detect"}[5m]))'
+    )
+
+
+def test_reversal_rate_reads_no_gen_ai_series():
+    # A1 §4.5 N1: a series OpenSRM defines MUST NOT use the gen_ai_ prefix.
+    q = _JUDGMENT_SLO_QUERIES["reversal_rate"]("fraud-detect", "7d")
+    assert "gen_ai_" not in q
 
 
 def test_judgment_query_builder_high_confidence_failure():
@@ -151,7 +161,7 @@ def test_judgment_type_not_slo_name_selects_the_builder():
         window="5m",
         judgment_type="reversal_rate",
     )
-    assert "gen_ai_overrides_total" in _query_for("fraud-detect", slo)[0]
+    assert "nthlayer_reversals_total" in _query_for("fraud-detect", slo)[0]
 
 
 # --- query_firing_alerts tests ---
@@ -1026,13 +1036,126 @@ def test_evaluate_once_rejects_a_hysteresis_below_one(tmp_path, value, capsys):
 
 # --- opensrm-h0at: measure reads the error-budget series generate writes ---
 
-# The spec's own v2 example, not a fixture written for this test. CI checks
-# opensrm out as a sibling (test.yml), as for measure/thresholds/test_phase.py;
-# a missing file fails here, it does not skip.
-_API_FULL_V2 = (
-    Path(__file__).resolve().parents[3]
-    / "opensrm" / "spec" / "v2" / "examples" / "migration" / "api-full-v2.yaml"
-)
+# The spec's own v2 example, not a fixture written for this test:
+# opensrm/spec/v2/examples/migration/api-full-v2.yaml, copied from opensrm
+# 0530688 with its comment lines removed (the parsed document is identical).
+# It lives here, not read from the sibling checkout, so the suite does not
+# depend on the workspace layout (tests/measure/test_manifest.py inlines its
+# spec copies the same way).
+_API_FULL_V2 = """\
+apiVersion: opensrm.nthlayer.io/v2
+kind: ServiceManifest
+metadata:
+  name: payment-api
+  namespace: default
+  annotations:
+    backstage.io/component-ref: "component:default/payment-api"
+    backstage.io/techdocs-ref: "dir:."
+    opensrm.nthlayer.io/runbook: "https://wiki.example.com/payment-api-runbook"
+    opensrm.nthlayer.io/documentation: "https://docs.example.com/payment-api"
+    pagerduty.com/service-id: "PXXXXXX"
+    slack.com/channel: "#payments-team"
+  labels:
+    domain: commerce
+    cost-center: engineering
+    tier: critical
+spec:
+  owner:
+    group: "group:default/payments"
+    escalation: "group:default/payments-oncall"
+    technical_contact: "user:default/payments-lead"
+  service:
+    name: payment-api
+    type: api
+    description: "Handles payment processing for checkout"
+  slo:
+    - apiVersion: openslo/v1
+      kind: SLO
+      metadata:
+        name: payment-api-availability
+      spec:
+        service: payment-api
+        objectives:
+          - displayName: "99.95% availability over 30 days"
+            target: 0.9995
+    - apiVersion: openslo/v1
+      kind: SLO
+      metadata:
+        name: payment-api-latency
+      spec:
+        service: payment-api
+        objectives:
+          - displayName: "99% of requests under 200ms p99 over 30 days"
+            target: 0.99
+    - apiVersion: openslo/v1
+      kind: SLO
+      metadata:
+        name: payment-api-error-rate
+      spec:
+        service: payment-api
+        objectives:
+          - displayName: "Error rate under 0.1% over 7 days"
+            target: 0.999
+    - apiVersion: openslo/v1
+      kind: SLO
+      metadata:
+        name: payment-api-throughput
+      spec:
+        service: payment-api
+        objectives:
+          - displayName: "Sustains 1000 rps over a 1 hour window"
+            target: 0.99
+  contracts:
+    - name: payment-api
+      api_ref:
+        openapi: "./api/payment-api.yaml"
+      promise:
+        availability: 0.9995
+        latency_p99: 300ms
+        throughput: 5000rps
+      contract_owner: "group:default/payments"
+  dependencies:
+    - service: "resource:default/postgresql"
+      expected_availability: 0.9995
+      fallback:
+        type: fail_closed
+        description: "v1 critical: true — no payment can be recorded without the store"
+    - service: "resource:default/redis"
+      fallback:
+        type: graceful_degradation
+        description: "v1 critical: false — fall through to the store on cache miss"
+    - service: "component:default/user-service"
+      expected_availability: 0.999
+      expected_latency_p99: 100ms
+      fallback:
+        type: fail_closed
+        description: "v1 critical: true — cannot authorise without the payer identity"
+    - service: "component:external/stripe-api"
+      expected_availability: 0.9999
+      fallback:
+        type: fail_closed
+        description: "v1 critical: true, type: external — no upstream processor, no payment"
+  instrumentation:
+    required_metrics:
+      - name: http_server_request_duration_seconds
+        type: histogram
+        labels: [service, method, status_code]
+      - name: http_server_requests_total
+        type: counter
+        labels: [service, method, status_code]
+      - name: http_server_active_requests
+        type: gauge
+        labels: [service]
+      - name: payment_transactions_total
+        type: counter
+        labels: [service, status_code]
+      - name: payment_transaction_amount_sum
+        type: counter
+        labels: [service]
+    required_logs:
+      - format: structured
+        required_fields: [timestamp, level, service, trace_id]
+"""
 
 
 def test_v2_classical_slos_read_the_series_generate_writes(tmp_path):
@@ -1044,7 +1167,7 @@ def test_v2_classical_slos_read_the_series_generate_writes(tmp_path):
     SLO's name, and since opensrm-zo0o writes one for latency and error_rate
     too, so every classical SLO here reads its own.
     """
-    (tmp_path / "payment-api.yaml").write_text(_API_FULL_V2.read_text())
+    (tmp_path / "payment-api.yaml").write_text(_API_FULL_V2)
 
     by_name = {s.slo_name: s for s in load_specs(tmp_path).slos}
 
@@ -1071,7 +1194,7 @@ def test_evaluate_once_reports_the_slos_it_wrote_no_verdict_for(tmp_path):
 
     specs = tmp_path / "specs"
     specs.mkdir()
-    (specs / "payment-api.yaml").write_text(_API_FULL_V2.read_text())
+    (specs / "payment-api.yaml").write_text(_API_FULL_V2)
     args = argparse.Namespace(
         specs_dir=str(specs), hysteresis=3, verdict_store=str(tmp_path / "v.db"),
         prometheus_url="http://prom", decision_store=None,
@@ -1161,3 +1284,157 @@ async def test_evaluate_once_accounts_for_every_slo_it_gives_no_verdict(tmp_path
     assert [r.slo_name for r in results] == ["availability"]
     assert [s.slo_name for s in not_evaluable] == ["throughput"]
     assert [s.slo_name for s in no_data] == ["latency"]
+
+
+@pytest.mark.asyncio
+async def test_a_judgment_slo_with_no_data_is_reported_not_dropped(specs_dir, verdict_store):
+    """A judgment SLO whose series nothing exports must be accounted for, as a
+    budgeted one is. It was left out of no_data, so an exporter still writing
+    the pre-A1 gen_ai_* counters would have lost its reversal_rate evaluation
+    with nothing in the run's report (opensrm-vgub). The log line for it
+    stays at debug (test_a_missing_budget_is_reported_not_hidden)."""
+    from nthlayer_workers.measure.cli import unevaluated_slos
+
+    slos = load_specs(specs_dir).slos
+    reversal = next(s for s in slos if s.judgment_type == "reversal_rate")
+    # The exporter this models answers only the old names: nothing matches.
+    old_names = {
+        'sum(increase(gen_ai_overrides_total{service="fraud-detect"}[7d]))'
+        " / "
+        'sum(increase(gen_ai_decisions_total{service="fraud-detect"}[7d]))': 0.02,
+    }
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.side_effect = lambda _c, _u, promql: old_names.get(promql)
+        results = await evaluate_slos("http://prom", [reversal], verdict_store)
+
+    assert results == []
+    _, no_data = unevaluated_slos([reversal], results)
+    assert [s.slo_name for s in no_data] == ["reversal_rate"]
+
+
+@pytest.mark.asyncio
+async def test_an_unbuilt_judgment_slo_with_no_data_is_reported_too(verdict_store):
+    """no_data covers every queried kind, so a judgment type with no builder
+    (the recording-rule `ratio` kind) is listed as well when its series is
+    absent (R5 edge cases, opensrm-vgub)."""
+    from nthlayer_workers.measure.cli import unevaluated_slos
+
+    unbuilt = ManifestSLO(name="seg", target=98.0, slo_type="judgment",
+                          window="5m", judgment_type="segment_disparity")
+    query, kind = _query_for("svc", unbuilt)
+    slo = SLODefinition(
+        service="svc", slo_name="seg", slo_type="judgment", target=98.0,
+        window="5m", query=query, query_kind=kind, judgment_type="segment_disparity",
+    )
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus"
+    ) as mock_query:
+        mock_query.return_value = None
+        results = await evaluate_slos("http://prom", [slo], verdict_store)
+
+    assert kind == "ratio"
+    assert results == []
+    not_evaluable, no_data = unevaluated_slos([slo], results)
+    assert not_evaluable == []
+    assert [s.slo_name for s in no_data] == ["seg"]
+
+
+@pytest.mark.parametrize(
+    ("query_kind", "reason"),
+    [
+        ("error_budget", "no_error_budget_value"),
+        ("judgment_rate", "no_query_value"),
+        ("ratio", "no_query_value"),
+    ],
+)
+def test_the_no_data_reason_follows_the_query_kind(query_kind, reason):
+    """evaluate-once says WHY an SLO has no data, and the two causes are
+    different operator problems: a missing error budget is generate's rules,
+    a judgment query with no value is the exporter (R5 provenance,
+    opensrm-vgub). Checked as the reason code, not the printed words."""
+    from nthlayer_workers.measure.cli import no_data_reason
+
+    slo = SLODefinition(
+        service="svc", slo_name="s", slo_type="judgment", target=98.0,
+        window="5m", query="q", query_kind=query_kind,
+    )
+
+    assert no_data_reason(slo) == reason
+
+
+def test_every_status_and_reason_has_words_to_print():
+    """The listing looks the words up by code, so a code with no entry would
+    be a KeyError in the middle of a run's report."""
+    from nthlayer_workers.measure.cli import (
+        _NO_DATA_REASON_BY_KIND,
+        _REASON_TEXT,
+        _STATUS_TEXT,
+    )
+
+    reasons = set(_NO_DATA_REASON_BY_KIND.values()) | {"no_query_value", "no_data_source"}
+    assert set(_REASON_TEXT) == reasons
+    assert set(_STATUS_TEXT) == {"not_evaluable", "no_data"}
+
+
+def test_evaluate_once_lists_each_unevaluated_slo_with_its_reason(tmp_path):
+    """evaluate-once end to end on the srm/v1 sample: with Prometheus
+    answering nothing, the run's account names every SLO, its status and why.
+    The listing prints exactly these records, so they are what is checked
+    (R5 provenance, opensrm-vgub)."""
+    import argparse
+
+    from nthlayer_workers.measure import cli
+    from nthlayer_workers.measure.cli import UnevaluatedSLO
+
+    specs = tmp_path / "specs"
+    specs.mkdir()
+    (specs / "fraud-detect.yaml").write_text(SAMPLE_SPEC)
+    args = argparse.Namespace(
+        specs_dir=str(specs), hysteresis=3, verdict_store=str(tmp_path / "v.db"),
+        prometheus_url="http://prom", decision_store=None,
+    )
+
+    reported = []
+    real = cli.unevaluated_report
+
+    def capture(slos, results):
+        reported.append(real(slos, results))
+        return reported[-1]
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus",
+        return_value=None,
+    ), patch.object(cli, "unevaluated_report", side_effect=capture):
+        cli.cmd_evaluate_once(args)
+
+    assert len(reported) == 1
+    assert sorted(reported[0], key=lambda u: u.slo_name) == [
+        UnevaluatedSLO("fraud-detect", "availability", "no_data", "no_error_budget_value"),
+        UnevaluatedSLO("fraud-detect", "latency", "no_data", "no_error_budget_value"),
+        UnevaluatedSLO("fraud-detect", "reversal_rate", "no_data", "no_query_value"),
+    ]
+
+
+def test_the_unevaluated_report_lists_not_evaluable_slos_first():
+    """A not-evaluable SLO (ruling D5) keeps its own status and reason, and
+    comes before the no-data ones, as the listing always had it."""
+    from nthlayer_workers.measure.cli import UnevaluatedSLO, unevaluated_report
+
+    def slo(name, kind):
+        return SLODefinition(
+            service="svc", slo_name=name, slo_type="traditional", target=99.0,
+            window="30d", query="", query_kind=kind,
+        )
+
+    report = unevaluated_report(
+        [slo("budgeted", "error_budget"), slo("throughput", "not_evaluable")], []
+    )
+
+    assert report == [
+        UnevaluatedSLO("svc", "throughput", "not_evaluable", "no_data_source"),
+        UnevaluatedSLO("svc", "budgeted", "no_data", "no_error_budget_value"),
+    ]

@@ -73,6 +73,31 @@ Two other readers of the budget change with it:
 The `latency_seconds` query kind, its duration-unit table and
 `SLODefinition.unit` in `measure/adapters/prometheus.py` are removed.
 
+## 4.2.3: `evaluate-once` reads reversal rate from the A1 series
+
+`nthlayer-measure evaluate-once` computes a `reversal_rate` judgment SLO from
+`nthlayer_reversals_total` over `nthlayer_decisions_total`, the names OpenSRM
+Addendum A1 §4.5 gives these counters. It read `gen_ai_overrides_total` over
+`gen_ai_decisions_total` before, and there is no fallback to those names.
+
+**Export the `nthlayer_*` counters before upgrading**, each with a `service`
+label equal to the manifest's `metadata.name`. If only the `gen_ai_*`
+counters exist, a `reversal_rate` SLO returns no value and gets no verdict.
+`evaluate-once` now lists every queried SLO that returned nothing as
+`NO DATA`, judgment SLOs included, and counts them in its closing summary;
+before, only classical SLOs with a missing error budget were listed.
+
+`NO DATA` on a `reversal_rate` SLO has a second, harmless cause: a service
+that has counted decisions but no reversal yet. Prometheus has no
+`nthlayer_reversals_total` series for it until the first reversal, so the
+rate is empty, not zero. That was already so under the old names; it is
+only visible now.
+
+Not changed: the worker (`nthlayer-workers serve`) evaluates the query
+written in the manifest, so it reads whatever series that query names. The
+`high_confidence_failure` query still reads the `gen_ai_*` counters; A1
+redefines that rate over outcomes, and it moves in a later release.
+
 ## Breaking changes
 
 ### `gen_ai.decision.evaluated` → per-dimension grader events + a summary

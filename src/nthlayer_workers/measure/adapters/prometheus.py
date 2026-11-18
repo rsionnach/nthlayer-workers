@@ -207,14 +207,28 @@ def _query_for(service: str, slo: ManifestSLO) -> tuple[str, str]:
     return f'slo:{name}:ratio{{service="{service}"}}', "ratio"
 
 
+# The series reversal_rate is counted from, as OpenSRM's Telemetry Addendum
+# A1 §4.5 names them (N1: a series OpenSRM defines uses the `nthlayer_`
+# prefix, never `gen_ai_`). Both carry `service` = the manifest's
+# metadata.name (N3). They were gen_ai_decisions_total and
+# gen_ai_overrides_total until opensrm-vgub; there is no fallback to the old
+# names, so a deployment exporting only those reads no data here.
+DECISIONS_SERIES = "nthlayer_decisions_total"
+REVERSALS_SERIES = "nthlayer_reversals_total"
+
+
 # PromQL builders keyed by judgment TYPE (spec.judgment_type), not by the
 # SLO's name — in v2 the two are independent. Lambdas take (service,
 # window).
+#
+# high_confidence_failure still reads the pre-A1 gen_ai_* counters. §4.5
+# redefines it over outcomes, which needs the decision/outcome join
+# (opensrm-r860); it moves under opensrm-9v3o.
 _JUDGMENT_SLO_QUERIES = {
     "reversal_rate": lambda service, window: (
-        f'sum(increase(gen_ai_overrides_total{{service="{service}"}}[{window}]))'
+        f'sum(increase({REVERSALS_SERIES}{{service="{service}"}}[{window}]))'
         f' / '
-        f'sum(increase(gen_ai_decisions_total{{service="{service}"}}[{window}]))'
+        f'sum(increase({DECISIONS_SERIES}{{service="{service}"}}[{window}]))'
     ),
     "high_confidence_failure": lambda service, window: (
         f'sum(increase(gen_ai_overrides_hcf_total{{service="{service}"}}[{window}]))'
@@ -408,6 +422,12 @@ async def evaluate_slos(
                         slo.service, slo.slo_name,
                     )
                 else:
+                    # Debug, by the opensrm-zo0o ruling: a judgment query
+                    # with nothing to read is often ordinary (no decisions
+                    # in the window, or no reversal yet), though it is also
+                    # what an exporter that does not write the series looks
+                    # like. The CLI lists the SLO as NO DATA either way, so
+                    # it is not lost.
                     logger.debug("No data for %s/%s, skipping", slo.service, slo.slo_name)
                 continue
 
