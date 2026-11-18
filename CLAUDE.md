@@ -139,8 +139,8 @@ verdict chain, or make module composition impossible.
     major upgrade; and never derive the expected major from the declared
     range, which would make the test agree with a wrong one. This rule is
     cited by its title, not its number, and
-    `test_the_rule_this_file_cites_is_in_claude_md` fails if the title
-    goes [opensrm-v929].
+    `tests/test_dependency_declarations.py::test_the_rule_this_file_cites_is_in_claude_md`
+    fails if the title goes [opensrm-v929].
 
 ## Where to find detail
 

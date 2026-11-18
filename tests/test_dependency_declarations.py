@@ -20,11 +20,10 @@ The rule both enforce is a hard rule in this repo's CLAUDE.md. Its title is the
 constant CITED_RULE below, not repeated here: a second copy of it in prose is
 one more thing to go stale. It is cited by title because rule numbers move,
 and test_the_rule_this_file_cites_is_in_claude_md checks it is there. The rule
-came from opensrm-p3bm in nthlayer-core. The short version: `tool.uv.sources`
-points nthlayer-common at
-the sibling checkout, a path source REPLACES registry resolution rather than
-being filtered by the version specifier, and nothing warned that the declared
-range and the tested version had diverged.
+came from opensrm-p3bm in nthlayer-core. The mechanism: `tool.uv.sources`
+points nthlayer-common at the sibling checkout, a path source REPLACES registry
+resolution rather than being filtered by the version specifier, and nothing
+warned that the declared range and the tested version had diverged.
 
 The guarded set is DISCOVERED from project.dependencies, never hand-listed. A
 hand-maintained roster can fall behind pyproject, and a roster that empties
@@ -313,8 +312,11 @@ def test_declared_ceiling_is_exactly_the_next_major(name):
 
 
 # The title of the CLAUDE.md hard rule this file and pyproject.toml's comment
-# cite. By title, because the number is not stable: the same rule is 10, 11 and
-# 16 in sibling repos, and inserting a rule above it here would move it.
+# cite, exactly as CLAUDE.md prints it at the head of the rule: in bold, with
+# its full stop. By title, because the number is not stable: the same rule is
+# 10, 11 and 16 in sibling repos, and inserting a rule above it here would move
+# it. Prose that quotes the title has neither the bold markers nor the full
+# stop, hence the `.strip("*.")` where pyproject.toml's comment is checked.
 CITED_RULE = "**A declared dependency range must admit exactly the versions tested.**"
 
 
