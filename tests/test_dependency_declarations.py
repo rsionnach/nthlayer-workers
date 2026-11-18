@@ -16,8 +16,11 @@ BUILT artifact's own metadata and is decisive in the release container, where
 deps come from PyPI rather than the sibling checkout. This file does not cover
 the container case; that one does.
 
-The full account of why both exist is nthlayer-core CLAUDE.md hard rule 10
-[opensrm-p3bm]. The short version: `tool.uv.sources` points nthlayer-common at
+The rule both enforce is this repo's CLAUDE.md hard rule "A declared dependency
+range must admit exactly the versions tested" (cited by title: rule numbers
+move; test_the_rule_this_file_cites_is_in_claude_md checks it is there). It
+came from opensrm-p3bm in nthlayer-core. The short version: `tool.uv.sources`
+points nthlayer-common at
 the sibling checkout, a path source REPLACES registry resolution rather than
 being filtered by the version specifier, and nothing warned that the declared
 range and the tested version had diverged.
@@ -212,9 +215,9 @@ def test_ceiling_excludes_the_next_major(name):
     `>=1!3.0.0` already excludes, so this assertion would pass vacuously. Left
     alone for the same reason UNBOUNDED_PROBE is — no sibling has ever used an
     epoch — and test_declared_range_has_an_upper_bound still catches an outright
-    missing ceiling in that case. This is nthlayer-core CLAUDE.md hard
-    rule 10's "not a future major" stated as an assertion rather than prose
-    [opensrm-ir5m, from the opensrm-p62o review].
+    missing ceiling in that case. This is the dependency-range rule's "not a
+    future major" (CLAUDE.md; see the module docstring) stated as an
+    assertion rather than prose [opensrm-ir5m, from the opensrm-p62o review].
 
     It deliberately does NOT assert anything about the range's upper edge
     WITHIN the current major: `<3.5.0` would pass here. That edge is
@@ -306,6 +309,40 @@ def test_declared_ceiling_is_exactly_the_next_major(name):
         f"is {installed}, so the ceiling must be '<{expected}'. A wider ceiling "
         f"publishes a major nothing here has run."
     )
+
+
+# The title of the CLAUDE.md hard rule this file and pyproject.toml's comment
+# cite. By title, because the number is not stable: the same rule is 10, 11 and
+# 16 in sibling repos, and inserting a rule above it here would move it.
+CITED_RULE = "**A declared dependency range must admit exactly the versions tested.**"
+
+
+def test_the_rule_this_file_cites_is_in_claude_md():
+    """A pointer nobody checks rots. This file and pyproject.toml used to cite
+    "nthlayer-core CLAUDE.md hard rule 10": another repo's file, by a number
+    that differs in every repo, with nothing here to notice it moving
+    [opensrm-v929]. The citation is now to this repo's own CLAUDE.md, and
+    this is the check: the rule is there, once, as a numbered hard rule."""
+    claude_md = (PYPROJECT.parent / "CLAUDE.md").read_text()
+
+    numbered = [
+        line for line in claude_md.splitlines()
+        if line.split(". ", 1)[0].isdigit() and line.split(". ", 1)[-1].startswith(CITED_RULE)
+    ]
+    assert len(numbered) == 1, (
+        f"CLAUDE.md should carry exactly one numbered hard rule titled "
+        f"{CITED_RULE}; found {len(numbered)}. pyproject.toml and this "
+        f"file cite it by that title."
+    )
+
+
+def test_pyproject_cites_the_rule_by_the_same_title():
+    """The other citation, in the comment above the nthlayer-common range.
+    The comment wraps, so its `#` markers and line breaks are folded away
+    before looking for the title."""
+    folded = " ".join(PYPROJECT.read_text().replace("#", " ").split())
+
+    assert CITED_RULE.strip("*.") in folded
 
 
 def test_uv_lock_records_this_projects_version():

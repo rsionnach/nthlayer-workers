@@ -120,6 +120,28 @@ verdict chain, or make module composition impossible.
     stdlib `logging.getLogger`, so %-style args only (kwargs would
     TypeError under structlog), as a load-bearing fact.
 
+15. **A declared dependency range must admit exactly the versions tested.**
+    Not the oldest that imports, not a future major. The floor of the
+    `nthlayer-common` range in `pyproject.toml` equals the installed
+    sibling, and the ceiling is the next major: anything wider publishes
+    support for versions nothing here has run. It needs a rule because
+    nothing else says so: `tool.uv.sources` points `nthlayer-common` at the
+    sibling checkout, and a path source replaces registry resolution
+    without consulting the version specifier, so a range that is wrong
+    still resolves, in development and in CI alike. Two guards, reading
+    deliberately different things: `tests/test_dependency_declarations.py`
+    reads `pyproject.toml` and fails locally;
+    `tests/release-smoke/test_resolved_dependencies.py` reads the built
+    wheel's own metadata against `EXPECTED_MAJORS` and is decisive in the
+    release container, where dependencies resolve from PyPI. Consequences:
+    raise the floor on every `nthlayer-common` release, a patch included
+    (the floor guard is red until you do); change `EXPECTED_MAJORS` with a
+    major upgrade; and never derive the expected major from the declared
+    range, which would make the test agree with a wrong one. This rule is
+    cited by its title, not its number, and
+    `test_the_rule_this_file_cites_is_in_claude_md` fails if the title
+    goes [opensrm-v929].
+
 ## Where to find detail
 
 - Source layout, per-module design decisions, test-suite
