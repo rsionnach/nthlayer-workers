@@ -13,7 +13,7 @@ from nthlayer_common.errors import main_with_error_handling
 from nthlayer_common.telemetry import init_telemetry
 
 from nthlayer_workers import TELEMETRY_SERVICE_NAME
-from nthlayer_workers.cli_output import warn_parse_failures
+from nthlayer_workers.cli_output import warn_parse_failures, warn_suffix_collisions
 
 _log = logging.getLogger(__name__)
 
@@ -87,6 +87,7 @@ def _cmd_collect(args: argparse.Namespace) -> int:
     loaded = load_specs(args.specs_dir)
     service_slos = loaded.service_slos
     warn_parse_failures(loaded.parse_failures, args.specs_dir)
+    warn_suffix_collisions(loaded.suffix_collisions)
     if not service_slos:
         print("No SLO definitions found in specs directory", file=sys.stderr)
         return 0
@@ -203,6 +204,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     loaded = load_specs(args.specs_dir)
     service_slos = loaded.service_slos
     warn_parse_failures(loaded.parse_failures, args.specs_dir)
+    warn_suffix_collisions(loaded.suffix_collisions)
     if not service_slos:
         print("No SLO definitions found in specs directory", file=sys.stderr)
         return 0

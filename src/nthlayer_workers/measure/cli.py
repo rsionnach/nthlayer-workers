@@ -185,7 +185,7 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
     from nthlayer_common.verdicts import SQLiteVerdictStore
     from nthlayer_common.verdicts import create as verdict_create
 
-    from nthlayer_workers.cli_output import warn_parse_failures
+    from nthlayer_workers.cli_output import warn_parse_failures, warn_suffix_collisions
     from nthlayer_workers.measure.adapters.prometheus import (
         evaluate_slos,
         evaluation_custom_metadata,
@@ -206,6 +206,7 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
     loaded = load_specs(specs_dir)
     slos = loaded.slos
     warn_parse_failures(loaded.parse_failures, specs_dir)
+    warn_suffix_collisions(loaded.suffix_collisions)
     if not slos:
         print(f"No SLO definitions found in {specs_dir}", file=sys.stderr)
         sys.exit(1)

@@ -11,8 +11,9 @@ in `CLAUDE.md` are canonical for runtime invariants — this file is the
 src/nthlayer_workers/
   __init__.py       # Package marker: "Tier 2 background computation modules"
   cli.py            # nthlayer-workers serve  + gate subcommand
-  cli_output.py     # warn_parse_failures() — operator-facing stderr shared
-                    #   by the observe and measure CLIs [opensrm-fxln]
+  cli_output.py     # warn_parse_failures(), warn_suffix_collisions() —
+                    #   operator-facing stderr shared by the observe and
+                    #   measure CLIs [opensrm-fxln, opensrm-j9wq]
   runner.py         # ModuleRunner orchestrator (see below)
 ```
 
@@ -282,7 +283,9 @@ budget).
 1 and exits 2 below it: `consecutive >= 0` is true before any window is
 evaluated, so 0 breached every judgment SLO on its first cycle. It also
 surfaces `LoadedSpecs.parse_failures` on stderr via
-`nthlayer_workers.cli_output.warn_parse_failures`, and writes each
+`nthlayer_workers.cli_output.warn_parse_failures` and
+`LoadedSpecs.suffix_collisions` via `warn_suffix_collisions` (see
+"Directory scans" below), and writes each
 verdict's `metadata.custom` through
 `prometheus.evaluation_custom_metadata` — the same definition
 `count_consecutive_breaches` reads back [opensrm-fxln].
@@ -858,6 +861,34 @@ on a clean load — and as the CLI's "Manifest parse failures: N" line
 manifest; foreign YAML sharing the directory is dropped with a
 `manifest_file_ignored` debug log carrying the reason. Parse failures
 log `manifest_parse_failed` with `spec_file` and `error`.
+`LoadedManifests.suffix_collisions` (see "Directory scans" below) reaches
+callers as `retro.metadata.custom["manifest_suffix_collisions"]`, a count,
+always present, and as the CLI's "Manifest files not read: N" line; each
+collision logs `manifest_suffix_collision` with `stem`, `kept` and
+`dropped` [opensrm-j9wq].
+
+### Directory scans [opensrm-j9wq]
+
+Three places read manifests from a directory: learn's
+`_load_manifests_from_specs`, observe's `spec_loader.load_specs` (the
+`collect` and `verify` commands) and measure's
+`adapters/prometheus.load_specs` (`evaluate-once`). The observe and measure
+worker modules do not: they read manifests from core's API.
+
+All three call nthlayer-common's `scan_manifest_files()`, never
+`iter_manifest_files()`. When a directory holds `svc.yaml` and `svc.yml`,
+common reads the `.yaml` and sets the other aside; nothing checks that the
+two declare the same service, so the one set aside may be a service that is
+then missing from the figures. `scan_manifest_files` returns each such pair
+as a `SuffixCollision(stem, kept, dropped)`; `iter_manifest_files` raises a
+`ManifestCollisionWarning` instead, which Python shows once per process for
+a call site and which never reaches structlog. So each loader carries
+`suffix_collisions: tuple[SuffixCollision, ...]` on its result beside
+`parse_failures`, logs every collision on every scan (`spec_suffix_collision`
+in observe, `manifest_suffix_collision` in learn, a stdlib warning in
+measure's adapter), and the CLIs print one stderr line per file not read.
+A collision is a caveat on the output, as a parse failure is, not an error:
+the run continues on the kept file.
 
 `recommendations.py` — NEW (opensrm-jmy.2): `SpecRecommendation` +
 `Recommendation` dataclasses + `analyze_incident()` glue.

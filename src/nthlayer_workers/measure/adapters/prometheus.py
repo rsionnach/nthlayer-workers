@@ -10,9 +10,10 @@ import httpx
 from nthlayer_common.manifest import (
     ERROR_BUDGET_REMAINING,
     ManifestLoadError,
+    SuffixCollision,
     foreign_yaml_reason,
-    iter_manifest_files,
     load_manifest,
+    scan_manifest_files,
 )
 from nthlayer_common.manifest.models import SLODefinition as ManifestSLO
 
@@ -78,6 +79,11 @@ class LoadedSpecs:
 
     slos: list[SLODefinition] = field(default_factory=list)
     parse_failures: int = 0
+    # Files the scan set aside because another file has the same name with
+    # the other manifest suffix (svc.yaml beside svc.yml; .yaml is read).
+    # The two need not declare the same service, so the one set aside may be
+    # a service whose SLOs are never evaluated (opensrm-j9wq).
+    suffix_collisions: tuple[SuffixCollision, ...] = ()
 
 
 def load_specs(specs_dir: Path) -> LoadedSpecs:
@@ -100,7 +106,17 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
     if not specs_dir.is_dir():
         return LoadedSpecs()
 
-    for spec_file in iter_manifest_files(specs_dir):
+    # scan_manifest_files returns the collisions as data, so they are
+    # reported on every scan; iter_manifest_files raised a warning Python
+    # shows once per process (opensrm-j9wq).
+    scan = scan_manifest_files(specs_dir)
+    for collision in scan.suffix_collisions:
+        logger.warning(
+            "Manifest %s was not read: %s has the same name and was read instead",
+            collision.dropped, collision.kept.name,
+        )
+
+    for spec_file in scan.files:
         try:
             manifest = load_manifest(spec_file, suppress_deprecation_warning=True)
         except (ManifestLoadError, FileNotFoundError, ValueError, OSError) as exc:
@@ -132,7 +148,11 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
                 query_kind=query_kind,
             ))
 
-    return LoadedSpecs(slos=slos, parse_failures=parse_failures)
+    return LoadedSpecs(
+        slos=slos,
+        parse_failures=parse_failures,
+        suffix_collisions=tuple(scan.suffix_collisions),
+    )
 
 
 # The classical kinds generate writes an error budget for (ruling D5,

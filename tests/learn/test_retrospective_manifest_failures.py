@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import argparse
 import textwrap
+import warnings
 from pathlib import Path
 
 import pytest
 import structlog
-from nthlayer_common.manifest import ManifestCollisionWarning, scan_manifest_files
+from nthlayer_common.manifest import SuffixCollision
 from nthlayer_common.verdicts.core import create
 from nthlayer_common.verdicts.models import Verdict
 from nthlayer_common.verdicts.sqlite_store import SQLiteVerdictStore
@@ -380,52 +381,149 @@ class TestEmptyAndAmbiguousFiles:
 class TestSameStemInBothSuffixes:
     """The same-stem case moved UPSTREAM in nthlayer-common 3.0.0 (opensrm-xvwt).
 
-    Before 3.0.0 ``iter_manifest_files`` yielded both ``svc-good.yaml`` and
-    ``svc-good.yml``, so the pair reached this module and the service-name
-    duplicate branch skipped the second. 3.0.0 drops it at the scan instead and
-    raises ``ManifestCollisionWarning``, so this module never sees the second
-    file and ``manifest_duplicate_skipped`` does NOT fire for a same-stem pair.
+    Before 3.0.0 the scan yielded both ``svc-good.yaml`` and ``svc-good.yml``,
+    so the pair reached this module and the service-name duplicate branch
+    skipped the second. 3.0.0 sets the ``.yml`` aside at the scan instead, so
+    this module never loads it and ``manifest_duplicate_skipped`` does NOT fire
+    for a same-stem pair.
 
-    The OUTCOME this class has always pinned is unchanged — one service loaded,
-    nothing counted as a parse failure — so those assertions are kept verbatim.
-    What moved is the layer carrying the operator's trace, so the log assertion
-    is replaced by one on the warning that now carries it rather than deleted:
-    deleting it would leave the silent-drop invariant unasserted at every layer,
-    which is the failure this whole module exists to prevent.
+    The OUTCOME this class has always pinned is unchanged: one service loaded,
+    nothing counted as a parse failure. What has moved, twice, is the layer
+    carrying the operator's trace. Under opensrm-xvwt it was the
+    ``ManifestCollisionWarning`` that ``iter_manifest_files`` raised, which
+    Python shows once per process for a call site and which never reached
+    structlog. Since opensrm-j9wq this module calls ``scan_manifest_files``
+    and reports the collision itself, from returned data, on every scan. The
+    assertion follows the trace rather than being deleted: deleting it would
+    leave the silent-drop invariant unasserted at every layer.
     """
 
     def test_yaml_wins_and_nothing_is_counted_as_a_failure(self, tmp_path: Path):
         specs = _write_specs(tmp_path / "specs")
         (specs / "svc-good.yml").write_text(GOOD_MANIFEST)
 
-        with (
-            pytest.warns(ManifestCollisionWarning) as collisions,
-            structlog.testing.capture_logs() as logs,
-        ):
+        with structlog.testing.capture_logs() as logs:
             loaded_specs = _load_manifests_from_specs(str(specs))
 
         assert loaded_specs.parse_failures == 0
         assert set(loaded_specs.manifests) == {"svc-good"}
 
-        # WHICH file lost, from the scan's structured record. Not a substring of
-        # the warning text: that message names BOTH files — "<dropped> was not
-        # loaded: it shares the stem '<stem>' with <kept.name>" — so
-        # `"svc-good.yml" in message` is green under INVERTED precedence too,
-        # matching via the kept name. [correctness IMPORTANT 1]
-        scan = scan_manifest_files(specs)
-        assert [(c.kept.name, c.dropped.name) for c in scan.suffix_collisions] == [
-            ("svc-good.yaml", "svc-good.yml")
-        ]
-
-        # The drop reaches an operator, and the message leads with the LOSER.
-        # Anchored at position rather than by containment, for the reason above.
-        assert len(collisions) == 1
-        assert str(collisions[0].message).startswith(
-            f"{specs / 'svc-good.yml'} was not loaded:"
+        # WHICH file lost, as the structured record this module now returns:
+        # kept and dropped are separate fields, so inverted precedence cannot
+        # pass by naming both files somewhere.
+        assert loaded_specs.suffix_collisions == (
+            SuffixCollision(
+                stem="svc-good",
+                kept=specs / "svc-good.yaml",
+                dropped=specs / "svc-good.yml",
+            ),
         )
 
-        # ...and this module's own branch is no longer what did it.
+        # The drop reaches the structured log an operator reads.
+        collisions = [e for e in logs if e["event"] == "manifest_suffix_collision"]
+        assert [(e["log_level"], e["kept"], e["dropped"]) for e in collisions] == [
+            ("warning", str(specs / "svc-good.yaml"), str(specs / "svc-good.yml"))
+        ]
+
+        # ...and this module's own duplicate branch is not what did it.
         assert [e for e in logs if e["event"] == "manifest_duplicate_skipped"] == []
+
+    def test_the_collision_is_reported_on_every_scan(self, tmp_path: Path):
+        """The reason for opensrm-j9wq. A worker scans the same directory from
+        the same line every cycle; the Python warning was shown for the first
+        scan only. Measured then, 5 cycles: 1 warning. Returned data has no
+        such memory."""
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "svc-good.yml").write_text(GOOD_MANIFEST)
+
+        with structlog.testing.capture_logs() as logs:
+            scans = [_load_manifests_from_specs(str(specs)) for _ in range(3)]
+
+        assert [len(s.suffix_collisions) for s in scans] == [1, 1, 1]
+        assert len([e for e in logs if e["event"] == "manifest_suffix_collision"]) == 3
+
+    def test_nothing_depends_on_the_python_warning(self, tmp_path: Path):
+        """Acceptance: no consumer relies on ManifestCollisionWarning. With
+        every warning turned into an error the scan still completes and still
+        reports the collision, so the warning is not the channel."""
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "svc-good.yml").write_text(GOOD_MANIFEST)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            loaded_specs = _load_manifests_from_specs(str(specs))
+
+        assert len(loaded_specs.suffix_collisions) == 1
+
+    def test_a_different_service_in_the_set_aside_file_is_not_loaded(self, tmp_path: Path):
+        """Grouping is by file name, not by service. The file set aside can
+        declare a service the kept one does not, and that service is then
+        missing from the view: the case the collision record exists for."""
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "svc-good.yml").write_text(GOOD_MANIFEST.replace("svc-good", "svc-other"))
+
+        loaded_specs = _load_manifests_from_specs(str(specs))
+
+        assert set(loaded_specs.manifests) == {"svc-good"}
+        assert [c.dropped.name for c in loaded_specs.suffix_collisions] == ["svc-good.yml"]
+
+    def test_a_clean_directory_has_no_collisions(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+
+        with structlog.testing.capture_logs() as logs:
+            loaded_specs = _load_manifests_from_specs(str(specs))
+
+        assert loaded_specs.suffix_collisions == ()
+        assert [e for e in logs if e["event"] == "manifest_suffix_collision"] == []
+
+    def test_no_specs_dir_has_no_collisions(self):
+        assert _load_manifests_from_specs(None).suffix_collisions == ()
+
+
+class TestRetrospectiveSurfacesSuffixCollisions:
+    """The count travels on the retrospective verdict, as the parse-failure
+    count does, and ``nthlayer-learn retrospective`` prints it."""
+
+    def test_collision_count_present_in_retro_custom(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "svc-good.yml").write_text(GOOD_MANIFEST)
+        store = MemoryStore()
+        incident = _incident()
+        store.put(incident)
+
+        retro = build_retrospective(incident.id, store, specs_dir=str(specs))
+
+        assert retro.metadata.custom["manifest_suffix_collisions"] == 1
+
+    def test_collision_count_zero_when_clean_or_absent(self, tmp_path: Path):
+        specs = _write_specs(tmp_path / "specs")
+        store = MemoryStore()
+        incident = _incident()
+        store.put(incident)
+
+        clean = build_retrospective(incident.id, store, specs_dir=str(specs))
+        absent = build_retrospective(incident.id, store)
+
+        # Always present: an absent key would read the same as "none".
+        assert clean.metadata.custom["manifest_suffix_collisions"] == 0
+        assert absent.metadata.custom["manifest_suffix_collisions"] == 0
+
+    def test_cli_reports_collisions(self, tmp_path: Path, incident_db, capsys):
+        specs = _write_specs(tmp_path / "specs")
+        (specs / "svc-good.yml").write_text(GOOD_MANIFEST)
+        db, incident_id = incident_db
+
+        TestCliSurfacesParseFailures._run_cli(db, incident_id, str(specs))
+
+        assert "Manifest files not read: 1" in capsys.readouterr().out
+
+    def test_cli_silent_when_no_collisions(self, tmp_path: Path, incident_db, capsys):
+        specs = _write_specs(tmp_path / "specs")
+        db, incident_id = incident_db
+
+        TestCliSurfacesParseFailures._run_cli(db, incident_id, str(specs))
+
+        assert "Manifest files not read" not in capsys.readouterr().out
 
 
 class TestDuplicateServiceAcrossDifferentStems:
@@ -671,9 +769,12 @@ class TestGateIsNotDuplicated:
         )
 
     def test_retrospective_uses_the_shared_file_lister(self):
-        from nthlayer_common.manifest import iter_manifest_files as shared
+        from nthlayer_common.manifest import scan_manifest_files as shared
 
         from nthlayer_workers.learn import retrospective
 
-        assert retrospective.iter_manifest_files is shared
+        assert retrospective.scan_manifest_files is shared
         assert not hasattr(retrospective, "_spec_files")
+        # The lossy view is gone from this module, not kept beside the full
+        # one: it reports collisions through a warning (opensrm-j9wq).
+        assert not hasattr(retrospective, "iter_manifest_files")
