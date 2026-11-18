@@ -890,6 +890,15 @@ measure's adapter), and the CLIs print one stderr line per file not read.
 A collision is a caveat on the output, as a parse failure is, not an error:
 the run continues on the kept file.
 
+A CLI run therefore reports a collision twice, as it does a parse failure:
+the loader's log line (for whoever collects logs) and the CLI's stderr line
+(for whoever is reading the output). With no logging configured the first
+is visible too, structlog's on stdout and stdlib's on stderr.
+
+The scan does not look inside the files. If the kept `.yaml` fails to parse
+and the `.yml` set aside is valid, the service is in neither: the run shows
+one parse failure and one collision for the same name.
+
 `recommendations.py` — NEW (opensrm-jmy.2): `SpecRecommendation` +
 `Recommendation` dataclasses + `analyze_incident()` glue.
 `Recommendation` fields: service / type / rationale / proposed_value

@@ -467,6 +467,23 @@ class TestSameStemInBothSuffixes:
         assert set(loaded_specs.manifests) == {"svc-good"}
         assert [c.dropped.name for c in loaded_specs.suffix_collisions] == ["svc-good.yml"]
 
+    def test_a_broken_kept_file_beside_a_valid_set_aside_one(self, tmp_path: Path):
+        """The scan chooses by suffix without reading the files. When the kept
+        ``.yaml`` fails to parse and the ``.yml`` set aside would have loaded,
+        the service is in neither, and the result says so twice."""
+        specs = tmp_path / "specs"
+        specs.mkdir()
+        (specs / "svc.yaml").write_text(BROKEN_MANIFEST)
+        (specs / "svc.yml").write_text(GOOD_MANIFEST)
+
+        loaded_specs = _load_manifests_from_specs(str(specs))
+
+        assert loaded_specs.parse_failures == 1
+        assert [(c.kept.name, c.dropped.name) for c in loaded_specs.suffix_collisions] == [
+            ("svc.yaml", "svc.yml")
+        ]
+        assert loaded_specs.manifests == {}
+
     def test_a_clean_directory_has_no_collisions(self, tmp_path: Path):
         specs = _write_specs(tmp_path / "specs")
 

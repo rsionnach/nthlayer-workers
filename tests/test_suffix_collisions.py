@@ -51,6 +51,19 @@ MANIFEST = textwrap.dedent("""\
 OTHER_MANIFEST = MANIFEST.replace("name: payments", "name: payments-api")
 
 
+# A manifest that fails to load while plainly aiming to be one: spec.owner.group
+# is not a Backstage entity reference. The shape used for the same purpose in
+# tests/learn/test_retrospective_manifest_failures.py.
+BROKEN_MANIFEST = textwrap.dedent("""\
+    apiVersion: opensrm.nthlayer.io/v2
+    kind: ServiceManifest
+    metadata: {name: payments, labels: {tier: critical}}
+    spec:
+      owner: {group: not-an-entity-ref}
+      service: {name: payments, type: api}
+""")
+
+
 @pytest.fixture
 def colliding_dir(tmp_path: Path) -> Path:
     """``payments.yaml`` (service payments) beside ``payments.yml`` (service
@@ -158,6 +171,29 @@ def test_neither_loader_depends_on_the_python_warning(load, colliding_dir: Path)
         loaded = load(colliding_dir)
 
     assert loaded.suffix_collisions == _expected(colliding_dir)
+
+
+@pytest.mark.parametrize(
+    ("load", "services"),
+    [
+        (spec_loader.load_specs, lambda loaded: {s.service for s in loaded.service_slos}),
+        (measure_adapter.load_specs, lambda loaded: {s.service for s in loaded.slos}),
+    ],
+    ids=["observe", "measure"],
+)
+def test_a_broken_kept_file_beside_a_valid_set_aside_one(load, services, tmp_path: Path):
+    """The scan chooses by suffix without reading the files. When the kept
+    ``.yaml`` fails to parse and the ``.yml`` set aside would have loaded, the
+    service is in neither, and the run says so twice: one parse failure and
+    one collision, for the same name."""
+    (tmp_path / "payments.yaml").write_text(BROKEN_MANIFEST)
+    (tmp_path / "payments.yml").write_text(MANIFEST)
+
+    loaded = load(tmp_path)
+
+    assert loaded.parse_failures == 1
+    assert loaded.suffix_collisions == _expected(tmp_path)
+    assert services(loaded) == set()
 
 
 # --- what the operator is told ---------------------------------------------
