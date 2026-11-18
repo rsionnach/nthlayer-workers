@@ -214,6 +214,29 @@ def test_no_collisions_means_no_lines():
     assert cli_output.suffix_collision_lines(()) == []
 
 
+def test_the_warning_goes_to_stderr_and_only_there(colliding_dir: Path, capsys):
+    """The CLI tests below show each command hands its collisions to
+    ``warn_suffix_collisions``; this shows the operator then sees them. The
+    stream is the behaviour under test (stdout carries the commands' own
+    output), so it is read back, and compared with the lines as data rather
+    than with typed-out text (R5 provenance, opensrm-j9wq)."""
+    collisions = _expected(colliding_dir)
+
+    cli_output.warn_suffix_collisions(collisions)
+
+    captured = capsys.readouterr()
+    assert captured.err.splitlines() == cli_output.suffix_collision_lines(collisions)
+    assert len(captured.err.splitlines()) == 1
+    assert captured.out == ""
+
+
+def test_no_collisions_writes_nothing(capsys):
+    cli_output.warn_suffix_collisions(())
+
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
+
+
 def _captured_warnings():
     """A stand-in for ``warn_suffix_collisions`` that records what it was
     given and still calls the real one, and the list it records into. Each
