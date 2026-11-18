@@ -345,9 +345,15 @@ def test_the_rule_this_file_cites_is_in_claude_md():
 
 
 def test_pyproject_cites_the_rule_by_the_same_title():
-    """The other citation, in the comment above the nthlayer-common range.
-    The comment wraps, so its `#` markers and line breaks are folded away
-    before looking for the title."""
+    """The other citation, which lives in the comment above the
+    nthlayer-common range. The comment wraps, so `#` markers and line breaks
+    are folded away before looking for the title.
+
+    What this does and does not check: that pyproject.toml's text carries the
+    title somewhere. It does not check WHERE, and it does not forbid a second
+    citation beside it, so a pointer into another repo's CLAUDE.md could be
+    written back in without failing here. Both are left to review: pinning
+    the title to one comment block would break on any reflow of that block."""
     folded = " ".join(PYPROJECT.read_text().replace("#", " ").split())
 
     assert CITED_RULE.strip("*.") in folded
