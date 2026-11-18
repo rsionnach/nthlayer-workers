@@ -577,11 +577,11 @@ class MeasureModule:
         return "reduced", 1  # fallback
 
     @staticmethod
-    def _find_slo(manifests: list[dict], service: str, slo_name: str) -> dict | None:
+    def _find_slo(manifests: list, service: str, slo_name: str) -> dict | None:
         """Find SLO data from manifests for severity classification.
 
         Passes over an entry of the wrong shape, as _judgment_slos does
-        (which has already logged it this cycle)."""
+        (which logs it, once per process)."""
         for m in manifests:
             if not isinstance(m, dict) or m.get("name") != service:
                 continue
