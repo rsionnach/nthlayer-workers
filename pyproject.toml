@@ -49,10 +49,11 @@ dependencies = [
     # tests/release-smoke/test_resolved_dependencies.py reads the BUILT wheel's
     # own metadata in the release container, where deps come from PyPI instead
     # of the sibling checkout. A major upgrade must change EXPECTED_MAJORS too.
-    # WHY 5.5.0 (opensrm-wo62.1): the version this repo is now built and tested
-    # against (nthlayer-core rule 10: the floor is the installed sibling). Bump
-    # it on every nthlayer-common minor release: the floor guard fails until you
-    # do.
+    # WHY THIS FLOOR: it is the version this repo is built and tested against
+    # (CLAUDE.md hard rule "A declared dependency range must admit exactly the
+    # versions tested": the floor is the installed sibling). Raise it on every
+    # nthlayer-common release, a patch included: the floor guard fails until
+    # you do.
     # 5.2.0 (opensrm-g32d): judgment thresholds are evaluated with
     # nthlayer-common's evaluate_threshold (CORE §5.5.6) and read from core 3.0's
     # /manifests via threshold_from_v2_entry; error magnitudes are no longer

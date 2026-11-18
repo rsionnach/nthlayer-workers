@@ -16,11 +16,14 @@ BUILT artifact's own metadata and is decisive in the release container, where
 deps come from PyPI rather than the sibling checkout. This file does not cover
 the container case; that one does.
 
-The full account of why both exist is nthlayer-core CLAUDE.md hard rule 10
-[opensrm-p3bm]. The short version: `tool.uv.sources` points nthlayer-common at
-the sibling checkout, a path source REPLACES registry resolution rather than
-being filtered by the version specifier, and nothing warned that the declared
-range and the tested version had diverged.
+The rule both enforce is a hard rule in this repo's CLAUDE.md. Its title is the
+constant CITED_RULE below, not repeated here: a second copy of it in prose is
+one more thing to go stale. It is cited by title because rule numbers move,
+and test_the_rule_this_file_cites_is_in_claude_md checks it is there. The rule
+came from opensrm-p3bm in nthlayer-core. The mechanism: `tool.uv.sources`
+points nthlayer-common at the sibling checkout, a path source REPLACES registry
+resolution rather than being filtered by the version specifier, and nothing
+warned that the declared range and the tested version had diverged.
 
 The guarded set is DISCOVERED from project.dependencies, never hand-listed. A
 hand-maintained roster can fall behind pyproject, and a roster that empties
@@ -212,9 +215,9 @@ def test_ceiling_excludes_the_next_major(name):
     `>=1!3.0.0` already excludes, so this assertion would pass vacuously. Left
     alone for the same reason UNBOUNDED_PROBE is — no sibling has ever used an
     epoch — and test_declared_range_has_an_upper_bound still catches an outright
-    missing ceiling in that case. This is nthlayer-core CLAUDE.md hard
-    rule 10's "not a future major" stated as an assertion rather than prose
-    [opensrm-ir5m, from the opensrm-p62o review].
+    missing ceiling in that case. This is the dependency-range rule's "not a
+    future major" (CLAUDE.md; see the module docstring) stated as an
+    assertion rather than prose [opensrm-ir5m, from the opensrm-p62o review].
 
     It deliberately does NOT assert anything about the range's upper edge
     WITHIN the current major: `<3.5.0` would pass here. That edge is
@@ -306,6 +309,56 @@ def test_declared_ceiling_is_exactly_the_next_major(name):
         f"is {installed}, so the ceiling must be '<{expected}'. A wider ceiling "
         f"publishes a major nothing here has run."
     )
+
+
+# The title of the CLAUDE.md hard rule this file and pyproject.toml's comment
+# cite, exactly as CLAUDE.md prints it at the head of the rule: in bold, with
+# its full stop. By title, because the number is not stable: the same rule is
+# 10, 11 and 16 in sibling repos, and inserting a rule above it here would move
+# it. Prose that quotes the title has neither the bold markers nor the full
+# stop, hence the `.strip("*.")` where pyproject.toml's comment is checked.
+CITED_RULE = "**A declared dependency range must admit exactly the versions tested.**"
+
+
+def test_the_rule_this_file_cites_is_in_claude_md():
+    """A pointer nobody checks rots. This file and pyproject.toml used to cite
+    "nthlayer-core CLAUDE.md hard rule 10": another repo's file, by a number
+    that differs in every repo, with nothing here to notice it moving
+    [opensrm-v929]. The citation is now to this repo's own CLAUDE.md, and
+    this is the check: the rule is there, once, as a numbered hard rule."""
+    claude_md = (PYPROJECT.parent / "CLAUDE.md").read_text()
+
+    numbered = [
+        line for line in claude_md.splitlines()
+        if line.split(". ", 1)[0].isdigit() and line.split(". ", 1)[-1].startswith(CITED_RULE)
+    ]
+    assert len(numbered) == 1, (
+        f"CLAUDE.md should carry exactly one numbered hard rule titled "
+        f"{CITED_RULE}; found {len(numbered)}. pyproject.toml and this "
+        f"file cite it by that title."
+    )
+    # The pointer back. The rule names this test as what checks it; renaming
+    # the test without the rule would leave CLAUDE.md citing nothing.
+    this_test = test_the_rule_this_file_cites_is_in_claude_md.__name__
+    assert this_test in claude_md, (
+        f"CLAUDE.md's dependency-range rule should name {this_test}, the "
+        f"test that checks its title"
+    )
+
+
+def test_pyproject_cites_the_rule_by_the_same_title():
+    """The other citation, which lives in the comment above the
+    nthlayer-common range. The comment wraps, so `#` markers and line breaks
+    are folded away before looking for the title.
+
+    What this does and does not check: that pyproject.toml's text carries the
+    title somewhere. It does not check WHERE, and it does not forbid a second
+    citation beside it, so a pointer into another repo's CLAUDE.md could be
+    written back in without failing here. Both are left to review: pinning
+    the title to one comment block would break on any reflow of that block."""
+    folded = " ".join(PYPROJECT.read_text().replace("#", " ").split())
+
+    assert CITED_RULE.strip("*.") in folded
 
 
 def test_uv_lock_records_this_projects_version():
