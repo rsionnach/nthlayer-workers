@@ -155,6 +155,24 @@ async def test_a_malformed_entry_is_logged_once_not_every_cycle(bad, where):
     assert [e["where"] for e in logs if e["event"] == "measure_manifest_skipped"] == [where]
 
 
+async def test_each_distinct_problem_is_logged_not_just_the_first():
+    """Once per DISTINCT problem. Two different malformed entries in one
+    response are two problems; remembering only that something was skipped
+    would log the first and hide every later one for the life of the
+    process (R5 provenance, opensrm-jarh)."""
+    response = [_manifest(), "not-a-manifest", {"name": "other", "slos": "none"},
+                {"name": "third", "slos": [None]}]
+    module, prov, _, _ = _module([response, response])
+
+    with structlog.testing.capture_logs() as logs:
+        await _cycle(module, prov)
+        await _cycle(module, prov)
+
+    assert [e["where"] for e in logs if e["event"] == "measure_manifest_skipped"] == [
+        "/manifests[1]", "/manifests[2].slos", "/manifests[3].slos[0]",
+    ]
+
+
 @pytest.mark.parametrize(
     "manifest",
     [
@@ -197,6 +215,18 @@ def test_find_slo_passes_over_a_malformed_entry(bad, where):
     for manifests in ([bad, _manifest()], [_manifest(), bad]):
         assert MeasureModule._find_slo(manifests, "fraud-detect", "reversal_rate") == _JUDGMENT_SLO
         assert MeasureModule._find_slo(manifests, "other", "reversal_rate") is None
+
+
+@pytest.mark.parametrize("slos", [None, 7, 0.5, True], ids=["null", "int", "float", "bool"])
+def test_find_slo_passes_over_a_slos_that_cannot_be_iterated(slos):
+    """The entries above leave a `slos` that is a string or a mapping, which
+    iterate without harm. One that is null or a number does not iterate at
+    all, and it is found under the very service being looked up: an earlier
+    entry for the same name (R5 provenance, opensrm-jarh)."""
+    manifests = [{"name": "fraud-detect", "slos": slos}, _manifest()]
+
+    assert MeasureModule._find_slo(manifests, "fraud-detect", "reversal_rate") == _JUDGMENT_SLO
+    assert MeasureModule._find_slo(manifests[:1], "fraud-detect", "reversal_rate") is None
 
 
 # --- a body that is not a list at all ---------------------------------------
