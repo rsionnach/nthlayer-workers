@@ -112,7 +112,8 @@ def load_specs(specs_dir: Path) -> LoadedSpecs:
     scan = scan_manifest_files(specs_dir)
     for collision in scan.suffix_collisions:
         logger.warning(
-            "Manifest %s was not read: %s has the same name and was read instead",
+            "Manifest %s was not read: %s has the same name apart from its "
+            "extension and was read instead",
             collision.dropped, collision.kept.name,
         )
 

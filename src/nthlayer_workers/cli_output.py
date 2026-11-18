@@ -38,8 +38,9 @@ def suffix_collision_lines(collisions: Sequence[SuffixCollision]) -> list[str]:
     """
     return [
         f"Warning: {c.dropped} was not read: {c.kept.name} has the same name "
-        f"and was read instead. If they declare different services, the one "
-        f"in {c.dropped.name} is not evaluated"
+        f"apart from its extension and was read instead. If they declare "
+        f"different services, rename one: the one in {c.dropped.name} is not "
+        f"evaluated"
         for c in collisions
     ]
 
