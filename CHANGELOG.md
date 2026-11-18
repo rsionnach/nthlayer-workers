@@ -6,6 +6,22 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [4.3.0](https://github.com/rsionnach/nthlayer-workers/compare/v4.2.2...v4.3.0) (2026-11-18)
+
+
+### Bug Fixes
+
+* **measure:** a malformed /manifests entry no longer fails the cycle ([9a5810e](https://github.com/rsionnach/nthlayer-workers/commit/9a5810e7d63fb5c8b1746477139ca2e77da61f1a))
+* **measure:** read reversal rate from the A1 nthlayer_* series ([0196af2](https://github.com/rsionnach/nthlayer-workers/commit/0196af25665c2e17ab9176c2698156a392774cf1))
+* report a manifest file the scan set aside, on every scan ([0074ad2](https://github.com/rsionnach/nthlayer-workers/commit/0074ad2d10026c80decb52264f7e6503cb8e9a2b))
+* require nthlayer-common 5.12.1 ([a90058a](https://github.com/rsionnach/nthlayer-workers/commit/a90058a8e0d7a2e67c6bf5c93130fb7fed4c7c08))
+
+
+### Documentation
+
+* give the dependency-range rule a home in workers' CLAUDE.md ([5635e07](https://github.com/rsionnach/nthlayer-workers/commit/5635e071dccd931c34d6fc69d42b4a6a3e829d9a))
+* head the reversal-rate upgrade note 4.3 ([fc5f735](https://github.com/rsionnach/nthlayer-workers/commit/fc5f7357acb8525d7c8e20d9dfac9add133999ff))
+
 ## [4.2.2](https://github.com/rsionnach/nthlayer-workers/compare/v4.2.1...v4.2.2) (2026-11-17)
 
 
