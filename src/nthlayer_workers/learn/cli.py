@@ -150,6 +150,15 @@ def _cmd_retrospective(args: argparse.Namespace) -> None:
                 f"  Manifest parse failures: {parse_failures} "
                 "(figures computed over a subset; see manifest_parse_failed logs)"
             )
+        # opensrm-j9wq: a file set aside for sharing its name with another
+        # may declare a different service, which the figures then omit.
+        suffix_collisions = custom.get("manifest_suffix_collisions", 0)
+        if suffix_collisions:
+            print(
+                f"  Manifest files not read: {suffix_collisions} "
+                "(same name as another file with the other suffix; "
+                "see manifest_suffix_collision logs)"
+            )
     except KeyError as e:
         print(f"Error: {e}", file=__import__("sys").stderr)
         __import__("sys").exit(1)

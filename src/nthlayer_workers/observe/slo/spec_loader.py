@@ -12,9 +12,10 @@ from pathlib import Path
 import structlog
 from nthlayer_common.manifest import (
     ManifestLoadError,
+    SuffixCollision,
     foreign_yaml_reason,
-    iter_manifest_files,
     load_manifest,
+    scan_manifest_files,
 )
 
 from nthlayer_workers.observe.slo.collector import ServiceSLO
@@ -36,10 +37,17 @@ class LoadedSpecs:
     service that declares none. The SLOs that would have breached are simply
     never evaluated, and nothing says so. The per-file
     ``spec_parse_failed`` warning carries which file and why.
+
+    ``suffix_collisions`` are the files the scan set aside because another
+    file has the same name with the other manifest suffix (``svc.yaml``
+    beside ``svc.yml``; ``.yaml`` is read). The two need not declare the
+    same service, so the SLOs of the one set aside may be missing from
+    ``service_slos``: a partial view by another route (opensrm-j9wq).
     """
 
     service_slos: list[ServiceSLO] = field(default_factory=list)
     parse_failures: int = 0
+    suffix_collisions: tuple[SuffixCollision, ...] = ()
 
 
 def load_specs(specs_dir: str | Path) -> LoadedSpecs:
@@ -65,7 +73,19 @@ def load_specs(specs_dir: str | Path) -> LoadedSpecs:
     results: list[ServiceSLO] = []
     parse_failures = 0
 
-    for path in iter_manifest_files(specs_path):
+    # scan_manifest_files returns the collisions as data, so they are
+    # reported on every scan; iter_manifest_files raised a warning Python
+    # shows once per process (opensrm-j9wq).
+    scan = scan_manifest_files(specs_path)
+    for collision in scan.suffix_collisions:
+        log.warning(
+            "spec_suffix_collision",
+            stem=collision.stem,
+            kept=str(collision.kept),
+            dropped=str(collision.dropped),
+        )
+
+    for path in scan.files:
         try:
             manifest = load_manifest(path, suppress_deprecation_warning=True)
         except (ManifestLoadError, FileNotFoundError, ValueError, OSError) as exc:
@@ -88,4 +108,8 @@ def load_specs(specs_dir: str | Path) -> LoadedSpecs:
         for slo in manifest.slos:
             results.append(ServiceSLO(service=manifest.name, slo=slo))
 
-    return LoadedSpecs(service_slos=results, parse_failures=parse_failures)
+    return LoadedSpecs(
+        service_slos=results,
+        parse_failures=parse_failures,
+        suffix_collisions=tuple(scan.suffix_collisions),
+    )

@@ -9,10 +9,11 @@ from typing import Any
 import structlog
 from nthlayer_common.manifest import (
     ManifestLoadError,
+    SuffixCollision,
     extract_declared_dependencies,
     foreign_yaml_reason,
-    iter_manifest_files,
     load_manifest,
+    scan_manifest_files,
 )
 from nthlayer_common.outcomes import (
     compute_financial_impact,
@@ -162,6 +163,10 @@ def build_retrospective(
         # would read the same as "no failures", which is the ambiguity
         # the silent skip created in the first place.
         "manifest_parse_failures": loaded_specs.parse_failures,
+        # opensrm-j9wq: files the scan set aside because another file has the
+        # same name with the other suffix. Always present, for the same
+        # reason as the count above.
+        "manifest_suffix_collisions": len(loaded_specs.suffix_collisions),
     }
     if trigger_service is not None:
         retro_custom["trigger_service"] = trigger_service
@@ -245,10 +250,18 @@ class LoadedManifests:
     over ``manifests`` alone: without it, a partial view is
     indistinguishable from a complete one. The per-file
     ``manifest_parse_failed`` warning carries which file and why.
+
+    ``suffix_collisions`` are the files the scan set aside because another
+    file in the directory has the same name with the other manifest suffix
+    (``svc.yaml`` beside ``svc.yml``; ``.yaml`` is read). Nothing checks that
+    the two declare the same service, so a collision is a second way for the
+    view to be partial, and it travels with the manifests for the same
+    reason the failure count does (opensrm-j9wq).
     """
 
     manifests: dict[str, Any]
     parse_failures: int = 0
+    suffix_collisions: tuple[SuffixCollision, ...] = ()
 
 
 def _load_manifests_from_specs(specs_dir: str | None) -> LoadedManifests:
@@ -279,7 +292,19 @@ def _load_manifests_from_specs(specs_dir: str | None) -> LoadedManifests:
 
     manifests: dict[str, Any] = {}
     parse_failures = 0
-    for spec_file in iter_manifest_files(specs_path):
+    # scan_manifest_files, not iter_manifest_files: the latter reports a
+    # collision through warnings.warn, which Python shows once per process
+    # for a given call site, and which never reaches structlog. Returned
+    # data is reported on every scan (opensrm-j9wq).
+    scan = scan_manifest_files(specs_path)
+    for collision in scan.suffix_collisions:
+        log.warning(
+            "manifest_suffix_collision",
+            stem=collision.stem,
+            kept=str(collision.kept),
+            dropped=str(collision.dropped),
+        )
+    for spec_file in scan.files:
         try:
             manifest = load_manifest(str(spec_file))
         except (ManifestLoadError, UnicodeDecodeError) as exc:
@@ -309,7 +334,11 @@ def _load_manifests_from_specs(specs_dir: str | None) -> LoadedManifests:
             )
             continue
         manifests[manifest.name] = manifest
-    return LoadedManifests(manifests=manifests, parse_failures=parse_failures)
+    return LoadedManifests(
+        manifests=manifests,
+        parse_failures=parse_failures,
+        suffix_collisions=tuple(scan.suffix_collisions),
+    )
 
 
 def _extract_declared_dependencies(

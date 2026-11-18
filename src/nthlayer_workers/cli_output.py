@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+
+from nthlayer_common.manifest import SuffixCollision
 
 
 def warn_parse_failures(parse_failures: int, specs_dir: str | Path) -> None:
@@ -24,3 +27,32 @@ def warn_parse_failures(parse_failures: int, specs_dir: str | Path) -> None:
             f"failed to parse and were not evaluated",
             file=sys.stderr,
         )
+
+
+def suffix_collision_lines(collisions: Sequence[SuffixCollision]) -> list[str]:
+    """One operator-facing line per file a directory scan set aside.
+
+    Each names the file that was NOT read first, then the one read in its
+    place. Kept apart from the printing so what is reported can be checked
+    as data.
+    """
+    return [
+        f"Warning: {c.dropped} was not read: {c.kept.name} has the same name "
+        f"apart from its extension and was read instead. If they declare "
+        f"different services, rename one: the one in {c.dropped.name} is not "
+        f"evaluated"
+        for c in collisions
+    ]
+
+
+def warn_suffix_collisions(collisions: Sequence[SuffixCollision]) -> None:
+    """Tell the operator which manifest files a scan set aside, and why.
+
+    ``svc.yaml`` beside ``svc.yml``: nthlayer-common reads the ``.yaml`` and
+    sets the other aside. Nothing checks that the two declare the same
+    service, so the SLOs that follow may be missing one. On stderr for the
+    reason ``warn_parse_failures`` is, and from returned data rather than a
+    Python warning, so it is said on every run (opensrm-j9wq).
+    """
+    for line in suffix_collision_lines(collisions):
+        print(line, file=sys.stderr)
