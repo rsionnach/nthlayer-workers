@@ -121,8 +121,9 @@ def _entries(manifests: list[dict], seen_problems: set[str]) -> tuple[set[str], 
     list, or no judgment_thresholds at all (a pre-3.0 core serves none: that
     says nothing about which entries exist). An open breach must not retire
     and re-raise because a response was briefly malformed or old. Cost: a
-    removed-and-broken entry lingers until the manifest parses cleanly or
-    the service disappears.
+    removed-and-broken entry lingers until the manifest parses cleanly. A
+    service that disappears from the response is not "present" either, so
+    its keys are kept too: absence is not evidence of deletion (_retire).
 
     Identical entries are kept once. A threshold_key shared by several
     distinct entries of a service (same identity, other bound values) is

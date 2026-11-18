@@ -218,8 +218,24 @@ SLO assessment, drift, discovery, gate, portfolio, verification.
 `worker.py` — `MeasureModule` WorkerModule impl [P3-C.1].
 `process_cycle()`:
 
-1. Fetch manifests from core.
-2. Per judgment SLO (skips SLOs without `judgment_type` field): query
+1. Fetch manifests from core. A failed request, or a successful one with
+   an empty list, ends the cycle there and changes nothing: threshold state
+   and governance of a service are kept while it is absent from a response
+   (absence is not evidence of deletion, and a breach retired on a briefly
+   empty catalogue would fire again and step the one-way ratchet twice), and
+   an empty response does not spend a due threshold run [opensrm-jarh].
+   Cleaning up a deleted service waits for an explicit signal from core
+   (opensrm-wogg). A successful response whose body is not a list at all
+   (an error object or text from something that is not core) is treated the
+   same way, with one `measure_manifests_not_a_list` warning per body type.
+2. `_judgment_slos` reads the response for the SLO phase. An entry of the
+   wrong shape (a manifest that is not a dict or has no string `name`, a
+   `slos` that is not a list, an SLO that is not a dict) is skipped with one
+   `measure_manifest_skipped` warning per distinct problem, as the threshold
+   phase skips its own; it used to raise out of the cycle, so nothing ran
+   for any service. Core serves a list of dicts, so this guards against a
+   response that is not core's [opensrm-jarh].
+   Per judgment SLO (skips SLOs without `judgment_type` field): query
    Prometheus → submit `judgment_slo_evaluation` assessment
    (`id="jse-{service}-{slo_name}-{uuid8}"`) → detect
    HEALTHY → BREACH transitions → emit `quality_breach` verdict
