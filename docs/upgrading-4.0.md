@@ -73,7 +73,7 @@ Two other readers of the budget change with it:
 The `latency_seconds` query kind, its duration-unit table and
 `SLODefinition.unit` in `measure/adapters/prometheus.py` are removed.
 
-## 4.2.3: `evaluate-once` reads reversal rate from the A1 series
+## 4.3: `evaluate-once` reads reversal rate from the A1 series
 
 `nthlayer-measure evaluate-once` computes a `reversal_rate` judgment SLO from
 `nthlayer_reversals_total` over `nthlayer_decisions_total`, the names OpenSRM
