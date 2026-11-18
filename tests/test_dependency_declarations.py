@@ -16,9 +16,10 @@ BUILT artifact's own metadata and is decisive in the release container, where
 deps come from PyPI rather than the sibling checkout. This file does not cover
 the container case; that one does.
 
-The rule both enforce is this repo's CLAUDE.md hard rule "A declared dependency
-range must admit exactly the versions tested" (cited by title: rule numbers
-move; test_the_rule_this_file_cites_is_in_claude_md checks it is there). It
+The rule both enforce is a hard rule in this repo's CLAUDE.md. Its title is the
+constant CITED_RULE below, not repeated here: a second copy of it in prose is
+one more thing to go stale. It is cited by title because rule numbers move,
+and test_the_rule_this_file_cites_is_in_claude_md checks it is there. The rule
 came from opensrm-p3bm in nthlayer-core. The short version: `tool.uv.sources`
 points nthlayer-common at
 the sibling checkout, a path source REPLACES registry resolution rather than
@@ -333,6 +334,13 @@ def test_the_rule_this_file_cites_is_in_claude_md():
         f"CLAUDE.md should carry exactly one numbered hard rule titled "
         f"{CITED_RULE}; found {len(numbered)}. pyproject.toml and this "
         f"file cite it by that title."
+    )
+    # The pointer back. The rule names this test as what checks it; renaming
+    # the test without the rule would leave CLAUDE.md citing nothing.
+    this_test = test_the_rule_this_file_cites_is_in_claude_md.__name__
+    assert this_test in claude_md, (
+        f"CLAUDE.md's dependency-range rule should name {this_test}, the "
+        f"test that checks its title"
     )
 
 
