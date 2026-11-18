@@ -136,6 +136,9 @@ class MeasureModule:
         # Once-per-change log memory; in-memory only, so a restart logs each
         # problem once more.
         self._threshold_problems: set[str] = set()
+        # The same once-per-change memory for the SLO phase's skipped
+        # /manifests entries (opensrm-jarh).
+        self._manifest_problems: set[str] = set()
         self._threshold_last_run: float | None = None
         # Governance keys (_breach_decisions / _breach_severities) that are
         # threshold keys, so threshold cleanup never touches SLO keys.
@@ -194,15 +197,7 @@ class MeasureModule:
             evaluation_ids: dict[str, str] = {}  # slo_key → assessment_id
 
             # Phase 1: Evaluate each judgment SLO (parallel with concurrency cap)
-            slos_to_eval = []
-            for m in manifests:
-                service = m.get("name")
-                if not service:
-                    continue
-                for slo in m.get("slos", []):
-                    if not slo.get("judgment_type"):
-                        continue
-                    slos_to_eval.append((service, slo))
+            slos_to_eval = _judgment_slos(manifests, self._manifest_problems)
 
             sem = asyncio.Semaphore(self._eval_concurrency)
 
@@ -570,12 +565,18 @@ class MeasureModule:
 
     @staticmethod
     def _find_slo(manifests: list[dict], service: str, slo_name: str) -> dict | None:
-        """Find SLO data from manifests for severity classification."""
+        """Find SLO data from manifests for severity classification.
+
+        Passes over an entry of the wrong shape, as _judgment_slos does
+        (which has already logged it this cycle)."""
         for m in manifests:
-            if m.get("name") != service:
+            if not isinstance(m, dict) or m.get("name") != service:
                 continue
-            for slo in m.get("slos", []):
-                if slo.get("name") == slo_name:
+            slos = m.get("slos")
+            if not isinstance(slos, list):
+                continue
+            for slo in slos:
+                if isinstance(slo, dict) and slo.get("name") == slo_name:
                     return slo
         return None
 
@@ -595,6 +596,56 @@ class MeasureModule:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _judgment_slos(manifests: list, seen_problems: set[str]) -> list[tuple[str, dict]]:
+    """Every judgment SLO a /manifests response serves, as (service, slo).
+
+    One entry of the wrong shape must cost only itself. Indexing each entry
+    as a dict without looking, as the SLO phase did, let a single bad one
+    raise out of process_cycle, so no SLO was evaluated, the threshold phase
+    did not run and governance did not move, for every service
+    (opensrm-jarh). The threshold phase already isolates its entries this
+    way (thresholds/phase.py, _entries).
+
+    Skipped, with one ``measure_manifest_skipped`` warning per distinct
+    problem for the life of the process: a manifest that is not a dict or
+    has no non-empty string ``name``, a ``slos`` that is not a list, and an
+    SLO that is not a dict. A manifest with no ``slos``, or ``slos: null``,
+    has no SLOs and is not a problem.
+
+    nthlayer-core serves a list of dicts today (catalogue.to_dict_list), so
+    none of these is a shape core produces; the guard is for a response
+    that is not what core sends.
+    """
+    found: list[tuple[str, dict]] = []
+    for i, m in enumerate(manifests):
+        service = m.get("name") if isinstance(m, dict) else None
+        if not isinstance(service, str) or not service:
+            _skip_once(seen_problems, f"manifest:{i}:{type(m).__name__}", f"/manifests[{i}]")
+            continue
+        slos = m.get("slos")
+        if slos is None:
+            continue
+        if not isinstance(slos, list):
+            _skip_once(seen_problems, f"slos:{service}:{type(slos).__name__}",
+                       f"/manifests[{i}].slos")
+            continue
+        for j, slo in enumerate(slos):
+            if not isinstance(slo, dict):
+                _skip_once(seen_problems, f"slo:{service}:{j}:{type(slo).__name__}",
+                           f"/manifests[{i}].slos[{j}]")
+                continue
+            if slo.get("judgment_type"):
+                found.append((service, slo))
+    return found
+
+
+def _skip_once(seen_problems: set[str], token: str, where: str) -> None:
+    """Log ``measure_manifest_skipped`` the first time *token* is seen."""
+    if token not in seen_problems:
+        seen_problems.add(token)
+        logger.warning("measure_manifest_skipped", where=where)
 
 
 def _detect_transitions(
