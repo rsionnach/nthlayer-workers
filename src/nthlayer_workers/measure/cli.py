@@ -213,6 +213,11 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
         )
         sys.exit(2)
 
+    # Read the trigger chain's config before evaluating anything. Read only
+    # after a breach, a config this version refuses would turn the breach's
+    # exit 2 into exit 1 and be found out mid-incident [opensrm-l0ki].
+    trigger_config = _optional_config(args)
+
     specs_dir = Path(args.specs_dir)
     loaded = load_specs(specs_dir)
     slos = loaded.slos
@@ -314,18 +319,24 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
     # Trigger downstream chain for breach verdicts
     breach_results = [r for r in results if r.breach]
     if breach_results:
-        _trigger_chain(args, breach_results)
+        _trigger_chain(args, breach_results, trigger_config)
         sys.exit(2)
 
 
-def _trigger_chain(args, breach_results):
-    """Invoke downstream components for breach results via subprocess."""
-
+def _optional_config(args: argparse.Namespace) -> MeasureConfig | None:
+    """The config evaluate-once's trigger chain reads, or None when there is
+    no config file: the file is optional for this command."""
     config_path = getattr(args, "config", None) or Path("measure.yaml")
     if not config_path.exists():
-        return  # No config, no trigger chain
+        return None
+    return _read_config(config_path)
 
-    config = _read_config(config_path)
+
+def _trigger_chain(args, breach_results, config: MeasureConfig | None):
+    """Invoke downstream components for breach results via subprocess."""
+
+    if config is None:
+        return  # No config, no trigger chain
     if not config.trigger.correlate_enabled:
         return
 

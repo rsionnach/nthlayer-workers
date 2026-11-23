@@ -1438,3 +1438,60 @@ def test_the_unevaluated_report_lists_not_evaluable_slos_first():
         UnevaluatedSLO("svc", "throughput", "not_evaluable", "no_data_source"),
         UnevaluatedSLO("svc", "budgeted", "no_data", "no_error_budget_value"),
     ]
+
+
+# --- opensrm-l0ki: evaluate-once reads its trigger config before evaluating ---
+
+
+def _evaluate_once_args(tmp_path, config_text):
+    import argparse
+
+    specs = tmp_path / "specs"
+    specs.mkdir()
+    (specs / "fraud-detect.yaml").write_text(SAMPLE_SPEC)
+    config = tmp_path / "measure.yaml"
+    config.write_text(config_text)
+    return argparse.Namespace(
+        specs_dir=str(specs), hysteresis=1, verdict_store=str(tmp_path / "v.db"),
+        prometheus_url="http://prom", decision_store=None, config=config,
+    )
+
+
+def test_evaluate_once_refuses_a_retired_config_key_before_evaluating(tmp_path):
+    """Not after a breach: read lazily, the refusal replaced the breach's
+    exit 2 with exit 1, once the breach verdicts were already written."""
+    from nthlayer_workers.measure import cli
+
+    args = _evaluate_once_args(tmp_path, "detection:\n  max_reversal_rate: 0.2\n")
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus",
+        return_value=0.9,
+    ) as query, pytest.raises(SystemExit) as exc:
+        cli.cmd_evaluate_once(args)
+
+    assert exc.value.code == 1
+    assert query.call_count == 0
+    assert not (tmp_path / "v.db").exists()
+
+
+def test_evaluate_once_still_exits_2_on_a_breach_with_a_current_config(tmp_path):
+    from nthlayer_common.verdicts import SQLiteVerdictStore, VerdictFilter
+
+    from nthlayer_workers.measure import cli
+
+    args = _evaluate_once_args(tmp_path, "detection:\n  max_evaluation_override_rate: 0.2\n")
+
+    with patch(
+        "nthlayer_workers.measure.adapters.prometheus.query_prometheus",
+        return_value=0.9,
+    ), pytest.raises(SystemExit) as exc:
+        cli.cmd_evaluate_once(args)
+
+    assert exc.value.code == 2
+    store = SQLiteVerdictStore(args.verdict_store)
+    try:
+        written = store.query(VerdictFilter(producer_system="nthlayer-measure", limit=50))
+    finally:
+        store.close()
+    assert any(v.metadata.custom.get("breach") for v in written)

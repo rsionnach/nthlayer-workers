@@ -258,14 +258,28 @@ def test_status_refuses_the_old_detection_key(tmp_path, capsys):
     assert not (tmp_path / "scores.db").exists()
 
 
-def test_the_trigger_chain_refuses_the_old_detection_key(tmp_path):
+def test_the_optional_config_refuses_the_old_detection_key(tmp_path):
     """evaluate-once reads the same config for its trigger chain."""
-    from nthlayer_workers.measure.cli import _trigger_chain
+    from nthlayer_workers.measure.cli import _optional_config
 
     config = _agent_config(tmp_path)
     config.write_text(config.read_text() + "detection:\n  max_reversal_rate: 0.2\n")
 
     with pytest.raises(SystemExit) as exc_info:
-        _trigger_chain(_make_args(config=config), [])
+        _optional_config(_make_args(config=config))
 
     assert exc_info.value.code == 1
+
+
+def test_the_optional_config_is_none_without_a_file(tmp_path):
+    from nthlayer_workers.measure.cli import _optional_config
+
+    assert _optional_config(_make_args(config=tmp_path / "absent.yaml")) is None
+
+
+def test_the_optional_config_loads_a_current_file(tmp_path):
+    from nthlayer_workers.measure.cli import _optional_config
+
+    loaded = _optional_config(_make_args(config=_agent_config(tmp_path)))
+
+    assert [a.name for a in loaded.agents] == ["fraud-detect"]
