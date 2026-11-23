@@ -5,6 +5,7 @@ import dataclasses
 
 import pytest
 import pytest_asyncio
+from nthlayer_common.telemetry import capture_events
 
 from nthlayer_workers.measure.calibration.slos import JudgmentSLOChecker, JudgmentSLOReport
 from nthlayer_workers.measure.store.sqlite import SQLiteScoreStore
@@ -104,6 +105,28 @@ async def test_evaluation_override_rate_with_no_evaluations_is_zero(store):
 
     assert report.evaluation_override_rate == 0.0
     assert report.total_evaluations == 0
+
+
+@pytest.mark.asyncio
+async def test_check_emits_the_report_it_returns_as_a_calibration_event(store):
+    """The event carries the figures of the report, under the same name."""
+    for eid in ("e1", "e2", "e3", "e4"):
+        await store.save_score(_score(eid))
+    await store.save_override("e1", {"correctness": 0.3}, "human")
+    await store.save_override("e2", {"correctness": 0.4}, "human")
+
+    with capture_events() as cap:
+        report = await JudgmentSLOChecker(store).check("agent-a", window_days=7)
+
+    (event,) = [r for r in cap.events if r.name == "nthlayer.calibration.report"]
+    assert report.evaluation_override_rate == pytest.approx(0.5)
+    assert dict(event.attributes) == {
+        "agent_name": "agent-a",
+        "window_days": 7,
+        "evaluation_override_rate": report.evaluation_override_rate,
+        "mae": report.mae,
+    }
+    assert report.mae > 0
 
 
 def test_the_report_names_no_reversal_rate_and_judges_no_slo():
