@@ -155,6 +155,9 @@ class VerdictChainAnalyzer:
         if not reversed_verdicts:
             return None
 
+        # Overridden verdicts over all of the service's verdicts in the
+        # window ("reversed" in this module means overridden). Not A1's
+        # reversal rate, which is over all decisions [opensrm-l0ki].
         downstream_overridden_ratio = len(reversed_verdicts) / len(downstream_verdicts)
 
         result = self._traverse(

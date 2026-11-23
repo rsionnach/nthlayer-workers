@@ -118,6 +118,20 @@ old names stop working.
 | measure config (`measure.yaml`) | `agents[].manifest` | removed |
 | degradation alert | `metric_name` `reversal_rate` | `evaluation_override_rate` |
 
+Python names, for code that imports nthlayer-workers:
+
+| Old | Now |
+|---|---|
+| `TrendWindow.reversal_rate` | `TrendWindow.evaluation_override_rate` |
+| `SLOThresholds.max_reversal_rate`, `DetectionConfig.max_reversal_rate` | `max_evaluation_override_rate` on both |
+| `JudgmentSLOReport.reversal_rate` | `JudgmentSLOReport.evaluation_override_rate` |
+| `JudgmentSLOReport.reversal_rate_target`, `.reversal_rate_compliant` | removed |
+| `JudgmentSLOChecker(store, slo=...)` | `JudgmentSLOChecker(store, quality_threshold=...)` |
+| `emit_calibration_report_event(reversal_rate=..., compliant=...)` | `evaluation_override_rate=...`; `compliant` removed |
+| module `nthlayer_workers.measure.manifest` (`JudgmentSLO`, `load_manifest`) | removed |
+| `AgentConfig.manifest` | removed |
+| `VerdictChainEvidence.downstream_reversal_rate` | `downstream_overridden_ratio` |
+
 What to do:
 
 - **Dashboards and alerts** that read `nthlayer_verdict_reversal_rate` show

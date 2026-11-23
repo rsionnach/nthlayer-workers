@@ -213,9 +213,9 @@ def cmd_evaluate_once(args: argparse.Namespace) -> None:
         )
         sys.exit(2)
 
-    # Read the trigger chain's config before evaluating anything. Read only
-    # after a breach, a config this version refuses would turn the breach's
-    # exit 2 into exit 1 and be found out mid-incident [opensrm-l0ki].
+    # Read the trigger chain's config before evaluating anything. If it were
+    # read only after a breach, a config this version refuses would turn the
+    # breach's exit 2 into exit 1, mid-incident [opensrm-l0ki].
     trigger_config = _optional_config(args)
 
     specs_dir = Path(args.specs_dir)

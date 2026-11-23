@@ -1040,8 +1040,7 @@ def test_evaluate_once_rejects_a_hysteresis_below_one(tmp_path, value, capsys):
 # opensrm/spec/v2/examples/migration/api-full-v2.yaml, copied from opensrm
 # 0530688 with its comment lines removed (the parsed document is identical).
 # It lives here, not read from the sibling checkout, so the suite does not
-# depend on the workspace layout (tests/measure/test_manifest.py inlines its
-# spec copies the same way).
+# depend on the workspace layout.
 _API_FULL_V2 = """\
 apiVersion: opensrm.nthlayer.io/v2
 kind: ServiceManifest
