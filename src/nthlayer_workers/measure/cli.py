@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from nthlayer_common.telemetry import init_telemetry
 
 from nthlayer_workers import TELEMETRY_SERVICE_NAME
-from nthlayer_workers.measure.config import MeasureConfig, load_config
+from nthlayer_workers.measure.config import MeasureConfig, RetiredConfigKeyError, load_config
 
 if TYPE_CHECKING:
     from nthlayer_workers.measure.pipeline.evaluator import ModelEvaluator
@@ -29,7 +29,18 @@ def _load_config(args: argparse.Namespace) -> MeasureConfig:
     if not config_path.exists():
         print(f"Config file not found: {config_path}", file=sys.stderr)
         sys.exit(1)
-    return load_config(config_path)
+    return _read_config(config_path)
+
+
+def _read_config(config_path: Path) -> MeasureConfig:
+    """Load the config, exiting 1 on a key this version no longer reads."""
+    try:
+        return load_config(config_path)
+    except RetiredConfigKeyError as exc:
+        # Say which key and what replaced it, without a traceback: this is
+        # what an operator sees on upgrading [opensrm-l0ki].
+        print(f"Error: {config_path}: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _build_store(config: MeasureConfig) -> SQLiteScoreStore:
@@ -314,7 +325,7 @@ def _trigger_chain(args, breach_results):
     if not config_path.exists():
         return  # No config, no trigger chain
 
-    config = load_config(config_path)
+    config = _read_config(config_path)
     if not config.trigger.correlate_enabled:
         return
 
@@ -411,7 +422,7 @@ def cmd_status(args: argparse.Namespace) -> None:
         "dimension_averages": window.dimension_averages,
         "evaluation_count": window.evaluation_count,
         "confidence_mean": window.confidence_mean,
-        "reversal_rate": window.reversal_rate,
+        "evaluation_override_rate": window.evaluation_override_rate,
         "total_cost_usd": window.total_cost_usd,
         "avg_cost_per_eval": window.avg_cost_per_eval,
         "autonomy": autonomy or "full",
@@ -458,30 +469,13 @@ def cmd_calibrate(args: argparse.Namespace) -> None:
         print(json.dumps(result, indent=2))
         return
 
-    slo = None
-    if args.agent:
-        from nthlayer_common.manifest import ManifestLoadError
-
-        from nthlayer_workers.measure.manifest import load_manifest
-
-        for ac in config.agents:
-            if ac.name == args.agent and ac.manifest:
-                # A manifest that is configured but cannot be read is an
-                # error, not a report without a target [opensrm-n4v1].
-                try:
-                    slo = load_manifest(Path(ac.manifest))
-                except (FileNotFoundError, ManifestLoadError) as exc:
-                    print(f"Error: manifest for agent '{args.agent}': {exc}", file=sys.stderr)
-                    sys.exit(1)
-                break
-
     store = _build_store(config)
 
     async def _run():
         if args.agent:
             from nthlayer_workers.measure.calibration.slos import JudgmentSLOChecker
 
-            checker = JudgmentSLOChecker(store, slo=slo)
+            checker = JudgmentSLOChecker(store)
             report = await checker.check(args.agent, window_days=args.window_days)
             return asdict(report)
         else:

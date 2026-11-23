@@ -305,12 +305,13 @@ surfaces `LoadedSpecs.parse_failures` on stderr via
 verdict's `metadata.custom` through
 `prometheus.evaluation_custom_metadata` — the same definition
 `count_consecutive_breaches` reads back [opensrm-fxln].
-`calibrate --agent` reads the agent's configured manifest through
-nthlayer-common's loader (`measure/manifest.py`, opensrm-n4v1): the
-reversal-rate judgment SLO's declared ceiling becomes the report's
-target. A manifest the loader rejects (the published opensrm/v1 schema
-is migrate-only), a missing file, or two reversal-rate SLOs exits 1.
-No manifest format declares a quality threshold, so the report's
+`calibrate --agent` reports calibration figures from the score store and
+judges no SLO [opensrm-l0ki]: its `evaluation_override_rate` is overridden
+evaluations over all evaluations, which is not A1's reversal rate, so it
+is no longer compared to the manifest's reversal-rate ceiling and reads
+no manifest. `status` and the degradation detector
+(`detection.max_evaluation_override_rate`) use the same figure under the
+same name. Nothing declares a quality threshold, so the report's
 false-accept rate, precision and recall are null. The legacy
 `serve` / `api-serve` /
 `governance {show, restore}` subcommands (and the `_build_pipeline`

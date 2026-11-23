@@ -1,5 +1,6 @@
 """Tests for CLI subcommands."""
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -103,7 +104,7 @@ def test_status_shows_window(config_file, capsys):
         dimension_averages={"correctness": 0.85},
         evaluation_count=10,
         confidence_mean=0.9,
-        reversal_rate=0.1,
+        evaluation_override_rate=0.1,
         total_cost_usd=0.50,
         avg_cost_per_eval=0.05,
     )
@@ -126,7 +127,8 @@ def test_status_shows_window(config_file, capsys):
     captured = capsys.readouterr()
     result = json.loads(captured.out)
     assert result["agent_name"] == "test-agent"
-    assert result["reversal_rate"] == 0.1
+    assert result["evaluation_override_rate"] == 0.1
+    assert "reversal_rate" not in result
     assert result["autonomy"] == "full"
 
 
@@ -173,43 +175,12 @@ def test_overrides_list(config_file, capsys):
 
 
 # ------------------------------------------------------------------ #
-# calibrate --agent reads the agent's manifest through nthlayer-common  #
-# [opensrm-n4v1]                                                       #
+# calibrate --agent reports calibration figures and judges no SLO      #
+# [opensrm-l0ki]                                                       #
 # ------------------------------------------------------------------ #
 
-# The shape of the shipped nthlayer/demo/specs/fraud-detect.yaml (srm/v1).
-_SRM_V1_MANIFEST = (
-    "apiVersion: srm/v1\n"
-    "kind: ServiceReliabilityManifest\n"
-    "metadata:\n"
-    "  name: fraud-detect\n"
-    "  team: payments-ml\n"
-    "  tier: critical\n"
-    "spec:\n"
-    "  type: ai-gate\n"
-    "  slos:\n"
-    "    reversal_rate:\n"
-    "      target: 98.5\n"
-    "      window: 30d\n"
-)
 
-# The loader's old, bespoke shape under the published opensrm/v1 apiVersion.
-_BESPOKE_MANIFEST = (
-    "apiVersion: opensrm/v1\n"
-    "kind: ServiceReliabilityManifest\n"
-    "metadata:\n"
-    "  name: fraud-detect\n"
-    "spec:\n"
-    "  type: ai-gate\n"
-    "  slos:\n"
-    "    judgment:\n"
-    "      reversal:\n"
-    "        rate:\n"
-    "          target: 0.05\n"
-)
-
-
-def _agent_config(tmp_path, manifest_path=None):
+def _agent_config(tmp_path, extra_agent_lines=""):
     cfg = tmp_path / "measure.yaml"
     cfg.write_text(
         "evaluator:\n"
@@ -220,66 +191,81 @@ def _agent_config(tmp_path, manifest_path=None):
         "agents:\n"
         "  - name: fraud-detect\n"
         "    adapter: webhook\n"
-        + (f"    manifest: {manifest_path}\n" if manifest_path is not None else "")
+        + extra_agent_lines
     )
     return cfg
 
 
-def test_calibrate_agent_reports_the_manifests_reversal_ceiling(tmp_path, capsys):
-    manifest = tmp_path / "fraud-detect.yaml"
-    manifest.write_text(_SRM_V1_MANIFEST)
-    args = _make_args(
-        config=_agent_config(tmp_path, manifest), window_days=30, agent="fraud-detect"
-    )
+def test_calibrate_agent_reports_the_evaluation_override_rate(tmp_path, capsys):
+    from nthlayer_workers.measure.store.sqlite import SQLiteScoreStore
 
-    cmd_calibrate(args)
+    config = _agent_config(tmp_path)
+    store = SQLiteScoreStore(tmp_path / "scores.db")
 
-    result = json.loads(capsys.readouterr().out)
-    assert result["agent_name"] == "fraud-detect"
-    assert result["reversal_rate_target"] == 0.015
-    assert result["reversal_rate_compliant"] is True
-    # No manifest format declares a quality threshold.
-    assert result["false_accept_rate"] is None
-    assert result["precision"] is None
-    assert result["recall"] is None
+    async def _seed():
+        for eid in ("e1", "e2", "e3", "e4"):
+            await store.save_score(QualityScore(
+                eval_id=eid, agent_name="fraud-detect", task_id="t1",
+                dimensions={"correctness": 0.9}, confidence=0.8,
+                evaluator_model="test-model", cost_usd=0.01,
+            ))
+        await store.save_override("e1", {"correctness": 0.3}, "human")
 
+    asyncio.run(_seed())
+    store.close()
 
-def test_calibrate_agent_without_a_manifest_reports_no_target(tmp_path, capsys):
-    args = _make_args(config=_agent_config(tmp_path), window_days=30, agent="fraud-detect")
-
-    cmd_calibrate(args)
+    cmd_calibrate(_make_args(config=config, window_days=30, agent="fraud-detect"))
 
     result = json.loads(capsys.readouterr().out)
-    assert result["reversal_rate_target"] is None
-    assert result["reversal_rate_compliant"] is None
+    # The whole report: one overridden evaluation in four, no figure named
+    # reversal rate, no target and no compliance.
+    assert result == {
+        "agent_name": "fraud-detect",
+        "window_days": 30,
+        "evaluation_override_rate": 0.25,
+        "false_accept_rate": None,
+        "precision": None,
+        "recall": None,
+        "mae": pytest.approx(0.6),
+        "total_evaluations": 4,
+        "total_overrides": 1,
+    }
 
 
-def test_calibrate_agent_fails_on_a_rejected_manifest(tmp_path, capsys):
-    """A configured manifest the loader rejects is an error, not a report
-    without a target."""
-    manifest = tmp_path / "old.yaml"
-    manifest.write_text(_BESPOKE_MANIFEST)
-    args = _make_args(
-        config=_agent_config(tmp_path, manifest), window_days=30, agent="fraud-detect"
-    )
+def test_calibrate_refuses_a_config_that_still_names_an_agent_manifest(tmp_path, capsys):
+    """The key's only reader is gone. Reading on without it would look as if
+    the manifest's SLO were still being judged. (Which key, and what replaced
+    it, is pinned on the error itself in test_config.py.)"""
+    config = _agent_config(tmp_path, "    manifest: fraud-detect.yaml\n")
 
     with pytest.raises(SystemExit) as exc_info:
-        cmd_calibrate(args)
+        cmd_calibrate(_make_args(config=config, window_days=30, agent="fraud-detect"))
 
     assert exc_info.value.code == 1
     assert capsys.readouterr().out == ""
     assert not (tmp_path / "scores.db").exists()
 
 
-def test_calibrate_agent_fails_on_a_missing_manifest(tmp_path, capsys):
-    args = _make_args(
-        config=_agent_config(tmp_path, tmp_path / "nowhere.yaml"),
-        window_days=30,
-        agent="fraud-detect",
-    )
+def test_status_refuses_the_old_detection_key(tmp_path, capsys):
+    config = _agent_config(tmp_path)
+    config.write_text(config.read_text() + "detection:\n  max_reversal_rate: 0.2\n")
 
     with pytest.raises(SystemExit) as exc_info:
-        cmd_calibrate(args)
+        cmd_status(_make_args(config=config, agent_name="fraud-detect", window_days=7))
 
     assert exc_info.value.code == 1
     assert capsys.readouterr().out == ""
+    assert not (tmp_path / "scores.db").exists()
+
+
+def test_the_trigger_chain_refuses_the_old_detection_key(tmp_path):
+    """evaluate-once reads the same config for its trigger chain."""
+    from nthlayer_workers.measure.cli import _trigger_chain
+
+    config = _agent_config(tmp_path)
+    config.write_text(config.read_text() + "detection:\n  max_reversal_rate: 0.2\n")
+
+    with pytest.raises(SystemExit) as exc_info:
+        _trigger_chain(_make_args(config=config), [])
+
+    assert exc_info.value.code == 1

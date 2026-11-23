@@ -12,7 +12,7 @@ def _make_window(**kwargs) -> TrendWindow:
         dimension_averages={"correctness": 0.9, "style": 0.8},
         evaluation_count=10,
         confidence_mean=0.85,
-        reversal_rate=0.1,
+        evaluation_override_rate=0.1,
         total_cost_usd=0.5,
         avg_cost_per_eval=0.05,
     )
@@ -22,7 +22,7 @@ def _make_window(**kwargs) -> TrendWindow:
 
 def test_no_alerts_within_slo():
     thresholds = SLOThresholds(
-        max_reversal_rate=0.3,
+        max_evaluation_override_rate=0.3,
         min_dimension_scores={"correctness": 0.7, "style": 0.6},
         min_confidence=0.5,
     )
@@ -31,12 +31,12 @@ def test_no_alerts_within_slo():
     assert alerts == []
 
 
-def test_reversal_rate_alert():
-    thresholds = SLOThresholds(max_reversal_rate=0.05)
+def test_evaluation_override_rate_alert():
+    thresholds = SLOThresholds(max_evaluation_override_rate=0.05)
     detector = ThresholdDetector(thresholds)
-    alerts = detector.check(_make_window(reversal_rate=0.15))
+    alerts = detector.check(_make_window(evaluation_override_rate=0.15))
     assert len(alerts) == 1
-    assert alerts[0].metric_name == "reversal_rate"
+    assert alerts[0].metric_name == "evaluation_override_rate"
     assert alerts[0].current_value == 0.15
     assert alerts[0].threshold == 0.05
 
@@ -51,7 +51,7 @@ def test_dimension_below_slo():
 
 
 def test_empty_window_no_alerts():
-    thresholds = SLOThresholds(max_reversal_rate=0.01, min_confidence=0.99)
+    thresholds = SLOThresholds(max_evaluation_override_rate=0.01, min_confidence=0.99)
     detector = ThresholdDetector(thresholds)
     alerts = detector.check(_make_window(evaluation_count=0))
     assert alerts == []

@@ -117,19 +117,18 @@ def emit_correction_event(
 def emit_calibration_report_event(
     agent_name: str,
     window_days: int,
-    reversal_rate: float,
+    evaluation_override_rate: float,
     false_accept_rate: float | None,
     precision: float | None,
     recall: float | None,
     mae: float,
-    compliant: bool | None = None,
 ) -> None:
     """Record a calibration/SLO report. It is computed as it is emitted, so
     its Timestamp is the emit time."""
     attributes: dict[str, str | float | int | bool] = {
         "agent_name": agent_name,
         "window_days": window_days,
-        "reversal_rate": reversal_rate,
+        "evaluation_override_rate": evaluation_override_rate,
         "mae": mae,
     }
     if false_accept_rate is not None:
@@ -138,8 +137,6 @@ def emit_calibration_report_event(
         attributes["precision"] = precision
     if recall is not None:
         attributes["recall"] = recall
-    if compliant is not None:
-        attributes["reversal_rate_compliant"] = compliant
     emit_event("nthlayer.calibration.report", attributes)
 
 

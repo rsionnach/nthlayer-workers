@@ -65,21 +65,21 @@ async def test_multiple_scores_averaged(store, tracker):
 
 
 @pytest.mark.asyncio
-async def test_reversal_rate_computed(store, tracker):
+async def test_evaluation_override_rate_computed(store, tracker):
     await store.save_score(_make_score("e1", {"correctness": 0.8}))
     await store.save_score(_make_score("e2", {"correctness": 0.6}))
     await store.save_override("e1", {"correctness": 0.5}, "reviewer")
 
     window = await tracker.compute_window("agent-a", 7)
-    assert window.reversal_rate == pytest.approx(0.5)  # 1 of 2 overridden
+    assert window.evaluation_override_rate == pytest.approx(0.5)  # 1 of 2 overridden
 
 
 @pytest.mark.asyncio
-async def test_reversal_rate_no_overrides(store, tracker):
+async def test_evaluation_override_rate_no_overrides(store, tracker):
     await store.save_score(_make_score("e1", {"correctness": 0.8}))
 
     window = await tracker.compute_window("agent-a", 7)
-    assert window.reversal_rate == pytest.approx(0.0)
+    assert window.evaluation_override_rate == pytest.approx(0.0)
 
 
 @pytest.mark.asyncio

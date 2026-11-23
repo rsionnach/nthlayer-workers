@@ -1,4 +1,9 @@
-"""Judgment SLO metrics — extends calibration with false accept rate, precision, recall.
+"""Calibration metrics per agent: evaluation override rate, false accept rate,
+precision, recall.
+
+None of these is A1's reversal rate (reversals / all decisions), and the
+report judges no SLO: the manifest's reversal-rate SLO is evaluated by the
+measure module from the A1 series [opensrm-l0ki].
 
 All metrics are arithmetic over stored scores and overrides (ZFC: transport).
 """
@@ -8,7 +13,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from nthlayer_workers.measure.manifest import JudgmentSLO
 from nthlayer_workers.measure.store.protocol import ScoreStore
 from nthlayer_workers.measure.telemetry import emit_calibration_report_event
 from nthlayer_workers.measure.types import QualityScore
@@ -16,13 +20,12 @@ from nthlayer_workers.measure.types import QualityScore
 
 @dataclass(frozen=True)
 class JudgmentSLOReport:
-    """Full judgment SLO compliance report for one agent."""
+    """Calibration report for one agent."""
 
     agent_name: str
     window_days: int
-    reversal_rate: float
-    reversal_rate_target: float | None
-    reversal_rate_compliant: bool | None
+    # Overridden evaluations / all evaluations in the window.
+    evaluation_override_rate: float
     false_accept_rate: float | None
     precision: float | None
     recall: float | None
@@ -32,11 +35,17 @@ class JudgmentSLOReport:
 
 
 class JudgmentSLOChecker:
-    """Computes judgment SLO compliance from store data."""
+    """Computes the calibration report from store data.
 
-    def __init__(self, store: ScoreStore, slo: JudgmentSLO | None = None) -> None:
+    *quality_threshold* is the score below which an evaluation counts as
+    rejected. Nothing declares one today (no manifest format has it, and the
+    CLI passes none), so without it the false-accept rate, precision and
+    recall are None.
+    """
+
+    def __init__(self, store: ScoreStore, quality_threshold: float | None = None) -> None:
         self._store = store
-        self._slo = slo
+        self._quality_threshold = quality_threshold
 
     async def check(
         self,
@@ -64,12 +73,14 @@ class JudgmentSLOChecker:
             eid = ov["eval_id"]
             overrides_by_eval.setdefault(eid, []).append(ov)
 
-        reversal_rate = self._compute_reversal_rate(overrides_by_eval, total_evals)
+        evaluation_override_rate = self._compute_evaluation_override_rate(
+            overrides_by_eval, total_evals
+        )
         mae = self._compute_mae(overrides)
 
-        # Quality threshold from manifest — fail open (None) when absent.
-        # Without operator-declared threshold, code cannot classify quality.
-        score_threshold = self._slo.quality_threshold if self._slo else None
+        # Fail open (None) when absent: without an operator-declared
+        # threshold, code cannot classify quality.
+        score_threshold = self._quality_threshold
 
         if score_threshold is not None:
             false_accept_rate = self._compute_false_accept_rate(
@@ -86,16 +97,10 @@ class JudgmentSLOChecker:
             precision = None
             recall = None
 
-        # Windowed compliance
-        target = self._slo.reversal_rate_target if self._slo else None
-        compliant = reversal_rate <= target if target is not None else None
-
         report = JudgmentSLOReport(
             agent_name=agent_name,
             window_days=window_days,
-            reversal_rate=reversal_rate,
-            reversal_rate_target=target,
-            reversal_rate_compliant=compliant,
+            evaluation_override_rate=evaluation_override_rate,
             false_accept_rate=false_accept_rate,
             precision=precision,
             recall=recall,
@@ -107,18 +112,17 @@ class JudgmentSLOChecker:
         emit_calibration_report_event(
             agent_name=agent_name,
             window_days=window_days,
-            reversal_rate=reversal_rate,
+            evaluation_override_rate=evaluation_override_rate,
             false_accept_rate=false_accept_rate,
             precision=precision,
             recall=recall,
             mae=mae,
-            compliant=compliant,
         )
 
         return report
 
     @staticmethod
-    def _compute_reversal_rate(
+    def _compute_evaluation_override_rate(
         overrides_by_eval: dict[str, list[dict]], total_evals: int
     ) -> float:
         if total_evals == 0:

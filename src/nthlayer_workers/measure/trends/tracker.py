@@ -54,10 +54,10 @@ class StoreTrendTracker:
             name: dim_totals[name] / dim_counts[name] for name in dim_totals
         }
 
-        # Reversal rate: proportion of eval_ids that have overrides
+        # Proportion of eval_ids that have overrides
         overrides = await self._store.get_overrides(since, limit=10000, agent_name=agent_name)
         overridden_eval_ids = {o["eval_id"] for o in overrides}
-        reversal_rate = len(overridden_eval_ids) / len(scores)
+        evaluation_override_rate = len(overridden_eval_ids) / len(scores)
 
         count = len(scores)
         return TrendWindow(
@@ -66,7 +66,7 @@ class StoreTrendTracker:
             dimension_averages=dimension_averages,
             evaluation_count=count,
             confidence_mean=confidence_sum / count,
-            reversal_rate=reversal_rate,
+            evaluation_override_rate=evaluation_override_rate,
             total_cost_usd=total_cost,
             avg_cost_per_eval=total_cost / count,
         )
