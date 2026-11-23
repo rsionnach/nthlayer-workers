@@ -90,7 +90,7 @@ def test_evaluation_summary_carries_per_evaluation_facts():
     from nthlayer_workers.measure.telemetry import emit_evaluation_events
 
     alerts = [
-        Alert(agent_name="agent-a", metric_name="reversal_rate",
+        Alert(agent_name="agent-a", metric_name="evaluation_override_rate",
               current_value=0.5, threshold=0.3, message="too high")
     ]
     events = _events(lambda: emit_evaluation_events(_make_score(), alerts))
@@ -200,16 +200,20 @@ def test_calibration_report_is_an_implementation_event():
     from nthlayer_workers.measure.telemetry import emit_calibration_report_event
 
     events = _events(lambda: emit_calibration_report_event(
-        agent_name="agent-a", window_days=30, reversal_rate=0.1,
+        agent_name="agent-a", window_days=30, evaluation_override_rate=0.1,
         false_accept_rate=None, precision=0.8, recall=None, mae=0.05,
     ))
 
     assert [n for n, _ in events] == ["nthlayer.calibration.report"]
     attrs = events[0][1]
     assert attrs["agent_name"] == "agent-a"
-    assert attrs["reversal_rate"] == 0.1
+    assert attrs["evaluation_override_rate"] == 0.1
     assert attrs["precision"] == 0.8
-    assert "recall" not in attrs
+    # The whole attribute set: no figure named reversal rate, and no
+    # compliance against one [opensrm-l0ki].
+    assert set(attrs) == {
+        "agent_name", "window_days", "evaluation_override_rate", "mae", "precision",
+    }
 
 
 def test_autonomy_change_is_an_implementation_event():

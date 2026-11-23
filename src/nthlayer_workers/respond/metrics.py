@@ -1,6 +1,6 @@
 """Prometheus metrics from the verdict store.
 
-Exposes verdict accuracy, total counts, and reversal rates as gauges.
+Exposes verdict accuracy and total counts as gauges.
 Plain text exposition format — no prometheus_client dependency.
 """
 from __future__ import annotations
@@ -48,7 +48,7 @@ class VerdictMetricsCollector:
         now = datetime.now(tz=UTC)
         windows = {"7d": timedelta(days=7), "30d": timedelta(days=30)}
 
-        # Collect accuracy/reversal lines separately so we can emit headers only if needed
+        # Collect accuracy lines separately so we can emit headers only if needed
         accuracy_lines: list[str] = []
 
         for (producer, subject_type), verdicts in sorted(groups.items()):
@@ -60,7 +60,7 @@ class VerdictMetricsCollector:
                 f'verdict_type="{subject_type}"}} {len(verdicts)}'
             )
 
-            # Accuracy and reversal rate per window
+            # Accuracy per window
             for window_label, delta in windows.items():
                 cutoff = now - delta
                 windowed = [
@@ -82,22 +82,15 @@ class VerdictMetricsCollector:
                 )
                 total_resolved = len(resolved)
                 accuracy = 1.0 - (overridden / total_resolved)
-                reversal = overridden / total_resolved
 
                 accuracy_lines.append(
                     f'nthlayer_verdict_accuracy{{component="{component}",'
                     f'verdict_type="{subject_type}",window="{window_label}"}} {accuracy:.4f}'
                 )
-                accuracy_lines.append(
-                    f'nthlayer_verdict_reversal_rate{{component="{component}",'
-                    f'verdict_type="{subject_type}",window="{window_label}"}} {reversal:.4f}'
-                )
 
         if accuracy_lines:
-            lines.append("# HELP nthlayer_verdict_accuracy Verdict accuracy (1 - reversal rate) by component")
+            lines.append("# HELP nthlayer_verdict_accuracy Verdict accuracy (1 - overridden / resolved) by component")
             lines.append("# TYPE nthlayer_verdict_accuracy gauge")
-            lines.append("# HELP nthlayer_verdict_reversal_rate Verdict reversal rate (overridden / total resolved) by component")
-            lines.append("# TYPE nthlayer_verdict_reversal_rate gauge")
             lines.extend(accuracy_lines)
 
         lines.append("")  # trailing newline

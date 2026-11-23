@@ -77,7 +77,7 @@ def test_trend_window_new_fields_default():
         evaluation_count=0,
         confidence_mean=0.0,
     )
-    assert tw.reversal_rate == 0.0
+    assert tw.evaluation_override_rate == 0.0
     assert tw.total_cost_usd == 0.0
     assert tw.avg_cost_per_eval == 0.0
 
@@ -89,11 +89,11 @@ def test_trend_window_new_fields_explicit():
         dimension_averages={"x": 0.9},
         evaluation_count=5,
         confidence_mean=0.85,
-        reversal_rate=0.2,
+        evaluation_override_rate=0.2,
         total_cost_usd=0.05,
         avg_cost_per_eval=0.01,
     )
-    assert tw.reversal_rate == 0.2
+    assert tw.evaluation_override_rate == 0.2
     assert tw.total_cost_usd == 0.05
     assert tw.avg_cost_per_eval == 0.01
 

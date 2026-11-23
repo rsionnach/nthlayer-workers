@@ -57,7 +57,7 @@ class VerdictChainEvidence:
     """One upstream → downstream relationship observed during traversal."""
 
     downstream_service: str
-    downstream_reversal_rate: float
+    downstream_overridden_ratio: float
     upstream_service: str
     upstream_confidence_shift: float  # negative = degraded
     upstream_score_degradation: str  # "0.87 → 0.71"
@@ -155,12 +155,15 @@ class VerdictChainAnalyzer:
         if not reversed_verdicts:
             return None
 
-        downstream_reversal_rate = len(reversed_verdicts) / len(downstream_verdicts)
+        # Overridden verdicts over all of the service's verdicts in the
+        # window ("reversed" in this module means overridden). Not A1's
+        # reversal rate, which is over all decisions [opensrm-l0ki].
+        downstream_overridden_ratio = len(reversed_verdicts) / len(downstream_verdicts)
 
         result = self._traverse(
             service=service,
             reversed_downstream=reversed_verdicts,
-            downstream_reversal_rate=downstream_reversal_rate,
+            downstream_overridden_ratio=downstream_overridden_ratio,
             verdict_store=verdict_store,
             baseline_window=baseline_window,
             depth=1,
@@ -176,7 +179,7 @@ class VerdictChainAnalyzer:
         *,
         service: str,
         reversed_downstream: list[Verdict],
-        downstream_reversal_rate: float,
+        downstream_overridden_ratio: float,
         verdict_store: VerdictStore,
         baseline_window: tuple[datetime, datetime],
         depth: int,
@@ -227,7 +230,7 @@ class VerdictChainAnalyzer:
 
         evidence = VerdictChainEvidence(
             downstream_service=service,
-            downstream_reversal_rate=round(downstream_reversal_rate, 4),
+            downstream_overridden_ratio=round(downstream_overridden_ratio, 4),
             upstream_service=primary_upstream,
             upstream_confidence_shift=round(current_avg - baseline_avg, 4),
             upstream_score_degradation=f"{baseline_avg:.2f} → {current_avg:.2f}",
@@ -246,7 +249,7 @@ class VerdictChainAnalyzer:
                 deeper = self._traverse(
                     service=primary_upstream,
                     reversed_downstream=upstream_reversed,
-                    downstream_reversal_rate=(
+                    downstream_overridden_ratio=(
                         len(upstream_reversed) / max(1, len(primary_refs))
                     ),
                     verdict_store=verdict_store,

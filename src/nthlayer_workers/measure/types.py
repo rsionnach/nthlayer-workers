@@ -70,6 +70,8 @@ class TrendWindow:
     dimension_averages: dict[str, float]
     evaluation_count: int
     confidence_mean: float
-    reversal_rate: float = 0.0
+    # Overridden evaluations / all evaluations in the window. Not A1's
+    # reversal rate (reversals / all decisions) [opensrm-l0ki].
+    evaluation_override_rate: float = 0.0
     total_cost_usd: float = 0.0
     avg_cost_per_eval: float = 0.0

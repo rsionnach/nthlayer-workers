@@ -3,7 +3,12 @@
 
 import pytest
 
-from nthlayer_workers.measure.config import VALID_TOP_KEYS, MeasureConfig, load_config
+from nthlayer_workers.measure.config import (
+    VALID_TOP_KEYS,
+    MeasureConfig,
+    RetiredConfigKeyError,
+    load_config,
+)
 
 
 def test_tiering_config_defaults():
@@ -116,3 +121,59 @@ def test_all_recognised_keys_accepted(tmp_path):
     p.write_text(yaml_content)
     config = load_config(p)
     assert config.dimensions == ["a", "b"]
+
+
+# ------------------------------------------------------------------ #
+# Retired keys are refused by name [opensrm-l0ki]                      #
+# ------------------------------------------------------------------ #
+
+
+def test_the_detection_ceiling_is_read_under_its_new_name(tmp_path):
+    cfg = tmp_path / "measure.yaml"
+    cfg.write_text("detection:\n  max_evaluation_override_rate: 0.12\n")
+
+    assert load_config(cfg).detection.max_evaluation_override_rate == 0.12
+
+
+def test_the_old_detection_key_is_refused_and_names_its_replacement(tmp_path):
+    cfg = tmp_path / "measure.yaml"
+    cfg.write_text("detection:\n  max_reversal_rate: 0.12\n")
+
+    with pytest.raises(RetiredConfigKeyError) as exc_info:
+        load_config(cfg)
+
+    err = exc_info.value
+    assert (err.where, err.key, err.replacement) == (
+        "detection", "max_reversal_rate", "max_evaluation_override_rate",
+    )
+    # An operator reads the message, so the new key is in it whole.
+    assert err.args == (
+        "detection.max_reversal_rate was renamed to "
+        "detection.max_evaluation_override_rate",
+    )
+
+
+def test_the_old_detection_key_is_refused_beside_the_new_one(tmp_path):
+    cfg = tmp_path / "measure.yaml"
+    cfg.write_text(
+        "detection:\n  max_evaluation_override_rate: 0.2\n  max_reversal_rate: 0.12\n"
+    )
+
+    with pytest.raises(RetiredConfigKeyError):
+        load_config(cfg)
+
+
+def test_an_agent_manifest_key_is_refused_and_has_no_replacement(tmp_path):
+    cfg = tmp_path / "measure.yaml"
+    cfg.write_text(
+        "agents:\n"
+        "  - name: a\n"
+        "  - name: b\n"
+        "    manifest: b.yaml\n"
+    )
+
+    with pytest.raises(RetiredConfigKeyError) as exc_info:
+        load_config(cfg)
+
+    err = exc_info.value
+    assert (err.where, err.key, err.replacement) == ("agents[1]", "manifest", None)

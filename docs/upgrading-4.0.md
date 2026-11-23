@@ -98,6 +98,65 @@ written in the manifest, so it reads whatever series that query names. The
 `high_confidence_failure` query still reads the `gen_ai_*` counters; A1
 redefines that rate over outcomes, and it moves in a later release.
 
+## 4.3: one quantity is named reversal rate
+
+OpenSRM Addendum A1's reversals over all decisions
+(`nthlayer_reversals_total / nthlayer_decisions_total`) is the only figure
+NthLayer calls a reversal rate. Every other figure of that name in
+nthlayer-workers is renamed or removed in this release, with no alias: the
+old names stop working.
+
+| Where | Old name | Now |
+|---|---|---|
+| respond `/metrics` | gauge `nthlayer_verdict_reversal_rate` | removed; it was `1 - nthlayer_verdict_accuracy` |
+| `nthlayer-measure calibrate --agent`, JSON | `reversal_rate` | `evaluation_override_rate` |
+| `nthlayer-measure calibrate --agent`, JSON | `reversal_rate_target`, `reversal_rate_compliant` | removed |
+| event `nthlayer.calibration.report` | attribute `reversal_rate` | `evaluation_override_rate` |
+| event `nthlayer.calibration.report` | attribute `reversal_rate_compliant` | removed |
+| `nthlayer-measure status`, JSON | `reversal_rate` | `evaluation_override_rate` |
+| measure config (`measure.yaml`) | `detection.max_reversal_rate` | `detection.max_evaluation_override_rate` |
+| measure config (`measure.yaml`) | `agents[].manifest` | removed |
+| degradation alert | `metric_name` `reversal_rate` | `evaluation_override_rate` |
+
+Python names, for code that imports nthlayer-workers:
+
+| Old | Now |
+|---|---|
+| `TrendWindow.reversal_rate` | `TrendWindow.evaluation_override_rate` |
+| `SLOThresholds.max_reversal_rate`, `DetectionConfig.max_reversal_rate` | `max_evaluation_override_rate` on both |
+| `JudgmentSLOReport.reversal_rate` | `JudgmentSLOReport.evaluation_override_rate` |
+| `JudgmentSLOReport.reversal_rate_target`, `.reversal_rate_compliant` | removed |
+| `JudgmentSLOChecker(store, slo=...)` | `JudgmentSLOChecker(store, quality_threshold=...)` |
+| `emit_calibration_report_event(reversal_rate=..., compliant=...)` | `evaluation_override_rate=...`; `compliant` removed |
+| module `nthlayer_workers.measure.manifest` (`JudgmentSLO`, `load_manifest`) | removed |
+| `AgentConfig.manifest` | removed |
+| `VerdictChainEvidence.downstream_reversal_rate` | `downstream_overridden_ratio` |
+
+What to do:
+
+- **Dashboards and alerts** that read `nthlayer_verdict_reversal_rate` show
+  no data after the upgrade, without an error. Use
+  `1 - nthlayer_verdict_accuracy` for the same number, or the A1 counters
+  for the reversal rate.
+- **`measure.yaml`**: rename `detection.max_reversal_rate`, and delete
+  `agents[].manifest`. A config that still has either key is refused at
+  load, with an error that names the key.
+- **Anything that reads the calibrate or status JSON, or the
+  `nthlayer.calibration.report` event**: read `evaluation_override_rate`.
+
+`evaluation_override_rate` is overridden evaluations over all evaluations
+in the window, counted from the measure score store. It is not
+`override_rate` in `calibrate --verdict`, which is overridden verdicts over
+resolved verdicts.
+
+`calibrate --agent` no longer reads the agent's manifest and no longer says
+whether a reversal-rate SLO is met: it compared the manifest's ceiling for
+one quantity against a different one. The reversal-rate SLO is evaluated
+from the A1 counters, by the measure module and by `evaluate-once`.
+
+Not changed: the `reversal_rate` judgment SLO type, the manifest keys that
+declare it, and the SLO's name in verdicts and alerts.
+
 ## Breaking changes
 
 ### `gen_ai.decision.evaluated` → per-dimension grader events + a summary

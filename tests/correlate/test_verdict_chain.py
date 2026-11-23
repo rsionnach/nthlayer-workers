@@ -179,6 +179,8 @@ class TestSpecScenarios:
         assert ev.upstream_service == "agent-a"
         assert ev.upstream_confidence_shift < 0  # degraded
         assert ev.upstream_representation > 0.5  # majority of reversed verdicts
+        # 10 of the 12 downstream verdicts in the window were overridden.
+        assert ev.downstream_overridden_ratio == pytest.approx(10 / 12, abs=1e-4)
 
     def test_2_upstream_fine_no_root_cause(self, incident_start):
         """Spec 2: Agent B degrades but Agent A is steady → returns None."""

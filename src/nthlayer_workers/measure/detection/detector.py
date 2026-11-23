@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class SLOThresholds:
     """Human-declared service level objectives."""
 
-    max_reversal_rate: float = 1.0
+    max_evaluation_override_rate: float = 1.0
     min_dimension_scores: dict[str, float] = field(default_factory=dict)
     min_confidence: float = 0.0
 
@@ -35,15 +35,15 @@ class ThresholdDetector:
 
         alerts: list[Alert] = []
 
-        if window.reversal_rate > self._thresholds.max_reversal_rate:
+        if window.evaluation_override_rate > self._thresholds.max_evaluation_override_rate:
             alert = Alert(
                 agent_name=window.agent_name,
-                metric_name="reversal_rate",
-                current_value=window.reversal_rate,
-                threshold=self._thresholds.max_reversal_rate,
+                metric_name="evaluation_override_rate",
+                current_value=window.evaluation_override_rate,
+                threshold=self._thresholds.max_evaluation_override_rate,
                 message=(
-                    f"Reversal rate {window.reversal_rate:.2%} exceeds "
-                    f"threshold {self._thresholds.max_reversal_rate:.2%}"
+                    f"Evaluation override rate {window.evaluation_override_rate:.2%} exceeds "
+                    f"threshold {self._thresholds.max_evaluation_override_rate:.2%}"
                 ),
             )
             alerts.append(alert)

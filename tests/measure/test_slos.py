@@ -1,10 +1,13 @@
-"""Tests for Judgment SLO checker — false accept rate, precision, recall, windowed compliance."""
+"""Tests for the calibrate report: evaluation override rate, false accept rate,
+precision, recall."""
+
+import dataclasses
 
 import pytest
 import pytest_asyncio
+from nthlayer_common.telemetry import capture_events
 
-from nthlayer_workers.measure.calibration.slos import JudgmentSLOChecker
-from nthlayer_workers.measure.manifest import JudgmentSLO
+from nthlayer_workers.measure.calibration.slos import JudgmentSLOChecker, JudgmentSLOReport
 from nthlayer_workers.measure.store.sqlite import SQLiteScoreStore
 from nthlayer_workers.measure.types import QualityScore
 
@@ -28,14 +31,6 @@ def _score(eval_id: str, agent: str = "agent-a", dims: dict | None = None, confi
     )
 
 
-def _slo_with_quality_threshold(threshold: float = 0.5) -> JudgmentSLO:
-    return JudgmentSLO(
-        agent_name="agent-a",
-        reversal_rate_target=0.05,
-        quality_threshold=threshold,
-    )
-
-
 @pytest.mark.asyncio
 async def test_false_accept_rate(store):
     """Evals overridden downward that had high avg scores should count as false accepts."""
@@ -46,7 +41,7 @@ async def test_false_accept_rate(store):
     # Score e2: high quality (avg 0.85) — no override
     await store.save_score(_score("e2", dims={"correctness": 0.9, "style": 0.8}))
 
-    checker = JudgmentSLOChecker(store, slo=_slo_with_quality_threshold(0.5))
+    checker = JudgmentSLOChecker(store, quality_threshold=(0.5))
     report = await checker.check("agent-a", window_days=7)
 
     # 1 downward override, original avg 0.85 >= 0.5 → false accept
@@ -63,7 +58,7 @@ async def test_precision(store):
     await store.save_score(_score("e2", dims={"correctness": 0.3, "style": 0.2}))
     await store.save_override("e2", {"correctness": 0.9}, "human")
 
-    checker = JudgmentSLOChecker(store, slo=_slo_with_quality_threshold(0.5))
+    checker = JudgmentSLOChecker(store, quality_threshold=(0.5))
     report = await checker.check("agent-a", window_days=7)
 
     # 2 scored low, 1 agreed → precision = 0.5
@@ -81,7 +76,7 @@ async def test_recall(store):
     await store.save_score(_score("e2", dims={"correctness": 0.3, "style": 0.2}))
     await store.save_override("e2", {"correctness": 0.1}, "human")
 
-    checker = JudgmentSLOChecker(store, slo=_slo_with_quality_threshold(0.5))
+    checker = JudgmentSLOChecker(store, quality_threshold=(0.5))
     report = await checker.check("agent-a", window_days=7)
 
     # 2 human-flagged (downward overrides), 1 evaluator caught (low score) → recall = 0.5
@@ -89,36 +84,72 @@ async def test_recall(store):
 
 
 @pytest.mark.asyncio
-async def test_windowed_compliance(store):
-    """Windowed compliance checks reversal rate against SLO target."""
-    # 2 evals, 1 with override → 50% reversal rate
-    await store.save_score(_score("e1"))
-    await store.save_score(_score("e2"))
+async def test_evaluation_override_rate_is_overridden_evals_over_all_evals(store):
+    # 4 evals; e1 overridden twice and e2 once: 2 distinct overridden evals.
+    for eid in ("e1", "e2", "e3", "e4"):
+        await store.save_score(_score(eid))
     await store.save_override("e1", {"correctness": 0.3}, "human")
+    await store.save_override("e1", {"style": 0.2}, "human")
+    await store.save_override("e2", {"correctness": 0.4}, "human")
 
-    slo = JudgmentSLO(
-        agent_name="agent-a",
-        reversal_rate_target=0.6,
-    )
+    report = await JudgmentSLOChecker(store).check("agent-a", window_days=7)
 
-    checker = JudgmentSLOChecker(store, slo=slo)
-    report = await checker.check("agent-a", window_days=7)
-
-    assert report.reversal_rate == pytest.approx(0.5)
-    assert report.reversal_rate_target == pytest.approx(0.6)
-    assert report.reversal_rate_compliant is True  # 0.5 <= 0.6
+    assert report.evaluation_override_rate == pytest.approx(0.5)
+    assert report.total_evaluations == 4
+    assert report.total_overrides == 3
 
 
 @pytest.mark.asyncio
-async def test_slo_report_no_manifest_fails_open(store):
-    """Without a manifest quality_threshold, threshold-dependent metrics are None."""
+async def test_evaluation_override_rate_with_no_evaluations_is_zero(store):
+    report = await JudgmentSLOChecker(store).check("agent-a", window_days=7)
+
+    assert report.evaluation_override_rate == 0.0
+    assert report.total_evaluations == 0
+
+
+@pytest.mark.asyncio
+async def test_check_emits_the_report_it_returns_as_a_calibration_event(store):
+    """The event carries the figures of the report, under the same name."""
+    for eid in ("e1", "e2", "e3", "e4"):
+        await store.save_score(_score(eid))
+    await store.save_override("e1", {"correctness": 0.3}, "human")
+    await store.save_override("e2", {"correctness": 0.4}, "human")
+
+    with capture_events() as cap:
+        report = await JudgmentSLOChecker(store).check("agent-a", window_days=7)
+
+    (event,) = [r for r in cap.events if r.name == "nthlayer.calibration.report"]
+    assert report.evaluation_override_rate == pytest.approx(0.5)
+    assert dict(event.attributes) == {
+        "agent_name": "agent-a",
+        "window_days": 7,
+        "evaluation_override_rate": report.evaluation_override_rate,
+        "mae": report.mae,
+    }
+    assert report.mae > 0
+
+
+def test_the_report_names_no_reversal_rate_and_judges_no_slo():
+    """A1's reversals over all decisions is the only quantity named reversal
+    rate, and calibrate does not judge the manifest's SLO for it
+    [opensrm-l0ki, from the opensrm-5lxs decision record]."""
+    assert {f.name for f in dataclasses.fields(JudgmentSLOReport)} == {
+        "agent_name", "window_days", "evaluation_override_rate",
+        "false_accept_rate", "precision", "recall", "mae",
+        "total_evaluations", "total_overrides",
+    }
+
+
+@pytest.mark.asyncio
+async def test_report_without_a_quality_threshold_fails_open(store):
+    """Without a quality threshold, threshold-dependent metrics are None."""
     await store.save_score(_score("e1"))
     await store.save_score(_score("e2"))
 
     checker = JudgmentSLOChecker(store)
     report = await checker.check("agent-a", window_days=7)
 
-    assert report.reversal_rate == 0.0
+    assert report.evaluation_override_rate == 0.0
     assert report.false_accept_rate is None
     assert report.precision is None
     assert report.recall is None
@@ -128,45 +159,16 @@ async def test_slo_report_no_manifest_fails_open(store):
 
 
 @pytest.mark.asyncio
-async def test_slo_report_with_quality_threshold(store):
-    """With a manifest quality_threshold, threshold-dependent metrics are computed."""
+async def test_report_with_quality_threshold(store):
+    """With a quality threshold, threshold-dependent metrics are computed."""
     await store.save_score(_score("e1"))
     await store.save_score(_score("e2"))
 
-    checker = JudgmentSLOChecker(store, slo=_slo_with_quality_threshold(0.5))
+    checker = JudgmentSLOChecker(store, quality_threshold=(0.5))
     report = await checker.check("agent-a", window_days=7)
 
-    assert report.reversal_rate == 0.0
+    assert report.evaluation_override_rate == 0.0
     assert report.false_accept_rate == 0.0
     assert report.precision == 1.0
     assert report.recall == 1.0
     assert report.mae == 0.0
-
-
-@pytest.mark.asyncio
-async def test_slo_report_with_manifest_target(store):
-    """Report with manifest target should include compliance."""
-    await store.save_score(_score("e1"))
-
-    slo = JudgmentSLO(
-        agent_name="agent-a",
-        reversal_rate_target=0.05,
-    )
-
-    checker = JudgmentSLOChecker(store, slo=slo)
-    report = await checker.check("agent-a", window_days=7)
-
-    assert report.reversal_rate_target == pytest.approx(0.05)
-    assert report.reversal_rate_compliant is True  # 0% reversal <= 5% target
-
-
-@pytest.mark.asyncio
-async def test_slo_report_without_manifest(store):
-    """Report without manifest should have None for target/compliance."""
-    await store.save_score(_score("e1"))
-
-    checker = JudgmentSLOChecker(store)
-    report = await checker.check("agent-a", window_days=7)
-
-    assert report.reversal_rate_target is None
-    assert report.reversal_rate_compliant is None

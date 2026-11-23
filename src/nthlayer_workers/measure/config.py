@@ -17,7 +17,6 @@ class AgentConfig:
     name: str
     adapter: str = "webhook"
     dimensions: list[str] | None = None
-    manifest: str | None = None
     adapter_config: dict[str, Any] = field(default_factory=dict)
 
 
@@ -42,7 +41,9 @@ class StoreConfig:
 class DetectionConfig:
     """Configuration for degradation detection thresholds."""
 
-    max_reversal_rate: float = 0.3
+    # Overridden evaluations / all evaluations, the figure the trend window
+    # reports. Not A1's reversal rate [opensrm-l0ki].
+    max_evaluation_override_rate: float = 0.3
     min_dimension_scores: dict[str, float] = field(default_factory=dict)
     min_confidence: float = 0.5
 
@@ -96,6 +97,42 @@ class MeasureConfig:
     tiering: TieringConfig | None = None
 
 
+# Keys this loader used to read, by section: the key that replaced each, or
+# None for one that is gone. A retired key is refused by name, since one that
+# is silently ignored reads as still in force [opensrm-l0ki].
+RETIRED_KEYS: dict[str, dict[str, str | None]] = {
+    "detection": {"max_reversal_rate": "max_evaluation_override_rate"},
+    # calibrate no longer compares its report against a manifest's
+    # reversal-rate SLO, which was the key's only reader.
+    "agents": {"manifest": None},
+}
+
+
+class RetiredConfigKeyError(ValueError):
+    """A config file sets a key this loader no longer reads.
+
+    ``where`` is the mapping that holds it as the operator wrote it
+    (``detection``, ``agents[0]``); ``replacement`` is the key to use
+    instead, or None when there is none.
+    """
+
+    def __init__(self, where: str, key: str, replacement: str | None) -> None:
+        self.where = where
+        self.key = key
+        self.replacement = replacement
+        what = (
+            f"was renamed to {where}.{replacement}" if replacement is not None
+            else "is no longer read; remove it"
+        )
+        super().__init__(f"{where}.{key} {what}")
+
+
+def _refuse_retired_keys(section: str, where: str, raw: dict) -> None:
+    for key, replacement in RETIRED_KEYS.get(section, {}).items():
+        if key in raw:
+            raise RetiredConfigKeyError(where, key, replacement)
+
+
 VALID_TOP_KEYS = frozenset({
     "evaluator",
     "store",
@@ -127,6 +164,7 @@ def load_config(path: Path) -> MeasureConfig:
             return cls()
         if not isinstance(section, dict):
             raise ValueError(f"Config section '{key}' must be a mapping, got {type(section).__name__}")
+        _refuse_retired_keys(key, key, section)
         return cls(**section)
 
     evaluator = _section("evaluator", EvaluatorConfig)
@@ -142,11 +180,11 @@ def load_config(path: Path) -> MeasureConfig:
             raise ValueError(f"agents[{i}] must be a mapping, got {type(agent_data).__name__}")
         if "name" not in agent_data:
             raise ValueError(f"agents[{i}] missing required field 'name'")
+        _refuse_retired_keys("agents", f"agents[{i}]", agent_data)
         agents.append(AgentConfig(
             name=agent_data["name"],
             adapter=agent_data.get("adapter", "webhook"),
             dimensions=agent_data.get("dimensions"),
-            manifest=agent_data.get("manifest"),
             adapter_config=agent_data.get("adapter_config", {}),
         ))
 

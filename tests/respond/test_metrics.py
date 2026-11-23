@@ -1,6 +1,7 @@
 """Tests for VerdictMetricsCollector — Prometheus metrics from verdict store."""
 from __future__ import annotations
 
+import pytest
 from nthlayer_common.verdicts import MemoryStore
 from nthlayer_common.verdicts import create as verdict_create
 
@@ -14,6 +15,33 @@ def _make_verdict(producer_system, subject_type, status="pending"):
         producer={"system": producer_system},
     )
     return v
+
+
+def _sample_lines(text):
+    return [line for line in text.splitlines() if line and not line.startswith("#")]
+
+
+def _series_names(text):
+    """The metric name of every sample line in a text exposition."""
+    return {line.split("{", 1)[0].split(" ", 1)[0] for line in _sample_lines(text)}
+
+
+def _described_names(text):
+    """The metric names that have a HELP or TYPE line."""
+    return {
+        line.split(" ")[2]
+        for line in text.splitlines()
+        if line.startswith(("# HELP ", "# TYPE "))
+    }
+
+
+def _samples(text, name):
+    """The values of every sample of the series *name*."""
+    return [
+        float(line.rsplit(" ", 1)[1])
+        for line in _sample_lines(text)
+        if line.split("{", 1)[0].split(" ", 1)[0] == name
+    ]
 
 
 def test_empty_store_returns_no_gauges():
@@ -42,7 +70,7 @@ def test_total_count_gauges():
 def test_accuracy_from_resolved_verdicts():
     """Accuracy gauge computed from resolved vs overridden verdicts."""
     store = MemoryStore()
-    # 8 confirmed, 2 overridden = 0.8 accuracy, 0.2 reversal rate
+    # 8 confirmed, 2 overridden = 0.8 accuracy
     for i in range(10):
         v = _make_verdict("nthlayer-measure", "evaluation")
         store.put(v)
@@ -55,7 +83,13 @@ def test_accuracy_from_resolved_verdicts():
     text = collector.collect()
     # Check accuracy is present (exact value depends on window filtering)
     assert 'nthlayer_verdict_accuracy{component="measure",verdict_type="evaluation"' in text
-    assert 'nthlayer_verdict_reversal_rate{component="measure"' in text
+    # Every series the collector exposes. The overridden / resolved gauge that
+    # was named a reversal rate is retired: it was 1 - accuracy, and A1's
+    # reversals over all decisions is the only reversal rate [opensrm-l0ki].
+    assert _series_names(text) == {"nthlayer_verdicts_total", "nthlayer_verdict_accuracy"}
+    assert _described_names(text) == {"nthlayer_verdicts_total", "nthlayer_verdict_accuracy"}
+    samples = _samples(text, "nthlayer_verdict_accuracy")
+    assert samples and all(value == pytest.approx(0.8) for value in samples)
 
 
 def test_component_label_strips_prefix():
