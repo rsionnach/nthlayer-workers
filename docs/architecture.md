@@ -198,7 +198,8 @@ SLO assessment, drift, discovery, gate, portfolio, verification.
 - `slo/collector.py` — `SLOMetricCollector(prometheus_url)`:
   async `collect(list[ServiceSLO]) -> list[SLOResult]`. It reads a
   query only when its value is a good ratio (`not_evaluable_reason`,
-  opensrm-1jrk): a `good_query` / `total_query` pair, or the single
+  opensrm-1jrk) and the SLO declares a type: a `good_query` /
+  `total_query` pair, or the single
   query of an availability SLO (measure's `_classical_kind`; a
   judgment SLO loads as availability). Any other SLO (latency,
   error_rate, throughput, custom, an unknown or missing type) gets a

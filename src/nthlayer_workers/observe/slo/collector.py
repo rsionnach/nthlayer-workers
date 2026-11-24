@@ -71,7 +71,8 @@ NO_SLO_TYPE = "no slo_type"
 
 def _ratio_pair(slo: SLODefinition) -> tuple[str, str] | None:
     """The SLO's ``(good_query, total_query)``, or None unless it has both.
-    A blank query is no query: sent, it would be ``() / (...)``."""
+    A blank member counts as missing; otherwise the query sent would be
+    ``() / (total)``."""
     good = (slo.good_query or "").strip()
     total = (slo.total_query or "").strip()
     return (good, total) if good and total else None
@@ -259,9 +260,10 @@ def results_to_assessments(results: list[SLOResult], service: str) -> list[Asses
 def _build_slo_query(slo: SLODefinition, service_name: str) -> str | None:
     """Build PromQL query from SLO definition.
 
-    A good/total pair comes first: it is a good ratio whatever the SLO's
-    type, where the single query of anything but an availability SLO is not
-    (see ``not_evaluable_reason``). An SLO can carry both.
+    A good/total pair comes first: it is a good ratio whatever type the SLO
+    declares, where the single query of anything but an availability SLO is
+    not. An SLO can carry both. (An SLO that declares no type never gets
+    here, pair or not: see ``not_evaluable_reason``.)
     """
     pair = _ratio_pair(slo)
     if pair is not None:

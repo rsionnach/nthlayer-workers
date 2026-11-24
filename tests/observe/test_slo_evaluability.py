@@ -260,7 +260,7 @@ async def test_a_loaded_good_total_slo_sends_its_pair(tmp_path):
     assert [c.args[0] for c in provider.get_sli_value.await_args_list] == [_CHECKOUT_PAIR_QUERY]
 
 
-async def test_a_good_total_pair_is_evaluated_whatever_the_type(tmp_path):
+async def test_a_good_total_pair_is_evaluated_whatever_type_is_declared(tmp_path):
     item = _pair(tmp_path, slo_type="latency")
 
     (result,), provider = await _collect([item], 0.995)

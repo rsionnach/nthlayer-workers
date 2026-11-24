@@ -165,9 +165,9 @@ ratio and wrong for anything else: a latency SLO whose query is a p95 of
 0.2 s was reported as an SLI of 20% with its budget `EXHAUSTED`, and a
 custom SLO answering 97 (a percentage) as 9700% and `HEALTHY`.
 
-Now only two shapes are evaluated: an SLO with both `good_query` and
-`total_query`, and an availability SLO (judgment SLOs included) with a
-single query. Every other SLO gets a `slo_status` reading with status
+Now only two shapes are evaluated, and only for an SLO that declares a
+type: one with both `good_query` and `total_query`, and an availability
+SLO (judgment SLOs included) with a single query. Every other SLO gets a `slo_status` reading with status
 `NO_DATA`, no SLI and no budget figures, and `error` set to
 `not_evaluable: <reason>`. Its query is not sent.
 
