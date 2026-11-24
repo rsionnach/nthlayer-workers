@@ -157,6 +157,31 @@ from the A1 counters, by the measure module and by `evaluate-once`.
 Not changed: the `reversal_rate` judgment SLO type, the manifest keys that
 declare it, and the SLO's name in verdicts and alerts.
 
+## 4.3: observe reads an SLO only when its query is a good ratio
+
+`observe.collect` and `nthlayer-observe collect` computed an error rate as
+`1 - value` for every SLO with a query. That is right for an availability
+ratio and wrong for anything else: a latency SLO whose query is a p95 of
+0.2 s was reported as an SLI of 20% with its budget `EXHAUSTED`, and a
+custom SLO answering 97 (a percentage) as 9700% and `HEALTHY`.
+
+Now only two shapes are evaluated: an SLO with both `good_query` and
+`total_query`, and an availability SLO (judgment SLOs included) with a
+single query. Every other SLO gets a `slo_status` reading with status
+`NO_DATA`, no SLI and no budget figures, and `error` set to
+`not_evaluable: <reason>`. Its query is not sent.
+
+What changes for you:
+
+- A deploy gate that was `BLOCKED` by a latency SLO's false `EXHAUSTED`
+  reading clears on the first collection after the upgrade.
+- Latency, error-rate, throughput and custom SLOs no longer count toward
+  the service's aggregate budget or the portfolio's status counts. They
+  were counted with wrong numbers before.
+- An SLO that reaches the worker with no `slo_type` is no longer assumed
+  to be availability: it gets the same `NO_DATA` reading, and one
+  `slo_without_type_not_evaluated` warning.
+
 ## Breaking changes
 
 ### `gen_ai.decision.evaluated` → per-dimension grader events + a summary

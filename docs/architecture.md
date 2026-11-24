@@ -196,14 +196,27 @@ SLO assessment, drift, discovery, gate, portfolio, verification.
   `_worst_status` uses `_STATUS_SEVERITY` dict: EXHAUSTED=4,
   CRITICAL=3, WARNING=2, ERROR=1, NO_DATA=0, HEALTHY=-1, UNKNOWN=-2.
 - `slo/collector.py` — `SLOMetricCollector(prometheus_url)`:
-  stateless, async `collect(list[ServiceSLO]) -> list[SLOResult]`.
+  async `collect(list[ServiceSLO]) -> list[SLOResult]`. It reads a
+  query only when its value is a good ratio (`not_evaluable_reason`,
+  opensrm-1jrk): a `good_query` / `total_query` pair, or the single
+  query of an availability SLO (measure's `_classical_kind`; a
+  judgment SLO loads as availability). Any other SLO (latency,
+  error_rate, throughput, custom, an unknown or missing type) gets a
+  `NO_DATA` result with `error` `not_evaluable: <reason>` and no query
+  is sent. It is a reading, not silence, because the gate and the
+  portfolio take the newest `slo_status` per SLO whatever its age. An
+  SLO with no type is warned about once per service and SLO
+  (`slo_without_type_not_evaluated`); the worker passes a missing
+  `slo_type` through as blank, with no availability default. The
+  worker path never sees a pair: core's `/manifests` does not send
+  `good_query` / `total_query` (opensrm-hyfe).
   `PrometheusProvider` closed in finally. Auth from
   `PROMETHEUS_USERNAME` / `NTHLAYER_METRICS_USER` +
   `PROMETHEUS_PASSWORD` / `NTHLAYER_METRICS_PASSWORD`.
   `sli_value=0.0` treated as total outage (EXHAUSTED) not NO_DATA
   (opensrm-e1gk tracks provider fix).
-  `_build_slo_query`: `indicator_query` first, then
-  `good_query` / `total_query` fallback, substitutes `$service` /
+  `_build_slo_query`: the `good_query` / `total_query` pair first,
+  then `indicator_query`, substitutes `$service` /
   `${service}`.
   `_determine_status`: lookup dict `STATUS_THRESHOLDS`
   `{100→EXHAUSTED, 80→CRITICAL, 50→WARNING, default HEALTHY}`.

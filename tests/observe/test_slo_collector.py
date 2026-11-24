@@ -34,9 +34,9 @@ def no_query_slo():
     return ServiceSLO(
         service="payment-api",
         slo=SLODefinition(
-            name="latency",
+            name="availability",
             target=99.9,
-            slo_type="latency",
+            slo_type="availability",
             window="30d",
         ),
     )
