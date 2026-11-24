@@ -86,6 +86,53 @@ resources:
 """
 
 
+# The service and its first two SLOs from
+# nthlayer-generate/examples/services/checkout-service.yaml (generate
+# 2010f6d): the legacy shape that declares an SLO as a good/total pair
+# (`success_ratio`). Every pair test below starts from this SLO as the
+# loader returns it, so a loader that stopped filling good_query and
+# total_query would turn them red.
+CHECKOUT_SERVICE = """\
+apiVersion: nthlayer.dev/v1
+kind: Service
+
+service:
+  name: checkout-service
+  team: commerce
+  tier: critical
+  type: api
+
+resources:
+  - kind: SLO
+    name: availability
+    spec:
+      objective: 99.95
+      window: 30d
+      indicators:
+        - type: availability
+          success_ratio:
+            total_query: sum(rate(http_requests_total{service="checkout-service"}[5m]))
+            good_query: sum(rate(http_requests_total{service="checkout-service",status!~"5.."}[5m]))
+
+  - kind: SLO
+    name: latency-p95
+    spec:
+      objective: 99.0
+      window: 30d
+      indicators:
+        - type: latency
+          threshold_ms: 800
+          percentile: 95
+          latency_query: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{service="checkout-service"}[5m]))
+"""
+
+_CHECKOUT_PAIR_QUERY = (
+    '(sum(rate(http_requests_total{service="checkout-service",status!~"5.."}[5m])))'
+    ' / (sum(rate(http_requests_total{service="checkout-service"}[5m])))'
+)
+_P95_QUERY = "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))"
+
+
 def _load(tmp_path, text: str = SEARCH_API) -> dict[str, ServiceSLO]:
     path = tmp_path / "search-api.yaml"
     path.write_text(text)
@@ -109,6 +156,14 @@ async def _collect(items: list[ServiceSLO], value: float | None, collector=None)
     ):
         results = await collector.collect(items)
     return results, provider
+
+
+def _pair(tmp_path, **changes) -> ServiceSLO:
+    """checkout-service's good/total SLO as loaded, with *changes* applied
+    to the loaded SLODefinition."""
+    item = _load(tmp_path, CHECKOUT_SERVICE)["availability"]
+    assert item.slo.good_query and item.slo.total_query
+    return dataclasses.replace(item, slo=dataclasses.replace(item.slo, **changes))
 
 
 def test_the_fixture_has_the_three_kinds(tmp_path):
@@ -191,48 +246,41 @@ async def test_a_declared_type_is_matched_whatever_its_case(tmp_path):
     assert provider.get_sli_value.await_count == 1
 
 
-async def test_a_good_total_pair_is_evaluated_whatever_the_type():
-    item = ServiceSLO(
-        service="svc",
-        slo=SLODefinition(
-            name="fast-enough", target=99.0, slo_type="latency", window="30d",
-            good_query="sum(rate(fast_total[5m]))", total_query="sum(rate(all_total[5m]))",
-        ),
-    )
+async def test_a_loaded_good_total_slo_sends_its_pair(tmp_path):
+    slos = _load(tmp_path, CHECKOUT_SERVICE)
+    assert slos["latency-p95"].slo.slo_type == "latency"
+
+    results, provider = await _collect(list(slos.values()), 0.9999)
+
+    by_name = {r.name: r for r in results}
+    assert by_name["availability"].status == "HEALTHY"
+    assert by_name["availability"].current_sli == pytest.approx(99.99)
+    assert by_name["latency-p95"].status == "NO_DATA"
+    assert by_name["latency-p95"].error.startswith(NOT_EVALUABLE_PREFIX)
+    assert [c.args[0] for c in provider.get_sli_value.await_args_list] == [_CHECKOUT_PAIR_QUERY]
+
+
+async def test_a_good_total_pair_is_evaluated_whatever_the_type(tmp_path):
+    item = _pair(tmp_path, slo_type="latency")
 
     (result,), provider = await _collect([item], 0.995)
 
     assert result.status != "NO_DATA"
     assert result.current_sli == pytest.approx(99.5)
-    (query,) = [c.args[0] for c in provider.get_sli_value.await_args_list]
-    assert query == "(sum(rate(fast_total[5m]))) / (sum(rate(all_total[5m])))"
+    assert [c.args[0] for c in provider.get_sli_value.await_args_list] == [_CHECKOUT_PAIR_QUERY]
 
 
-async def test_a_pair_is_sent_in_preference_to_the_slos_own_query():
+async def test_a_pair_is_sent_in_preference_to_the_slos_own_query(tmp_path):
     """A latency SLO with both: its own query answers in seconds."""
-    item = ServiceSLO(
-        service="svc",
-        slo=SLODefinition(
-            name="fast-enough", target=99.0, slo_type="latency", window="30d",
-            indicator_query="histogram_quantile(0.95, rate(d_bucket[5m]))",
-            good_query="sum(rate(fast_total[5m]))", total_query="sum(rate(all_total[5m]))",
-        ),
-    )
+    item = _pair(tmp_path, slo_type="latency", indicator_query=_P95_QUERY)
 
     (_result,), provider = await _collect([item], 0.995)
 
-    (query,) = [c.args[0] for c in provider.get_sli_value.await_args_list]
-    assert query == "(sum(rate(fast_total[5m]))) / (sum(rate(all_total[5m])))"
+    assert [c.args[0] for c in provider.get_sli_value.await_args_list] == [_CHECKOUT_PAIR_QUERY]
 
 
-async def test_an_availability_slo_with_a_blank_pair_member_falls_back_to_its_query():
-    item = ServiceSLO(
-        service="svc",
-        slo=SLODefinition(
-            name="availability", target=99.9, slo_type="availability", window="30d",
-            indicator_query="some_ratio", good_query="  ", total_query="all_total",
-        ),
-    )
+async def test_an_availability_slo_with_a_blank_pair_member_falls_back_to_its_query(tmp_path):
+    item = _pair(tmp_path, indicator_query="some_ratio", good_query="  ")
 
     (_result,), provider = await _collect([item], 0.9995)
 
@@ -240,23 +288,17 @@ async def test_an_availability_slo_with_a_blank_pair_member_falls_back_to_its_qu
 
 
 @pytest.mark.parametrize(
-    "queries",
+    "missing",
     [
-        {"good_query": "sum(rate(fast_total[5m]))"},
-        {"total_query": "sum(rate(all_total[5m]))"},
+        {"good_query": None},
+        {"total_query": None},
         # A blank member is no member: sent, it would be `(  ) / (...)`.
-        {"good_query": "  ", "total_query": "sum(rate(all_total[5m]))"},
-        {"good_query": "sum(rate(fast_total[5m]))", "total_query": ""},
+        {"good_query": "  "},
+        {"total_query": ""},
     ],
 )
-async def test_half_a_pair_is_not_a_pair(queries):
-    item = ServiceSLO(
-        service="svc",
-        slo=SLODefinition(
-            name="fast-enough", target=99.0, slo_type="latency", window="30d",
-            indicator_query="histogram_quantile(0.95, rate(d_bucket[5m]))", **queries,
-        ),
-    )
+async def test_half_a_pair_is_not_a_pair(tmp_path, missing):
+    item = _pair(tmp_path, slo_type="latency", indicator_query=_P95_QUERY, **missing)
 
     (result,), provider = await _collect([item], 0.995)
 
