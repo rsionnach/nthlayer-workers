@@ -120,6 +120,43 @@ class TestGateCLISubmitsAssessment:
         assert data.get("data", {}).get("decision") == "blocked"
 
     @pytest.mark.asyncio
+    async def test_no_budget_data_is_a_warning_with_no_budget_figure(self, gate_args, capsys):
+        """Every reading for the service is NO_DATA (generate's rules are not
+        loaded): the gate warns, exits 0 and states no budget [opensrm-9qa6]."""
+        import json
+
+        from nthlayer_workers.cli import _gate_async
+
+        no_data = _make_slo_assessment_dict("availability", 0.0, "NO_DATA")
+        for key in ("current_sli", "burned_minutes", "percent_consumed"):
+            del no_data["data"][key]
+        no_data["data"]["error"] = "no error budget series"
+
+        client = AsyncMock()
+        client.get_manifest = AsyncMock(return_value=_make_manifest_response())
+        client.get_assessments = AsyncMock(return_value=APIResult(
+            ok=True, status_code=200, data=[no_data],
+        ))
+        submitted = []
+        client.submit_assessment = AsyncMock(
+            side_effect=lambda envelope: (
+                submitted.append(envelope), APIResult(ok=True, status_code=201, data={})
+            )[1]
+        )
+
+        with patch("nthlayer_common.api_client.CoreAPIClient", return_value=client):
+            exit_code = await _gate_async(gate_args)
+
+        assert exit_code == 0
+        printed = json.loads(capsys.readouterr().out)
+        assert printed["decision"] == "WARNING"
+        assert printed["budget_remaining_pct"] is None
+        inner = submitted[0].get("data", submitted[0]).get("data", {})
+        assert inner["decision"] == "warning"
+        assert inner["budget_remaining_pct"] is None
+        assert inner["slo_count"] == 1
+
+    @pytest.mark.asyncio
     async def test_manifest_fetch_failure_short_circuits(self, gate_args):
         """If the manifest fetch fails, no assessment is submitted (fail closed before evaluation)."""
         from nthlayer_workers.cli import _gate_async

@@ -182,6 +182,54 @@ What changes for you:
   to be availability: it gets the same `NO_DATA` reading, and one
   `slo_without_type_not_evaluated` warning.
 
+## 4.4: observe reads error budgets from generate's recording rules
+
+`observe.collect` and `nthlayer-observe collect` no longer evaluate an SLO's
+own query. They read `slo:error_budget_remaining:ratio{service, slo}`, the
+series nthlayer-generate's recording rules write, as measure has since
+4.2. Availability, latency and error-rate SLOs are read this way. Latency
+and error-rate SLOs, reported `NO_DATA` since 4.3.1, get readings again.
+
+**Load the recording rules from nthlayer-generate 4.1.0 or later into
+Prometheus before upgrading.** There is no fallback to the manifest's query:
+
+- Until the rules are loaded, every classical SLO reads `NO_DATA` with the
+  error `no error budget series`, and the deploy gate returns `WARNING`
+  ("No budget data for N SLOs").
+- There is no backfill. The rules compute each budget over the SLO's window
+  from the samples Prometheus has, so for the first window after the rules
+  load, the gate acts on a budget that covers only the time since they were
+  deployed.
+
+What else changes:
+
+- **Judgment SLOs** (reversal rate and the like) are no longer read by
+  observe: they get `NO_DATA` with `not_evaluable: judgment SLOs are
+  evaluated by measure`. Measure evaluates them, from the A1 counters.
+  Correlate therefore gets no breach event from observe for a judgment
+  SLO; it still gets measure's `quality_breach` verdict.
+- **A good/total pair no longer makes an SLO readable.** Throughput,
+  freshness, custom and unrecognised kinds are `NO_DATA` `not_evaluable`
+  whatever queries they carry, because generate writes them no budget.
+- **The objective on a reading is the one the budget was computed
+  against**, the `objective` label of the series, not the manifest's
+  target. They differ while a changed manifest waits for its rules to be
+  regenerated; observe then logs `slo_objective_differs_from_manifest` once
+  per service and SLO. `total_budget_minutes`, `burned_minutes` and
+  `current_sli` follow the series' objective.
+- **The numbers change for availability SLOs.** `percent_consumed` was a
+  5-minute error ratio scaled to the whole window; it is now the share of
+  the budget used over the window. `current_sli` is the good ratio over the
+  window, not over the last 5 minutes.
+- **A budget with no requests behind it** (the rule's value is not a
+  number) reads `NO_DATA` with `error budget is not a finite number`.
+- **The deploy gate warns when it has no budget to judge.** When a service
+  has readings and none carries a budget, the gate returned `APPROVED`
+  with 100% remaining; it now returns `WARNING`, and `budget_remaining_pct`
+  is `null` in the `gate` and `check-deploy` output and in the
+  `deploy_gate` assessment. A service with no readings at all is still
+  approved by default.
+
 ## Breaking changes
 
 ### `gen_ai.decision.evaluated` → per-dimension grader events + a summary

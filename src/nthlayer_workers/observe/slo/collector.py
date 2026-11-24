@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from typing import Any
 
 import structlog
+from nthlayer_common.manifest import ERROR_BUDGET_REMAINING
 from nthlayer_common.manifest.models import SLODefinition
 from nthlayer_common.providers import PrometheusProvider
 from nthlayer_common.providers.prometheus import PrometheusProviderError
 
-from nthlayer_workers.measure.adapters.prometheus import _classical_kind
+from nthlayer_workers.measure.adapters.prometheus import BUDGETED_KINDS, _classical_kind
 from nthlayer_workers.observe.assessment import Assessment, create
 
 logger = structlog.get_logger()
@@ -63,56 +65,118 @@ class BudgetSummary:
     valid_slo_count: int
 
 
-# SLOResult.error for an SLO whose query is never sent, because its value
-# cannot be read as a good ratio. The reason follows the prefix.
+# SLOResult.error for an SLO that is never queried, because generate writes
+# no error budget for it. The reason follows the prefix.
 NOT_EVALUABLE_PREFIX = "not_evaluable: "
 NO_SLO_TYPE = "no slo_type"
-
-
-def _ratio_pair(slo: SLODefinition) -> tuple[str, str] | None:
-    """The SLO's ``(good_query, total_query)``, or None unless it has both.
-    A blank member counts as missing; otherwise the query sent would be
-    ``() / (total)``."""
-    good = (slo.good_query or "").strip()
-    total = (slo.total_query or "").strip()
-    return (good, total) if good and total else None
+JUDGMENT_SLO = "judgment SLOs are evaluated by measure"
+# SLOResult.error when Prometheus holds no budget for an SLO that should
+# have one: generate's rules are not loaded, or generate chose not to write
+# this budget (an objective or latency bound it cannot trust).
+NO_BUDGET_SERIES = "no error budget series"
+# SLOResult.error when the budget rule has nothing to divide by: no requests
+# in the window.
+BUDGET_NOT_FINITE = "error budget is not a finite number"
+# The two reasons that are an absence of data, not a fault.
+_NO_DATA_REASONS = frozenset({NO_BUDGET_SERIES, BUDGET_NOT_FINITE})
 
 
 def not_evaluable_reason(slo: SLODefinition) -> str | None:
-    """Why this SLO's query cannot be read as a good ratio, or None if it can.
+    """Why observe has no error budget to read for this SLO, or None if it
+    has one.
 
-    The collector computes ``1 - value`` as an error rate, so it reads only
-    what is a good ratio by construction: a good/total pair, or the single
-    query of an availability SLO (a judgment SLO loads as availability). Any
-    other query is in the SLO's own unit. A p95 of 0.2 s read as a ratio is
-    an SLI of 20% and an exhausted budget; a 45 s lag is 4500% and healthy
-    [opensrm-1jrk].
+    Observe reads the budget generate writes
+    (``slo:error_budget_remaining:ratio``), as measure does, and generate
+    writes one only for the kinds in measure's ``BUDGETED_KINDS``. Nothing
+    else is evaluated, whatever queries the SLO carries [opensrm-9qa6].
 
     The kind is measure's ``_classical_kind``, so the two modules agree on
-    what an SLO is. A missing type is checked first: ``_classical_kind``
-    falls back to the SLO's name, and a name is not a declaration.
+    what an SLO is. Two checks come before it, because it would answer
+    wrongly: a missing type (it falls back to the SLO's name, and a name is
+    not a declaration) and a judgment SLO (it loads as availability, but its
+    budget is measure's to evaluate, from the A1 counters).
     """
     slo_type = str(slo.slo_type).strip() if slo.slo_type is not None else ""
     if not slo_type:
         return NO_SLO_TYPE
-    if _ratio_pair(slo) is not None:
-        return None
-    if _classical_kind(slo) == "availability":
-        return None
-    return f"slo_type {slo_type!r} has no good/total query pair"
+    if slo.judgment_type:
+        return JUDGMENT_SLO
+    if _classical_kind(slo) not in BUDGETED_KINDS:
+        return f"no error budget is written for slo_type {slo_type!r}"
+    return None
+
+
+@dataclass(frozen=True)
+class BudgetReading:
+    """What an error budget sample says about its SLO.
+
+    ``remaining`` is the series value: 1.0 a full budget, 0.0 spent,
+    negative overspent. ``objective`` is the series' own ``objective``
+    label, the 0-100 target the budget was computed against.
+    """
+
+    remaining: float
+    objective: float
+
+    @property
+    def consumed(self) -> float:
+        """The share of the budget used: 0.0 none, 1.0 all, above 1 overspent."""
+        return 1.0 - self.remaining
+
+    @property
+    def sli_percent(self) -> float:
+        """The good ratio over the SLO's window, as a percentage.
+
+        generate writes ``remaining = 1 - (1 - good) / (1 - objective/100)``;
+        this is that formula solved for ``good``.
+        """
+        return (1.0 - self.consumed * (1.0 - self.objective / 100.0)) * 100.0
+
+
+def read_budget_series(series: list[dict]) -> BudgetReading | str:
+    """The reading in an instant-query result for one SLO's budget, or the
+    reason there is none.
+
+    Exactly one series is a reading. None is ``NO_BUDGET_SERIES``, and a
+    value that is not a finite number is ``BUDGET_NOT_FINITE`` (the rule
+    divides by a request count of zero): both are an absence of data.
+    Anything else is a reason naming a fault: more than one series (two
+    rule sets writing the same SLO), a malformed sample, or an
+    ``objective`` label that is missing or leaves no budget.
+    """
+    if not series:
+        return NO_BUDGET_SERIES
+    if len(series) > 1:
+        return f"{len(series)} error budget series for one SLO"
+    sample = series[0]
+    try:
+        remaining = float(sample["value"][1])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return "error budget sample has no value"
+    if not math.isfinite(remaining):
+        return BUDGET_NOT_FINITE
+    try:
+        objective = float(sample["metric"]["objective"])
+    except (KeyError, TypeError, ValueError):
+        return "error budget series has no objective label"
+    if not (math.isfinite(objective) and 0.0 < objective < 100.0):
+        return f"error budget series has objective {objective}, which leaves no budget"
+    return BudgetReading(remaining=remaining, objective=objective)
 
 
 class SLOMetricCollector:
     """SLO metric collector.
 
-    Holds one piece of state, for logging only: which untyped SLOs it has
-    already warned about, so a worker that keeps its collector across cycles
-    warns once per service and SLO, not once per cycle.
+    Holds state for logging only: which SLOs it has already warned about
+    (no type; a budget computed against another objective than the
+    manifest's), so a worker that keeps its collector across cycles warns
+    once per service and SLO, not once per cycle.
     """
 
     def __init__(self, prometheus_url: str | None = None) -> None:
         self.prometheus_url = prometheus_url
         self._untyped_warned: set[tuple[str, str]] = set()
+        self._objective_warned: set[tuple[str, str]] = set()
         self._username = os.environ.get("PROMETHEUS_USERNAME") or os.environ.get(
             "NTHLAYER_METRICS_USER"
         )
@@ -169,28 +233,36 @@ class SLOMetricCollector:
             result.status = "NO_DATA"
             return result
 
-        query = _build_slo_query(slo, item.service)
-
-        if query is None:
-            result.error = "No query defined"
-            result.status = "NO_DATA"
-            return result
+        # {service, slo}, as measure reads it: the objective is not a
+        # matcher but something to read back.
+        query = ERROR_BUDGET_REMAINING.selector(service=item.service, slo=slo.name)
 
         try:
-            sli_value = await provider.get_sli_value(query)
+            response = await provider.query(query)
+            series = (response.get("data") or {}).get("result") or []
+            reading = read_budget_series(series)
 
-            if sli_value is None:
+            if isinstance(reading, str) and reading in _NO_DATA_REASONS:
+                result.error = reading
                 result.status = "NO_DATA"
                 return result
+            if isinstance(reading, str):
+                logger.warning(
+                    "error_budget_unreadable", service=item.service, slo=slo.name, reason=reading
+                )
+                result.error = reading
+                result.status = "ERROR"
+                return result
 
-            result.current_sli = sli_value * 100
-            error_rate = 1.0 - sli_value
-            result.burned_minutes = window_minutes * error_rate
-            result.percent_consumed = (
-                (result.burned_minutes / total_budget_minutes) * 100
-                if total_budget_minutes > 0
-                else 0
-            )
+            self._warn_if_objective_differs(item, reading.objective)
+            # The series' objective, not the manifest's target: it is what
+            # the budget was computed against, and the two differ while a
+            # changed manifest waits for its rules to be regenerated.
+            result.objective = reading.objective
+            result.total_budget_minutes = window_minutes * (100 - reading.objective) / 100
+            result.current_sli = reading.sli_percent
+            result.burned_minutes = result.total_budget_minutes * reading.consumed
+            result.percent_consumed = reading.consumed * 100
             result.status = _determine_status(result.percent_consumed)
 
         except PrometheusProviderError as e:
@@ -203,6 +275,27 @@ class SLOMetricCollector:
             result.status = "ERROR"
 
         return result
+
+    def _warn_if_objective_differs(self, item: ServiceSLO, objective: float) -> None:
+        """Warn, once per service and SLO, when the budget in Prometheus was
+        computed against another objective than the manifest declares."""
+        try:
+            declared = float(item.slo.target)
+        except (TypeError, ValueError):
+            declared = math.nan
+        if declared == objective:
+            return
+        key = (item.service, item.slo.name)
+        if key in self._objective_warned:
+            return
+        self._objective_warned.add(key)
+        logger.warning(
+            "slo_objective_differs_from_manifest",
+            service=item.service,
+            slo=item.slo.name,
+            manifest_target=item.slo.target,
+            budget_objective=objective,
+        )
 
     def calculate_aggregate_budget(self, results: list[SLOResult]) -> BudgetSummary:
         """Calculate aggregate budget across all SLOs."""
@@ -255,28 +348,6 @@ def results_to_assessments(results: list[SLOResult], service: str) -> list[Asses
 
         assessments.append(create("slo_status", service, data))
     return assessments
-
-
-def _build_slo_query(slo: SLODefinition, service_name: str) -> str | None:
-    """Build PromQL query from SLO definition.
-
-    A good/total pair comes first: it is a good ratio whatever type the SLO
-    declares, where the single query of anything but an availability SLO is
-    not. An SLO can carry both. (An SLO that declares no type never gets
-    here, pair or not: see ``not_evaluable_reason``.)
-    """
-    pair = _ratio_pair(slo)
-    if pair is not None:
-        good, total = pair
-        query: str | None = f"({good}) / ({total})"
-    else:
-        query = slo.indicator_query
-
-    if query:
-        query = query.replace("${service}", service_name)
-        query = query.replace("$service", service_name)
-
-    return query
 
 
 def _determine_status(percent_consumed: float) -> str:

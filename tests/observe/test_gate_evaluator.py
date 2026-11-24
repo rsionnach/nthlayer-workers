@@ -112,13 +112,48 @@ class TestCheckDeploy:
         assert result.result == GateResult.BLOCKED
         assert len(result.recommendations) > 0
 
-    def test_slo_without_percent_consumed_ignored(self):
+    def test_no_reading_with_a_budget_is_a_warning_not_a_healthy_budget(self):
+        """Readings exist and none states a budget: that is not 100% left
+        [opensrm-9qa6]."""
         store = _make_store_with_assessments("svc", [
-            {"slo_name": "avail", "status": "NO_DATA"},  # no percent_consumed
+            {"slo_name": "avail", "status": "NO_DATA", "error": "no error budget series"},
+            {"slo_name": "latency", "status": "ERROR", "error": "timeout"},
+            {"slo_name": "lag", "status": "NO_DATA", "error": "not_evaluable: x"},
+        ])
+        result = check_deploy("svc", "critical", store)
+        assert result.result == GateResult.WARNING
+        assert result.budget_remaining_pct is None
+        assert result.slo_count == 3
+        assert result.message == "No budget data for 3 SLOs"
+
+    def test_one_slo_without_a_budget_is_named_in_the_singular(self):
+        store = _make_store_with_assessments("svc", [
+            {"slo_name": "avail", "status": "NO_DATA"},
+        ])
+        result = check_deploy("svc", "standard", store)
+        assert result.result == GateResult.WARNING
+        assert result.message == "No budget data for 1 SLO"
+
+    def test_a_reading_with_a_budget_decides_beside_ones_without(self):
+        """The readings without a budget are left out of the average, as
+        before; one reading with a budget is enough to decide."""
+        store = _make_store_with_assessments("svc", [
+            {"slo_name": "avail", "status": "HEALTHY", "percent_consumed": 20.0},
+            {"slo_name": "lag", "status": "NO_DATA"},
         ])
         result = check_deploy("svc", "standard", store)
         assert result.result == GateResult.APPROVED
-        assert result.budget_remaining_pct == 100.0
+        assert result.budget_remaining_pct == 80.0
+        assert result.slo_count == 2
+
+    def test_a_fully_spent_budget_still_blocks_beside_ones_without(self):
+        store = _make_store_with_assessments("svc", [
+            {"slo_name": "avail", "status": "EXHAUSTED", "percent_consumed": 130.0},
+            {"slo_name": "lag", "status": "NO_DATA"},
+        ])
+        result = check_deploy("svc", "critical", store)
+        assert result.result == GateResult.BLOCKED
+        assert result.budget_remaining_pct == 0.0
 
 
 class TestCheckDeployCLI:
@@ -132,3 +167,34 @@ class TestCheckDeployCLI:
         assert "--service" in captured.out
         assert "--tier" in captured.out
         assert "--store" in captured.out
+
+    def test_check_deploy_with_no_budget_data_warns_and_states_no_budget(self, tmp_path, capsys):
+        """Through the legacy CLI and a real SQLite store: exit 1 (WARNING),
+        a null budget in the output and in the stored deploy_gate reading,
+        and a decision record that says the budget is unknown [opensrm-9qa6]."""
+        import json
+
+        from nthlayer_workers.observe.cli import main
+        from nthlayer_workers.observe.decision_records import generate_summaries
+        from nthlayer_workers.observe.sqlite_store import SQLiteAssessmentStore
+        from nthlayer_workers.observe.store import AssessmentFilter
+
+        db = tmp_path / "assessments.db"
+        with SQLiteAssessmentStore(str(db)) as store:
+            store.put(create("slo_status", "svc", {
+                "slo_name": "availability", "status": "NO_DATA",
+                "error": "no error budget series",
+            }))
+
+        exit_code = main(["check-deploy", "--service", "svc", "--tier", "critical", "--store", str(db)])
+
+        assert exit_code == 1
+        printed = json.loads(capsys.readouterr().out)
+        assert (printed["decision"], printed["budget_remaining_pct"]) == ("WARNING", None)
+        with SQLiteAssessmentStore(str(db)) as store:
+            (gate,) = store.query(AssessmentFilter(service="svc", kind="deploy_gate"))
+        assert gate.data["decision"] == "warning"
+        assert gate.data["budget_remaining_pct"] is None
+        assert generate_summaries(gate).technical == (
+            "svc deploy gate: WARNING. Budget remaining: unknown. No budget data for 1 SLO"
+        )

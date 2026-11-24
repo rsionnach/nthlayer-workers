@@ -196,29 +196,35 @@ SLO assessment, drift, discovery, gate, portfolio, verification.
   `_worst_status` uses `_STATUS_SEVERITY` dict: EXHAUSTED=4,
   CRITICAL=3, WARNING=2, ERROR=1, NO_DATA=0, HEALTHY=-1, UNKNOWN=-2.
 - `slo/collector.py` — `SLOMetricCollector(prometheus_url)`:
-  async `collect(list[ServiceSLO]) -> list[SLOResult]`. It reads a
-  query only when its value is a good ratio (`not_evaluable_reason`,
-  opensrm-1jrk) and the SLO declares a type: a `good_query` /
-  `total_query` pair, or the single
-  query of an availability SLO (measure's `_classical_kind`; a
-  judgment SLO loads as availability). Any other SLO (latency,
-  error_rate, throughput, custom, an unknown or missing type) gets a
-  `NO_DATA` result with `error` `not_evaluable: <reason>` and no query
-  is sent. It is a reading, not silence, because the gate and the
-  portfolio take the newest `slo_status` per SLO whatever its age. An
-  SLO with no type is warned about once per service and SLO
+  async `collect(list[ServiceSLO]) -> list[SLOResult]`. It reads each
+  classical SLO from the error budget generate writes,
+  `slo:error_budget_remaining:ratio{service, slo}`, as measure does,
+  and from nothing else: the manifest's own queries are never sent
+  (opensrm-9qa6). `not_evaluable_reason` says which SLOs have no budget
+  to read: one with no type, a judgment SLO (measure owns those), and
+  any kind outside measure's `BUDGETED_KINDS` (`_classical_kind`),
+  whatever queries it carries. Each gets a `NO_DATA` result with
+  `error` `not_evaluable: <reason>` and is not queried. A budgeted SLO
+  whose series is missing, or not a finite number (no requests in the
+  window), is `NO_DATA` too (`NO_BUDGET_SERIES`, `BUDGET_NOT_FINITE`);
+  two series for one SLO, or an `objective` label that is missing or
+  leaves no budget, is `ERROR`. These are readings, not silence,
+  because the gate and the portfolio take the newest `slo_status` per
+  SLO whatever its age.
+  `BudgetReading` turns the sample into the result: with `remaining`
+  the series value and `objective` the series' own label,
+  `percent_consumed = (1 - remaining) * 100`, `burned_minutes` is that
+  share of the window's budget at that objective, and `current_sli`
+  is generate's formula solved for the good ratio. The result's
+  `objective` is the label, not the manifest's target; when they
+  differ the collector warns once per service and SLO
+  (`slo_objective_differs_from_manifest`). An SLO with no type is
+  warned about once per service and SLO too
   (`slo_without_type_not_evaluated`); the worker passes a missing
-  `slo_type` through as blank, with no availability default. The
-  worker path never sees a pair: core's `/manifests` does not send
-  `good_query` / `total_query` (opensrm-hyfe).
+  `slo_type` through as blank, with no availability default.
   `PrometheusProvider` closed in finally. Auth from
   `PROMETHEUS_USERNAME` / `NTHLAYER_METRICS_USER` +
   `PROMETHEUS_PASSWORD` / `NTHLAYER_METRICS_PASSWORD`.
-  `sli_value=0.0` treated as total outage (EXHAUSTED) not NO_DATA
-  (opensrm-e1gk tracks provider fix).
-  `_build_slo_query`: the `good_query` / `total_query` pair first,
-  then `indicator_query`, substitutes `$service` /
-  `${service}`.
   `_determine_status`: lookup dict `STATUS_THRESHOLDS`
   `{100→EXHAUSTED, 80→CRITICAL, 50→WARNING, default HEALTHY}`.
   `_parse_window_minutes`: lookup dict `{d, h, w, m}`, default
