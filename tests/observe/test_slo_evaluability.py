@@ -225,12 +225,36 @@ async def test_a_pair_is_sent_in_preference_to_the_slos_own_query():
     assert query == "(sum(rate(fast_total[5m]))) / (sum(rate(all_total[5m])))"
 
 
-async def test_half_a_pair_is_not_a_pair():
+async def test_an_availability_slo_with_a_blank_pair_member_falls_back_to_its_query():
+    item = ServiceSLO(
+        service="svc",
+        slo=SLODefinition(
+            name="availability", target=99.9, slo_type="availability", window="30d",
+            indicator_query="some_ratio", good_query="  ", total_query="all_total",
+        ),
+    )
+
+    (_result,), provider = await _collect([item], 0.9995)
+
+    assert [c.args[0] for c in provider.get_sli_value.await_args_list] == ["some_ratio"]
+
+
+@pytest.mark.parametrize(
+    "queries",
+    [
+        {"good_query": "sum(rate(fast_total[5m]))"},
+        {"total_query": "sum(rate(all_total[5m]))"},
+        # A blank member is no member: sent, it would be `(  ) / (...)`.
+        {"good_query": "  ", "total_query": "sum(rate(all_total[5m]))"},
+        {"good_query": "sum(rate(fast_total[5m]))", "total_query": ""},
+    ],
+)
+async def test_half_a_pair_is_not_a_pair(queries):
     item = ServiceSLO(
         service="svc",
         slo=SLODefinition(
             name="fast-enough", target=99.0, slo_type="latency", window="30d",
-            good_query="sum(rate(fast_total[5m]))",
+            indicator_query="histogram_quantile(0.95, rate(d_bucket[5m]))", **queries,
         ),
     )
 

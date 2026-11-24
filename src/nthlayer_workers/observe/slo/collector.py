@@ -69,6 +69,14 @@ NOT_EVALUABLE_PREFIX = "not_evaluable: "
 NO_SLO_TYPE = "no slo_type"
 
 
+def _ratio_pair(slo: SLODefinition) -> tuple[str, str] | None:
+    """The SLO's ``(good_query, total_query)``, or None unless it has both.
+    A blank query is no query: sent, it would be ``() / (...)``."""
+    good = (slo.good_query or "").strip()
+    total = (slo.total_query or "").strip()
+    return (good, total) if good and total else None
+
+
 def not_evaluable_reason(slo: SLODefinition) -> str | None:
     """Why this SLO's query cannot be read as a good ratio, or None if it can.
 
@@ -86,7 +94,7 @@ def not_evaluable_reason(slo: SLODefinition) -> str | None:
     slo_type = str(slo.slo_type).strip() if slo.slo_type is not None else ""
     if not slo_type:
         return NO_SLO_TYPE
-    if slo.good_query and slo.total_query:
+    if _ratio_pair(slo) is not None:
         return None
     if _classical_kind(slo) == "availability":
         return None
@@ -255,8 +263,10 @@ def _build_slo_query(slo: SLODefinition, service_name: str) -> str | None:
     type, where the single query of anything but an availability SLO is not
     (see ``not_evaluable_reason``). An SLO can carry both.
     """
-    if slo.total_query and slo.good_query:
-        query: str | None = f"({slo.good_query}) / ({slo.total_query})"
+    pair = _ratio_pair(slo)
+    if pair is not None:
+        good, total = pair
+        query: str | None = f"({good}) / ({total})"
     else:
         query = slo.indicator_query
 
