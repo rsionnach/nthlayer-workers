@@ -157,7 +157,7 @@ from the A1 counters, by the measure module and by `evaluate-once`.
 Not changed: the `reversal_rate` judgment SLO type, the manifest keys that
 declare it, and the SLO's name in verdicts and alerts.
 
-## 4.3: observe reads an SLO only when its query is a good ratio
+## 4.3.1: observe reads an SLO only when its query is a good ratio
 
 `observe.collect` and `nthlayer-observe collect` computed an error rate as
 `1 - value` for every SLO with a query. That is right for an availability
