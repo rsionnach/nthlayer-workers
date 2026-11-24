@@ -258,6 +258,9 @@ class SLOMetricCollector:
             # The series' objective, not the manifest's target: it is what
             # the budget was computed against, and the two differ while a
             # changed manifest waits for its rules to be regenerated.
+            # The window has no such label: it is the manifest's, so after
+            # a window change the two minute figures are off until the
+            # rules are regenerated, and nothing here can tell (opensrm-ejqc).
             result.objective = reading.objective
             result.total_budget_minutes = window_minutes * (100 - reading.objective) / 100
             result.current_sli = reading.sli_percent

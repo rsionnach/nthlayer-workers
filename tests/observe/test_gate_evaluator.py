@@ -126,6 +126,37 @@ class TestCheckDeploy:
         assert result.slo_count == 3
         assert result.message == "No budget data for 3 SLOs"
 
+    def test_a_missing_budget_points_at_the_recording_rules(self):
+        """One SLO that could have a budget and has none: the rules may not
+        be loaded."""
+        store = _make_store_with_assessments("svc", [
+            {"slo_name": "avail", "status": "NO_DATA", "error": "no error budget series"},
+            {"slo_name": "lag", "status": "NO_DATA",
+             "error": "not_evaluable: no error budget is written for slo_type 'custom'"},
+        ])
+        result = check_deploy("svc", "standard", store)
+        assert result.result == GateResult.WARNING
+        assert result.recommendations == [
+            "Check that nthlayer-generate's recording rules are loaded in Prometheus",
+        ]
+
+    def test_a_service_with_no_budgetable_slo_is_not_told_to_load_the_rules(self):
+        """Every SLO is one no budget is ever written for: loading the rules
+        would change nothing, so the gate does not suggest it."""
+        store = _make_store_with_assessments("svc", [
+            {"slo_name": "reversal_rate", "status": "NO_DATA",
+             "error": "not_evaluable: judgment SLOs are evaluated by measure"},
+            {"slo_name": "lag", "status": "NO_DATA",
+             "error": "not_evaluable: no error budget is written for slo_type 'custom'"},
+        ])
+        result = check_deploy("svc", "standard", store)
+        assert result.result == GateResult.WARNING
+        assert result.message == "No budget data for 2 SLOs"
+        assert result.recommendations == [
+            "None of this service's SLOs has an error budget to read "
+            "(judgment SLOs, or kinds no budget is written for)",
+        ]
+
     def test_one_slo_without_a_budget_is_named_in_the_singular(self):
         store = _make_store_with_assessments("svc", [
             {"slo_name": "avail", "status": "NO_DATA"},

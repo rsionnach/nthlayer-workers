@@ -12,6 +12,7 @@ from typing import Any
 from nthlayer_common.gate_models import GatePolicy, GateResult
 from nthlayer_common.tiers import TIER_CONFIGS
 
+from nthlayer_workers.observe.slo.collector import NOT_EVALUABLE_PREFIX
 from nthlayer_workers.observe.store import AssessmentFilter, AssessmentStore
 
 # Default thresholds from tier config
@@ -102,6 +103,18 @@ def check_deploy(
         # it is not APPROVED; nor is it evidence of a spent one, so it does
         # not block [opensrm-9qa6].
         count = len(latest_by_slo)
+        # Loading generate's rules helps only where a budget could exist.
+        # The collector marks an SLO that can never have one.
+        budgetable = [
+            d for d in latest_by_slo.values()
+            if not str(d.get("error") or "").startswith(NOT_EVALUABLE_PREFIX)
+        ]
+        recommendation = (
+            "Check that nthlayer-generate's recording rules are loaded in Prometheus"
+            if budgetable
+            else "None of this service's SLOs has an error budget to read "
+            "(judgment SLOs, or kinds no budget is written for)"
+        )
         return GateCheckResult(
             service=service,
             tier=tier,
@@ -110,9 +123,7 @@ def check_deploy(
             warning_threshold=warning_threshold,
             blocking_threshold=blocking_threshold,
             message=f"No budget data for {count} SLO{'s' if count != 1 else ''}",
-            recommendations=[
-                "Check that nthlayer-generate's recording rules are loaded in Prometheus",
-            ],
+            recommendations=[recommendation],
             slo_count=count,
         )
 
