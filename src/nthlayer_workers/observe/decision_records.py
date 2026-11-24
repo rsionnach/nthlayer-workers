@@ -133,9 +133,11 @@ def generate_summaries(legacy: LegacyAssessment) -> Summaries:
 
     elif legacy.kind == "deploy_gate":
         decision = d.get("decision", "unknown").upper()
+        # None: the gate had no budget reading to state (opensrm-9qa6).
         budget = d.get("budget_remaining_pct", 0)
         reasons = d.get("reasons", [])
-        technical = f"{svc} deploy gate: {decision}. Budget remaining: {budget}%."
+        remaining = "unknown" if budget is None else f"{budget}%"
+        technical = f"{svc} deploy gate: {decision}. Budget remaining: {remaining}."
         if reasons:
             technical += f" {reasons[0]}"
         plain = f"{svc} deployment {'allowed' if decision == 'APPROVED' else 'needs review' if decision == 'WARNING' else 'blocked'}."

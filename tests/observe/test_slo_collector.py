@@ -29,19 +29,6 @@ def availability_slo():
     )
 
 
-@pytest.fixture
-def no_query_slo():
-    return ServiceSLO(
-        service="payment-api",
-        slo=SLODefinition(
-            name="availability",
-            target=99.9,
-            slo_type="availability",
-            window="30d",
-        ),
-    )
-
-
 class TestSLOMetricCollector:
     def test_no_prometheus_url_raises(self):
         collector = SLOMetricCollector(prometheus_url=None)
@@ -50,99 +37,12 @@ class TestSLOMetricCollector:
 
             asyncio.run(collector.collect([]))
 
-    @patch("nthlayer_workers.observe.slo.collector.PrometheusProvider")
-    async def test_collect_healthy_slo(self, mock_provider_cls, availability_slo):
-        mock_provider = AsyncMock()
-        mock_provider.get_sli_value = AsyncMock(return_value=0.9995)
-        mock_provider.aclose = AsyncMock()
-        mock_provider_cls.return_value = mock_provider
-
-        collector = SLOMetricCollector("http://prom:9090")
-        results = await collector.collect([availability_slo])
-
-        assert len(results) == 1
-        r = results[0]
-        assert r.name == "availability"
-        assert r.status == "HEALTHY"
-        assert r.current_sli is not None
-        assert r.current_sli == pytest.approx(99.95)
-        assert r.burned_minutes is not None
-        assert r.percent_consumed is not None
-
-    @patch("nthlayer_workers.observe.slo.collector.PrometheusProvider")
-    async def test_collect_exhausted_slo(self, mock_provider_cls, availability_slo):
-        mock_provider = AsyncMock()
-        mock_provider.get_sli_value = AsyncMock(return_value=0.990)  # 1% error rate
-        mock_provider.aclose = AsyncMock()
-        mock_provider_cls.return_value = mock_provider
-
-        collector = SLOMetricCollector("http://prom:9090")
-        results = await collector.collect([availability_slo])
-
-        assert results[0].status == "EXHAUSTED"
-
-    @patch("nthlayer_workers.observe.slo.collector.PrometheusProvider")
-    async def test_collect_zero_sli_treated_as_total_outage(self, mock_provider_cls, availability_slo):
-        """sli_value=0.0 is a real measurement (total outage), distinct from no-data."""
-        mock_provider = AsyncMock()
-        mock_provider.get_sli_value = AsyncMock(return_value=0.0)
-        mock_provider.aclose = AsyncMock()
-        mock_provider_cls.return_value = mock_provider
-
-        collector = SLOMetricCollector("http://prom:9090")
-        results = await collector.collect([availability_slo])
-
-        assert results[0].status == "EXHAUSTED"
-        assert results[0].current_sli == 0.0
-        assert results[0].error is None
-
-    @patch("nthlayer_workers.observe.slo.collector.PrometheusProvider")
-    async def test_collect_none_sli_yields_no_data(self, mock_provider_cls, availability_slo):
-        """Provider returning None (empty Prometheus result) yields NO_DATA, not EXHAUSTED."""
-        mock_provider = AsyncMock()
-        mock_provider.get_sli_value = AsyncMock(return_value=None)
-        mock_provider.aclose = AsyncMock()
-        mock_provider_cls.return_value = mock_provider
-
-        collector = SLOMetricCollector("http://prom:9090")
-        results = await collector.collect([availability_slo])
-
-        assert results[0].status == "NO_DATA"
-        assert results[0].current_sli is None
-        assert results[0].burned_minutes is None
-        assert results[0].error is None
-
-    @patch("nthlayer_workers.observe.slo.collector.PrometheusProvider")
-    async def test_collect_prometheus_error(self, mock_provider_cls, availability_slo):
-        from nthlayer_common.providers.prometheus import PrometheusProviderError
-
-        mock_provider = AsyncMock()
-        mock_provider.get_sli_value = AsyncMock(side_effect=PrometheusProviderError("timeout"))
-        mock_provider.aclose = AsyncMock()
-        mock_provider_cls.return_value = mock_provider
-
-        collector = SLOMetricCollector("http://prom:9090")
-        results = await collector.collect([availability_slo])
-
-        assert results[0].status == "ERROR"
-        assert "timeout" in results[0].error
-
-    @patch("nthlayer_workers.observe.slo.collector.PrometheusProvider")
-    async def test_collect_no_query_defined(self, mock_provider_cls, no_query_slo):
-        mock_provider = AsyncMock()
-        mock_provider.aclose = AsyncMock()
-        mock_provider_cls.return_value = mock_provider
-
-        collector = SLOMetricCollector("http://prom:9090")
-        results = await collector.collect([no_query_slo])
-
-        assert results[0].status == "NO_DATA"
-        assert results[0].error == "No query defined"
+    # What a collected SLO reads as is in test_slo_budget.py.
 
     @patch("nthlayer_workers.observe.slo.collector.PrometheusProvider")
     async def test_provider_closed_after_collect(self, mock_provider_cls, availability_slo):
         mock_provider = AsyncMock()
-        mock_provider.get_sli_value = AsyncMock(return_value=0.999)
+        mock_provider.query = AsyncMock(return_value={"data": {"result": []}})
         mock_provider.aclose = AsyncMock()
         mock_provider_cls.return_value = mock_provider
 

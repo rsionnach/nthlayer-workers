@@ -12,6 +12,7 @@ from typing import Any
 from nthlayer_common.gate_models import GatePolicy, GateResult
 from nthlayer_common.tiers import TIER_CONFIGS
 
+from nthlayer_workers.observe.slo.collector import NOT_EVALUABLE_PREFIX
 from nthlayer_workers.observe.store import AssessmentFilter, AssessmentStore
 
 # Default thresholds from tier config
@@ -31,7 +32,9 @@ class GateCheckResult:
     service: str
     tier: str
     result: GateResult
-    budget_remaining_pct: float
+    # None when no reading for the service carries a budget: there is
+    # nothing to state, and 100.0 would read as healthy [opensrm-9qa6].
+    budget_remaining_pct: float | None
     warning_threshold: float
     blocking_threshold: float | None
     message: str
@@ -90,13 +93,43 @@ def check_deploy(
         if d.get("percent_consumed") is not None
     ]
 
-    avg_consumed = 0.0 if not consumed_values else sum(consumed_values) / len(consumed_values)
-
-    budget_remaining_pct = max(0.0, 100.0 - avg_consumed)
-
     # Get thresholds
     warning_threshold = _get_warning_threshold(tier, policy)
     blocking_threshold = _get_blocking_threshold(tier, policy)
+
+    if not consumed_values:
+        # Readings exist, and none of them carries a budget: every SLO is
+        # NO_DATA, ERROR or not evaluable. That is not a healthy budget, so
+        # it is not APPROVED; nor is it evidence of a spent one, so it does
+        # not block [opensrm-9qa6].
+        count = len(latest_by_slo)
+        # Loading generate's rules helps only where a budget could exist.
+        # The collector marks an SLO that can never have one.
+        budgetable = [
+            d for d in latest_by_slo.values()
+            if not str(d.get("error") or "").startswith(NOT_EVALUABLE_PREFIX)
+        ]
+        recommendation = (
+            "Check that nthlayer-generate's recording rules are loaded in Prometheus"
+            if budgetable
+            else "None of this service's SLOs has an error budget to read "
+            "(judgment SLOs, or kinds no budget is written for)"
+        )
+        return GateCheckResult(
+            service=service,
+            tier=tier,
+            result=GateResult.WARNING,
+            budget_remaining_pct=None,
+            warning_threshold=warning_threshold,
+            blocking_threshold=blocking_threshold,
+            message=f"No budget data for {count} SLO{'s' if count != 1 else ''}",
+            recommendations=[recommendation],
+            slo_count=count,
+        )
+
+    avg_consumed = sum(consumed_values) / len(consumed_values)
+
+    budget_remaining_pct = max(0.0, 100.0 - avg_consumed)
 
     # Evaluate gate
     result, message, recommendations = _evaluate_thresholds(
