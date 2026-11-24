@@ -157,38 +157,19 @@ from the A1 counters, by the measure module and by `evaluate-once`.
 Not changed: the `reversal_rate` judgment SLO type, the manifest keys that
 declare it, and the SLO's name in verdicts and alerts.
 
-## 4.3.1: observe reads an SLO only when its query is a good ratio
-
-`observe.collect` and `nthlayer-observe collect` computed an error rate as
-`1 - value` for every SLO with a query. That is right for an availability
-ratio and wrong for anything else: a latency SLO whose query is a p95 of
-0.2 s was reported as an SLI of 20% with its budget `EXHAUSTED`, and a
-custom SLO answering 97 (a percentage) as 9700% and `HEALTHY`.
-
-Now only two shapes are evaluated, and only for an SLO that declares a
-type: one with both `good_query` and `total_query`, and an availability
-SLO (judgment SLOs included) with a single query. Every other SLO gets a `slo_status` reading with status
-`NO_DATA`, no SLI and no budget figures, and `error` set to
-`not_evaluable: <reason>`. Its query is not sent.
-
-What changes for you:
-
-- A deploy gate that was `BLOCKED` by a latency SLO's false `EXHAUSTED`
-  reading clears on the first collection after the upgrade.
-- Latency, error-rate, throughput and custom SLOs no longer count toward
-  the service's aggregate budget or the portfolio's status counts. They
-  were counted with wrong numbers before.
-- An SLO that reaches the worker with no `slo_type` is no longer assumed
-  to be availability: it gets the same `NO_DATA` reading, and one
-  `slo_without_type_not_evaluated` warning.
-
 ## 4.4: observe reads error budgets from generate's recording rules
 
 `observe.collect` and `nthlayer-observe collect` no longer evaluate an SLO's
 own query. They read `slo:error_budget_remaining:ratio{service, slo}`, the
 series nthlayer-generate's recording rules write, as measure has since
-4.2. Availability, latency and error-rate SLOs are read this way. Latency
-and error-rate SLOs, reported `NO_DATA` since 4.3.1, get readings again.
+4.2. Availability, latency and error-rate SLOs are read this way.
+
+Before, every SLO's own query was read as a good ratio, which is right for
+an availability ratio and wrong for anything else: a latency SLO whose
+query is a p95 of 0.2 s was reported as an SLI of 20% with its budget
+`EXHAUSTED`, and a custom SLO answering 97 (a percentage) as 9700% and
+`HEALTHY`. A deploy gate that was `BLOCKED` by such a reading clears on
+the first collection after the upgrade.
 
 **Load the recording rules from nthlayer-generate 4.1.0 or later into
 Prometheus before upgrading.** There is no fallback to the manifest's query:
@@ -221,6 +202,9 @@ What else changes:
   5-minute error ratio scaled to the whole window; it is now the share of
   the budget used over the window. `current_sli` is the good ratio over the
   window, not over the last 5 minutes.
+- **An SLO with no `slo_type`** is no longer assumed to be availability. It
+  gets `NO_DATA` with `not_evaluable: no slo_type`, and observe logs
+  `slo_without_type_not_evaluated` once per service and SLO.
 - **A budget with no requests behind it** (the rule's value is not a
   number) reads `NO_DATA` with `error budget is not a finite number`.
 - **The deploy gate warns when it has no budget to judge.** When a service
