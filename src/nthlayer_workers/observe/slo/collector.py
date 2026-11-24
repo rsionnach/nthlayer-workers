@@ -1,4 +1,4 @@
-"""Stateless SLO metric collector — queries Prometheus and produces Assessments."""
+"""SLO metric collector — queries Prometheus and produces Assessments."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from nthlayer_common.manifest.models import SLODefinition
 from nthlayer_common.providers import PrometheusProvider
 from nthlayer_common.providers.prometheus import PrometheusProviderError
 
+from nthlayer_workers.measure.adapters.prometheus import _classical_kind
 from nthlayer_workers.observe.assessment import Assessment, create
 
 logger = structlog.get_logger()
@@ -62,11 +63,56 @@ class BudgetSummary:
     valid_slo_count: int
 
 
+# SLOResult.error for an SLO whose query is never sent, because its value
+# cannot be read as a good ratio. The reason follows the prefix.
+NOT_EVALUABLE_PREFIX = "not_evaluable: "
+NO_SLO_TYPE = "no slo_type"
+
+
+def _ratio_pair(slo: SLODefinition) -> tuple[str, str] | None:
+    """The SLO's ``(good_query, total_query)``, or None unless it has both.
+    A blank member counts as missing; otherwise the query sent would be
+    ``() / (total)``."""
+    good = (slo.good_query or "").strip()
+    total = (slo.total_query or "").strip()
+    return (good, total) if good and total else None
+
+
+def not_evaluable_reason(slo: SLODefinition) -> str | None:
+    """Why this SLO's query cannot be read as a good ratio, or None if it can.
+
+    The collector computes ``1 - value`` as an error rate, so it reads only
+    what is a good ratio by construction: a good/total pair, or the single
+    query of an availability SLO (a judgment SLO loads as availability). Any
+    other query is in the SLO's own unit. A p95 of 0.2 s read as a ratio is
+    an SLI of 20% and an exhausted budget; a 45 s lag is 4500% and healthy
+    [opensrm-1jrk].
+
+    The kind is measure's ``_classical_kind``, so the two modules agree on
+    what an SLO is. A missing type is checked first: ``_classical_kind``
+    falls back to the SLO's name, and a name is not a declaration.
+    """
+    slo_type = str(slo.slo_type).strip() if slo.slo_type is not None else ""
+    if not slo_type:
+        return NO_SLO_TYPE
+    if _ratio_pair(slo) is not None:
+        return None
+    if _classical_kind(slo) == "availability":
+        return None
+    return f"slo_type {slo_type!r} has no good/total query pair"
+
+
 class SLOMetricCollector:
-    """Stateless SLO metric collector."""
+    """SLO metric collector.
+
+    Holds one piece of state, for logging only: which untyped SLOs it has
+    already warned about, so a worker that keeps its collector across cycles
+    warns once per service and SLO, not once per cycle.
+    """
 
     def __init__(self, prometheus_url: str | None = None) -> None:
         self.prometheus_url = prometheus_url
+        self._untyped_warned: set[tuple[str, str]] = set()
         self._username = os.environ.get("PROMETHEUS_USERNAME") or os.environ.get(
             "NTHLAYER_METRICS_USER"
         )
@@ -110,6 +156,18 @@ class SLOMetricCollector:
             window=window,
             total_budget_minutes=total_budget_minutes,
         )
+
+        reason = not_evaluable_reason(slo)
+        if reason is not None:
+            # A reading, not silence: the gate and the portfolio take the
+            # newest slo_status per SLO whatever its age, so saying nothing
+            # would leave an earlier false reading in force.
+            if reason == NO_SLO_TYPE and (item.service, slo.name) not in self._untyped_warned:
+                self._untyped_warned.add((item.service, slo.name))
+                logger.warning("slo_without_type_not_evaluated", service=item.service, slo=slo.name)
+            result.error = NOT_EVALUABLE_PREFIX + reason
+            result.status = "NO_DATA"
+            return result
 
         query = _build_slo_query(slo, item.service)
 
@@ -200,11 +258,19 @@ def results_to_assessments(results: list[SLOResult], service: str) -> list[Asses
 
 
 def _build_slo_query(slo: SLODefinition, service_name: str) -> str | None:
-    """Build PromQL query from SLO definition."""
-    query = slo.indicator_query
+    """Build PromQL query from SLO definition.
 
-    if not query and slo.total_query and slo.good_query:
-        query = f"({slo.good_query}) / ({slo.total_query})"
+    A good/total pair comes first: it is a good ratio whatever type the SLO
+    declares, where the single query of anything but an availability SLO is
+    not. An SLO can carry both. (An SLO that declares no type never gets
+    here, pair or not: see ``not_evaluable_reason``.)
+    """
+    pair = _ratio_pair(slo)
+    if pair is not None:
+        good, total = pair
+        query: str | None = f"({good}) / ({total})"
+    else:
+        query = slo.indicator_query
 
     if query:
         query = query.replace("${service}", service_name)

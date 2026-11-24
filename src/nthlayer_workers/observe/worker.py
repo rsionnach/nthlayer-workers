@@ -323,7 +323,10 @@ def _extract_service_slos(manifest_dicts: list[dict]) -> list[ServiceSLO]:
             slo = SLODefinition(
                 name=name,
                 target=target,
-                slo_type=slo_dict.get("slo_type", "availability"),
+                # No default: an SLO core sends without a type is reported
+                # as not evaluable by the collector, not read as availability
+                # [opensrm-1jrk].
+                slo_type=slo_dict.get("slo_type") or "",
                 window=slo_dict.get("window", "30d"),
                 indicator_query=slo_dict.get("indicator_query"),
                 total_query=slo_dict.get("total_query"),
