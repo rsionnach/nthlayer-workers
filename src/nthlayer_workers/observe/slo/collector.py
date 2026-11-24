@@ -207,6 +207,9 @@ class SLOMetricCollector:
     ) -> SLOResult:
         """Collect metrics for a single SLO."""
         slo = item.slo
+        # The manifest's target and the budget minutes it implies. They
+        # stand on a result with no budget read; a budget that is read
+        # replaces both with the objective it was computed against.
         objective = slo.target
         window = slo.window
 

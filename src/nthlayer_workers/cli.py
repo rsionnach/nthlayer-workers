@@ -220,9 +220,9 @@ async def _gate_async(args: argparse.Namespace) -> int:
             "tier": result.tier,
             "decision": result.result.name,
             "budget_remaining_pct": (
-            None if result.budget_remaining_pct is None
-            else round(result.budget_remaining_pct, 1)
-        ),
+                None if result.budget_remaining_pct is None
+                else round(result.budget_remaining_pct, 1)
+            ),
             "message": result.message,
             "recommendations": result.recommendations,
         }
