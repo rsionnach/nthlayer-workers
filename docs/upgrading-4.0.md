@@ -214,7 +214,20 @@ What else changes:
   `deploy_gate` assessment. A service with no readings at all is still
   approved by default.
 
-## Breaking changes
+## 4.4: respond resolves the case of a resolved incident
+
+Respond opens a case in core for each incident and used to leave it open
+for good. It now resolves the case when the incident reaches `RESOLVED`,
+naming the incident's last verdict as the resolution.
+
+- Cases of incidents that end `ESCALATED` or `FAILED`, or that are
+  `AWAITING_APPROVAL`, stay open: those need a person.
+- An open case in core now means an incident still needs attention. The
+  pending queue no longer fills with incidents respond has finished.
+- A case an operator resolved first is left as they resolved it.
+- A case an operator holds a lease on is resolved all the same when its
+  incident resolves, and core drops the lease.
+
 
 ### `gen_ai.decision.evaluated` → per-dimension grader events + a summary
 

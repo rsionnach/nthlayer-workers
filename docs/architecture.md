@@ -666,7 +666,16 @@ caller skips appending to `verdict_chain` (keeps in-memory chain
 consistent with core lineage, avoids dangling `parent_ids`).
 
 `worker.py` — P3-E.1 implemented. `RespondModule(WorkerModule)`:
-`process_cycle()` = `_ingest_triggers` → `_drive_active_incidents`.
+`process_cycle()` = `_ingest_triggers` → `_drive_active_incidents` →
+`_resolve_cases_of_resolved_incidents`. The last resolves, in core
+(`PUT /cases/{id}/resolve`), the case of each incident that reached
+RESOLVED, with the incident's last verdict as the resolution
+(opensrm-j9io). ESCALATED, FAILED and AWAITING_APPROVAL leave the case
+open: those need a person. Each incident is settled once, recorded on
+its context as `metadata["case_resolution"]`: `resolved`,
+`already_resolved` (409: someone else resolved it), `no_case` (404:
+none was opened, or its creation failed) or `no_verdict`. Any other
+answer is retried next cycle.
 `Cursors` dataclass (`snapshot_after`, `breach_after` ISO 8601).
 `_NoopContextStore`: `save()=noop`, `load()` / `list_active()` /
 `list_all()` raise `NotImplementedError` (worker owns state via

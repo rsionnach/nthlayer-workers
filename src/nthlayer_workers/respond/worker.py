@@ -59,6 +59,27 @@ class Cursors:
         )
 
 
+# IncidentContext.metadata key: how the incident's case was settled once the
+# incident resolved, so that it is settled once.
+CASE_RESOLUTION = "case_resolution"
+CASE_RESOLVED = "resolved"
+CASE_ALREADY_RESOLVED = "already_resolved"
+CASE_ABSENT = "no_case"
+CASE_NO_VERDICT = "no_verdict"
+# Core's answers to PUT /cases/{id}/resolve that settle the matter. Anything
+# else (a 5xx, or no answer at all) is tried again.
+_CASE_RESOLUTION_BY_STATUS = {
+    200: CASE_RESOLVED,
+    409: CASE_ALREADY_RESOLVED,
+    404: CASE_ABSENT,
+}
+
+
+def _case_id(context: IncidentContext) -> str:
+    """The id of the case respond opens for an incident."""
+    return f"case-{context.id}"
+
+
 def _is_terminal_and_aged(context: IncidentContext, retention_seconds: float) -> bool:
     """True if context is in a terminal state AND older than retention window.
 
@@ -180,12 +201,14 @@ class RespondModule:
                 )
 
     async def process_cycle(self) -> None:
-        """One cycle: detect new triggers → drive active incidents.
+        """One cycle: detect new triggers → drive active incidents → resolve
+        the cases of incidents that have resolved.
 
         State is persisted by the runner via get_state() after this returns.
         """
         await self._ingest_triggers()
         await self._drive_active_incidents()
+        await self._resolve_cases_of_resolved_incidents()
 
     # ------------------------------------------------------------------ #
     # Pipeline drive                                                        #
@@ -556,7 +579,7 @@ class RespondModule:
         verdict chain is still correct.
         """
         case = {
-            "id": f"case-{ctx.id}",
+            "id": _case_id(ctx),
             "kind": "incident",
             "created_at": ctx.created_at,
             "underlying_verdict": underlying_verdict,
@@ -572,6 +595,56 @@ class RespondModule:
                 incident_id=ctx.id,
                 status_code=result.status_code,
                 error=result.error,
+            )
+
+    async def _resolve_cases_of_resolved_incidents(self) -> None:
+        """Resolve, in core, the case of each incident that reached RESOLVED.
+
+        Respond opens a case for an incident as soon as it knows of it. Left
+        open after respond has finished, the case says only that respond
+        touched the incident, and anything that waits on open cases (learn's
+        retrospective, the bench queue) waits on every incident there has
+        ever been [opensrm-j9io]. The incident's last verdict is the
+        resolution.
+
+        Only RESOLVED. ESCALATED, FAILED and AWAITING_APPROVAL leave the case
+        open: those need a person.
+
+        Each incident is settled once, and how is kept on the context
+        (``metadata[CASE_RESOLUTION]``): resolved here, already resolved by
+        someone else (409), or no case to resolve (404: none was created, as
+        for a snapshot with no breach verdict, or its creation failed). Any
+        other answer is a failure to reach core, and is tried again next
+        cycle for as long as the incident is kept.
+        """
+        for context in list(self._incidents.values()):
+            if context.state != IncidentState.RESOLVED:
+                continue
+            if context.metadata.get(CASE_RESOLUTION):
+                continue
+            if not context.verdict_chain:
+                # Nothing to name as the resolution. Not expected: an
+                # incident resolves by completing its pipeline.
+                logger.warning("respond_case_resolve_skipped_no_verdict", incident_id=context.id)
+                context.metadata[CASE_RESOLUTION] = CASE_NO_VERDICT
+                continue
+            resolution_id = context.verdict_chain[-1]
+            result = await self.client.resolve_case(_case_id(context), resolution_id)
+            outcome = _CASE_RESOLUTION_BY_STATUS.get(result.status_code)
+            if outcome is None:
+                logger.warning(
+                    "respond_case_resolve_failed",
+                    incident_id=context.id,
+                    status_code=result.status_code,
+                    error=result.error,
+                )
+                continue
+            context.metadata[CASE_RESOLUTION] = outcome
+            logger.info(
+                "respond_case_resolution",
+                incident_id=context.id,
+                outcome=outcome,
+                resolution_id=resolution_id,
             )
 
     async def _resolve_tiers(self, services: list[str]) -> dict[str, str]:
