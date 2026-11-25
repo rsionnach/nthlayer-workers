@@ -66,8 +66,8 @@ CASE_RESOLVED = "resolved"
 CASE_ALREADY_RESOLVED = "already_resolved"
 CASE_NO_CASE = "no_case"
 CASE_NO_VERDICT = "no_verdict"
-# Core's answers to PUT /cases/{id}/resolve that settle the matter. Anything
-# else (a 5xx, or no answer at all) is tried again.
+# Core's answers to PUT /cases/{id}/resolve that settle the matter. Any
+# other status (another 4xx, a 5xx) or no answer at all is tried again.
 _CASE_RESOLUTION_BY_STATUS = {
     200: CASE_RESOLVED,
     409: CASE_ALREADY_RESOLVED,

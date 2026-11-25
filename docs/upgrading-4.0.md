@@ -230,7 +230,6 @@ naming the incident's last verdict as the resolution.
 
 ## Breaking changes
 
-
 ### `gen_ai.decision.evaluated` → per-dimension grader events + a summary
 
 One event per evaluation becomes one `gen_ai.evaluation.result` per scored
