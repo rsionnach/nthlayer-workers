@@ -85,7 +85,8 @@ nthlayer-workers serve \
   [--correlate-interval 10] [--topology-drift-interval 3600] [--contract-interval 3600] \
   [--measure-interval 60] [--respond-interval 30] \
   [--outcome-interval 60] [--retrospective-interval 30] \
-  [--expiry-threshold-days 7]
+  [--expiry-threshold-days 7] \
+  [--retrospective-quiet-minutes 10] [--retrospective-max-age-hours 24]
 
 # Deploy gate (CLI-only in v1.5)
 nthlayer-workers gate --service payment-api [--tier critical] [--commit-sha SHA] \
