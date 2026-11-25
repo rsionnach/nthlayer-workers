@@ -109,6 +109,7 @@ async def test_a_resolved_incidents_case_is_resolved_with_its_last_verdict():
 # Guarded: an empty list would collect no test at all, and the three states
 # the ruling names must be among them.
 _OTHER_STATES = [s for s in IncidentState if s is not IncidentState.RESOLVED]
+assert _OTHER_STATES
 assert {
     IncidentState.ESCALATED, IncidentState.FAILED, IncidentState.AWAITING_APPROVAL,
 } <= set(_OTHER_STATES), _OTHER_STATES
