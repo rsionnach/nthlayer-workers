@@ -1012,7 +1012,7 @@ opensrm-jmy.6.
   - `has_open_case(client, ids, service)`: whether core holds an
     unresolved case, for the service respond files the incident under
     (`incident_service`), whose `underlying_verdict` is in the chain
-    (or is the snapshot id). A failed read, or a full page of that
+    (respond anchors a case on a trigger). A failed read, or a full page of that
     service's open cases, is "cannot tell".
   - `retrospective_closure(...)` decides: `max_age` once the snapshot
     is `--retrospective-max-age-hours` old (default 24), whatever the

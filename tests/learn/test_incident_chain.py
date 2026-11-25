@@ -252,6 +252,25 @@ async def test_a_failed_read_is_no_chain_at_all(method):
     assert await fetch_incident_chain(core, snapshot) is None
 
 
+async def test_a_failed_read_of_a_trigger_less_snapshots_descendants_is_no_chain():
+    """Correlate emits ``parent_ids: []`` for a window with no breach
+    verdict. With no trigger read to fail as well, the snapshot's own read
+    is the only one: its failure must not be an empty chain."""
+    core = FakeCore()
+    snapshot = _snapshot(triggers=(), minutes_ago=30)
+    core.assessments.append(snapshot)
+    _respond_chain(core, snapshot)
+    core.fail.add("get_descendants")
+
+    assert await fetch_incident_chain(core, snapshot) is None
+
+    module = LearnRetrospectiveModule(client=core)
+    await module.process_cycle()
+
+    assert core.retrospectives == []
+    assert list((await module.get_state())["pending"]) == ["csn-fraud-1"]
+
+
 async def test_newest_created_at_is_the_last_decision_not_an_outcome():
     core = FakeCore()
     snapshot, respond = _incident(core)
@@ -266,7 +285,10 @@ async def test_newest_created_at_is_the_last_decision_not_an_outcome():
 # has_open_case                                                        #
 # ------------------------------------------------------------------ #
 
-_ANCHORS = frozenset({"csn-fraud-1", "vrd-breach-1", "vrd-x"})
+# The ids of an incident's chain. Respond anchors the incident's case on
+# the first breach id (respond/worker.py, the eager case creation), which is
+# a trigger and so in the chain.
+_ANCHORS = frozenset({"vrd-breach-1", "vrd-x"})
 
 
 @pytest.mark.parametrize(
@@ -274,10 +296,9 @@ _ANCHORS = frozenset({"csn-fraud-1", "vrd-breach-1", "vrd-x"})
     [
         ("pending", "vrd-breach-1", True),
         ("leased", "vrd-breach-1", True),
+        # Not among the cases core returns for an open state.
         ("resolved", "vrd-breach-1", False),
         ("pending", "vrd-someone-elses", False),
-        # A case anchored on the snapshot id itself.
-        ("pending", "csn-fraud-1", True),
     ],
 )
 async def test_an_unresolved_case_on_the_chain_is_an_open_case(state, underlying, expected):
@@ -409,6 +430,30 @@ def test_a_snapshot_with_no_readable_age_is_closed_not_held_forever():
         now=NOW, snapshot_created_at=None, chain=_chain_ending(0), open_case=True,
         quiet=_QUIET, max_age=_MAX_AGE,
     ) == CLOSED_BY_MAX_AGE
+
+
+def _naive(minutes_ago: float) -> str:
+    """A UTC timestamp written with no offset."""
+    return (NOW - timedelta(minutes=minutes_ago)).replace(tzinfo=None).isoformat()
+
+
+async def test_timestamps_with_no_offset_are_read_as_utc():
+    core = FakeCore()
+    snapshot = _snapshot(minutes_ago=30)
+    snapshot["created_at"] = _naive(30)
+    core.assessments.append(snapshot)
+    core.put_verdict({"id": "vrd-breach-1", "type": "quality_breach", "service": "fraud-detect",
+                      "created_at": _naive(33), "parent_ids": []})
+    core.put_verdict({"id": "vrd-triage", "type": "triage", "service": "fraud-detect",
+                      "created_at": _naive(20), "parent_ids": ["csn-fraud-1"]})
+
+    chain = await fetch_incident_chain(core, snapshot)
+    assert chain.newest_created_at == NOW - timedelta(minutes=20)
+
+    await LearnRetrospectiveModule(client=core).process_cycle()
+
+    (retro,) = core.retrospectives
+    assert (retro["data"]["closed_by"], retro["data"]["verdict_count"]) == ("quiet", 2)
 
 
 # ------------------------------------------------------------------ #
@@ -554,6 +599,9 @@ async def test_a_restart_with_no_state_takes_up_pending_snapshots_and_repeats_no
     # csn-done is not written a second time; csn-moving is pending again.
     assert [r["data"]["correlation_snapshot_id"] for r in core.retrospectives] == ["csn-done"]
     assert list((await restarted.get_state())["pending"]) == ["csn-moving"]
+    # Nor was a second one attempted and refused: core's page of
+    # retrospectives named csn-done, so it was never taken up.
+    assert core.refused == []
 
     # ... and closes in the restarted process once it is quiet.
     finisher = LearnRetrospectiveModule(client=core, quiet_minutes=1)

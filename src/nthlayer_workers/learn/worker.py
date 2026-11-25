@@ -256,8 +256,8 @@ class LearnOutcomeModule:
 # The verdict type core gives the child it creates when an outcome is
 # resolved (POST /verdicts/{id}/outcome): id ``out-<id>``, parent_ids [<id>].
 _OUTCOME_RESOLUTION = "outcome_resolution"
-# Core's case states; a case in any other state is still open.
-_CASE_RESOLVED = "resolved"
+# The two of core's case states that are not "resolved". Cases are asked
+# for by state, so a resolved one is never among those returned.
 _OPEN_CASE_STATES = ("pending", "leased")
 _CASE_PAGE_LIMIT = 100
 
@@ -405,11 +405,7 @@ async def has_open_case(
             return None
         cases = result.data if isinstance(result.data, list) else []
         for case in cases:
-            if (
-                isinstance(case, dict)
-                and case.get("state") != _CASE_RESOLVED
-                and case.get("underlying_verdict") in anchor_ids
-            ):
+            if isinstance(case, dict) and case.get("underlying_verdict") in anchor_ids:
                 return True
         if len(cases) >= _CASE_PAGE_LIMIT:
             return None
@@ -532,12 +528,15 @@ class LearnRetrospectiveModule:
                 else:
                     logger.warning("retrospective_chain_unreadable", snapshot_id=snapshot_id)
                 continue
-            anchors = chain.ids | {snapshot_id}
             closed_by = retrospective_closure(
                 now=now,
                 snapshot_created_at=_parse_timestamp(snapshot.get("created_at")),
                 chain=chain,
-                open_case=await has_open_case(self.client, anchors, incident_service(snapshot)),
+                # Respond anchors an incident's case on a trigger verdict
+                # (the first breach id), which is in the chain.
+                open_case=await has_open_case(
+                    self.client, chain.ids, incident_service(snapshot)
+                ),
                 quiet=timedelta(minutes=self.quiet_minutes),
                 max_age=timedelta(hours=self.max_age_hours),
             )
