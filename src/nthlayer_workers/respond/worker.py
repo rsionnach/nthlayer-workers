@@ -614,8 +614,9 @@ class RespondModule:
         (``metadata[CASE_RESOLUTION]``): resolved here, already resolved by
         someone else (409), or no case to resolve (404: none was created, as
         for a snapshot with no breach verdict, or its creation failed). Any
-        other answer is a failure to reach core, and is tried again next
-        cycle for as long as the incident is kept.
+        other answer is a failure, tried again next cycle for as long as the
+        incident is kept; the sweep stops at the first one, so a core that
+        is down costs one call and one warning a cycle, not one per incident.
         """
         for context in list(self._incidents.values()):
             if context.state != IncidentState.RESOLVED:
@@ -638,7 +639,10 @@ class RespondModule:
                     status_code=result.status_code,
                     error=result.error,
                 )
-                continue
+                # Stop here for this cycle. Whatever refused this one (core
+                # down or hung, a credential) will refuse the rest, and each
+                # call can take the client's whole retry budget.
+                return
             context.metadata[CASE_RESOLUTION] = outcome
             logger.info(
                 "respond_case_resolution",
