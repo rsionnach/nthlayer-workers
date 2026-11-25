@@ -157,6 +157,20 @@ from the A1 counters, by the measure module and by `evaluate-once`.
 Not changed: the `reversal_rate` judgment SLO type, the manifest keys that
 declare it, and the SLO's name in verdicts and alerts.
 
+## 4.4: respond resolves the case of a resolved incident
+
+Respond opens a case in core for each incident and used to leave it open
+for good. It now resolves the case when the incident reaches `RESOLVED`,
+naming the incident's last verdict as the resolution.
+
+- Cases of incidents that end `ESCALATED` or `FAILED`, or that are
+  `AWAITING_APPROVAL`, stay open: those need a person.
+- An open case in core now means an incident still needs attention. The
+  pending queue no longer fills with incidents respond has finished.
+- A case an operator resolved first is left as they resolved it.
+- A case an operator holds a lease on is resolved all the same when its
+  incident resolves, and core drops the lease.
+
 ## 4.4: observe reads error budgets from generate's recording rules
 
 `observe.collect` and `nthlayer-observe collect` no longer evaluate an SLO's
