@@ -105,10 +105,16 @@ async def test_a_resolved_incidents_case_is_resolved_with_its_last_verdict():
     assert context.metadata[CASE_RESOLUTION] == "resolved"
 
 
-@pytest.mark.parametrize(
-    "state",
-    [s for s in IncidentState if s is not IncidentState.RESOLVED],
-)
+# Every state but RESOLVED, from the enum, so a state added later is covered.
+# Guarded: an empty list would collect no test at all, and the three states
+# the ruling names must be among them.
+_OTHER_STATES = [s for s in IncidentState if s is not IncidentState.RESOLVED]
+assert {
+    IncidentState.ESCALATED, IncidentState.FAILED, IncidentState.AWAITING_APPROVAL,
+} <= set(_OTHER_STATES), _OTHER_STATES
+
+
+@pytest.mark.parametrize("state", _OTHER_STATES)
 async def test_any_other_state_leaves_the_case_open(state):
     """ESCALATED, FAILED and AWAITING_APPROVAL need a person; the rest are
     still in motion."""
@@ -126,14 +132,6 @@ async def test_any_other_state_leaves_the_case_open(state):
     assert cases.resolve_calls == []
     assert cases.cases["case-INC-FRAUD-1"]["state"] == "pending"
     assert CASE_RESOLUTION not in context.metadata
-
-
-def test_the_states_that_leave_a_case_open_include_the_ones_that_need_a_person():
-    others = {s for s in IncidentState if s is not IncidentState.RESOLVED}
-
-    assert {
-        IncidentState.ESCALATED, IncidentState.FAILED, IncidentState.AWAITING_APPROVAL,
-    } <= others
 
 
 async def test_the_case_is_resolved_in_the_cycle_the_incident_resolves():
