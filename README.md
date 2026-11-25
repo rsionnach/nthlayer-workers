@@ -69,7 +69,7 @@ LLM-powered retrospective + outcome resolution. Two sub-modules:
 | Module | Cycle | Output |
 |---|---|---|
 | `learn.outcome` | 60 s | `calibration_signal` assessments — resolves pending verdicts via five paths: lineage, calibration sampling, downstream signal, score-outcome divergence, expiry |
-| `learn.retrospective` | 30 s | `retrospective` assessments — cursor-based poll on new `correlation_snapshot`s |
+| `learn.retrospective` | 30 s | `retrospective` assessments — one per `correlation_snapshot`, written once the incident's verdict chain has gone quiet with no open case, or after 24 h |
 
 Calibration signals fire only on real resolution, never on expiry — absence is not a quality signal.
 
@@ -85,7 +85,8 @@ nthlayer-workers serve \
   [--correlate-interval 10] [--topology-drift-interval 3600] [--contract-interval 3600] \
   [--measure-interval 60] [--respond-interval 30] \
   [--outcome-interval 60] [--retrospective-interval 30] \
-  [--expiry-threshold-days 7]
+  [--expiry-threshold-days 7] \
+  [--retrospective-quiet-minutes 10] [--retrospective-max-age-hours 24]
 
 # Deploy gate (CLI-only in v1.5)
 nthlayer-workers gate --service payment-api [--tier critical] [--commit-sha SHA] \

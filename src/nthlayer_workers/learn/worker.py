@@ -8,7 +8,7 @@ Two modules implementing WorkerModule protocol:
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -253,9 +253,236 @@ class LearnOutcomeModule:
 # ---------------------------------------------------------------------------
 
 
+# The verdict type core gives the child it creates when an outcome is
+# resolved (POST /verdicts/{id}/outcome): id ``out-<id>``, parent_ids [<id>].
+_OUTCOME_RESOLUTION = "outcome_resolution"
+# The two of core's case states that are not "resolved". Cases are asked
+# for by state, so a resolved one is never among those returned.
+_OPEN_CASE_STATES = ("pending", "leased")
+_CASE_PAGE_LIMIT = 100
+
+# Core's answer to an assessment whose id it already holds.
+_HTTP_CONFLICT = 409
+
+
+def retrospective_id(snapshot: dict) -> str:
+    """The id of the one retrospective a snapshot gets."""
+    return f"retro-{snapshot.get('id')}"
+
+
+# How a retrospective came to be written.
+CLOSED_BY_QUIET = "quiet"
+CLOSED_BY_MAX_AGE = "max_age"
+
+
+@dataclass(frozen=True)
+class IncidentChain:
+    """The decisions of one incident, oldest first, and which of them have
+    an outcome.
+
+    ``resolved_ids`` says only that core holds an outcome child for the
+    decision, never which outcome it carries.
+    """
+
+    decisions: tuple[dict, ...]
+    resolved_ids: frozenset[str]
+
+    @property
+    def ids(self) -> frozenset[str]:
+        return frozenset(v["id"] for v in self.decisions)
+
+    @property
+    def newest_created_at(self) -> datetime | None:
+        """When the last decision joined the chain, by core's timestamp."""
+        stamps = [t for v in self.decisions if (t := _parse_timestamp(v.get("created_at")))]
+        return max(stamps, default=None)
+
+
+async def fetch_incident_chain(client: CoreAPIClient, snapshot: dict) -> IncidentChain | None:
+    """The verdict chain of the incident a correlation snapshot opened, by
+    lineage; None when core could not be read (try again next cycle).
+
+    The chain is the snapshot's trigger verdicts (``data.parent_ids``) plus
+    every descendant of the snapshot id. That reaches respond's verdicts
+    because respond's first verdict lists the snapshot id in its
+    ``parent_ids`` and each later one chains to the one before, and because
+    core answers ``GET /verdicts/{id}/descendants`` for any ancestor id, an
+    assessment's included: its lineage table has no foreign key. It is
+    exactly this incident: a query by service and time also returns other
+    incidents on the service, and misses everything respond does, since
+    respond acts after the snapshot's window has closed [opensrm-91pa].
+
+    Outcome resolutions (the ``out-<id>`` child core creates when an outcome
+    is resolved) are not decisions and are left out of the chain; a decision
+    that has one is listed in ``resolved_ids``. A trigger's outcome child
+    descends from the trigger, not from the snapshot, so each trigger's
+    descendants are read too, for that child alone.
+
+    THIS IS THE ONE PLACE THAT KNOWS HOW AN INCIDENT'S VERDICTS ARE FOUND.
+    Core pins the behaviour it leans on in
+    ``test_descendants_of_an_assessment_id_returns_the_chain_that_names_it``
+    (opensrm-brms); the three-tier harness is to assert the result end to
+    end (opensrm-mtxr). When opensrm-7t3q's typed relations land, this
+    function, ``tests/learn/test_incident_chain.py`` and those two change
+    together.
+    """
+    snapshot_id = snapshot.get("id")
+    data = snapshot.get("data") or {}
+    trigger_ids = [p for p in (data.get("parent_ids") or []) if isinstance(p, str) and p]
+
+    decisions: dict[str, dict] = {}
+    outcome_children: list[dict] = []
+
+    def take(verdicts: Any, *, outcomes_only: bool = False) -> None:
+        for verdict in verdicts if isinstance(verdicts, list) else []:
+            if not isinstance(verdict, dict) or not verdict.get("id"):
+                continue
+            if verdict.get("type") == _OUTCOME_RESOLUTION:
+                outcome_children.append(verdict)
+            elif not outcomes_only:
+                decisions[verdict["id"]] = verdict
+
+    if snapshot_id:
+        descendants = await client.get_descendants(snapshot_id)
+        if not descendants.ok:
+            return None
+        take(descendants.data)
+
+    for trigger_id in trigger_ids:
+        trigger = await client.get_verdict(trigger_id)
+        if trigger.ok and isinstance(trigger.data, dict):
+            decisions[trigger_id] = trigger.data
+        elif trigger.status_code != 404:
+            return None
+        else:
+            # Pruned by retention, or never stored: the chain goes on
+            # without it.
+            continue
+        descendants = await client.get_descendants(trigger_id)
+        if not descendants.ok:
+            return None
+        take(descendants.data, outcomes_only=True)
+
+    resolved = {
+        parent
+        for child in outcome_children
+        for parent in (child.get("parent_ids") or [])
+        if parent in decisions
+    }
+    ordered = sorted(decisions.values(), key=lambda v: str(v.get("created_at") or ""))
+    return IncidentChain(decisions=tuple(ordered), resolved_ids=frozenset(resolved))
+
+
+def incident_service(snapshot: dict) -> str:
+    """The service respond files the snapshot's incident, and so its case,
+    under: the correlator's grouping anchor, else the first affected
+    service, else the placeholder. The same rule as respond's
+    ``open_from_snapshot``; ``tests/learn/test_incident_chain.py`` holds the
+    two together."""
+    data = snapshot.get("data") or {}
+    domain = data.get("domain") or {}
+    return (
+        domain.get("service")
+        or next(iter(data.get("affected_services") or []), None)
+        or "unknown"
+    )
+
+
+async def has_open_case(
+    client: CoreAPIClient, anchor_ids: frozenset[str], service: str
+) -> bool | None:
+    """Whether core holds an unresolved case for *service* whose underlying
+    verdict is one of *anchor_ids*; None when that cannot be told.
+
+    It cannot be told when a read fails, or when a page of the service's
+    open cases comes back full, since the anchoring case may be beyond it.
+    Reading one service's cases keeps that page from filling with the rest
+    of the fleet's.
+    """
+    for state in _OPEN_CASE_STATES:
+        result = await client.get_cases(state=state, service=service, limit=_CASE_PAGE_LIMIT)
+        if not result.ok:
+            return None
+        cases = result.data if isinstance(result.data, list) else []
+        for case in cases:
+            if isinstance(case, dict) and case.get("underlying_verdict") in anchor_ids:
+                return True
+        if len(cases) >= _CASE_PAGE_LIMIT:
+            return None
+    return False
+
+
+def retrospective_closure(
+    *,
+    now: datetime,
+    snapshot_created_at: datetime | None,
+    chain: IncidentChain,
+    open_case: bool | None,
+    quiet: timedelta,
+    max_age: timedelta,
+) -> str | None:
+    """How a pending snapshot's retrospective closes now, or None to wait.
+
+    ``max_age``: the snapshot is older than the maximum age. It is written
+    whatever the state of the incident, so it may describe an open one.
+
+    ``quiet``: no unresolved case in core anchors on the chain, and nothing
+    has joined the chain for the quiet period. The clock runs from core's
+    timestamps (the newest decision, or the snapshot itself when it is newer
+    or the chain is empty), never from when learn first saw the snapshot, so
+    a restart does not reset it. An open case, or one that cannot be ruled
+    out (``open_case`` None), waits.
+
+    A snapshot whose ``created_at`` cannot be read has no age to measure and
+    closes at once as ``max_age``, so that it is not held forever.
+    """
+    if snapshot_created_at is None or now - snapshot_created_at >= max_age:
+        return CLOSED_BY_MAX_AGE
+    if open_case is not False:
+        return None
+    newest = chain.newest_created_at
+    last_activity = snapshot_created_at if newest is None else max(newest, snapshot_created_at)
+    return CLOSED_BY_QUIET if now - last_activity >= quiet else None
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    """An ISO 8601 timestamp as an aware datetime, or None."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
 @dataclass
 class LearnRetrospectiveModule:
-    """Generate retrospective assessments when correlation snapshots close incidents.
+    """Write one retrospective per correlation snapshot, once its incident
+    has run its course.
+
+    A new snapshot is held as pending. Each cycle its verdict chain is read
+    again (``fetch_incident_chain``), and the retrospective is written when
+    ``retrospective_closure`` says so: the chain has gone quiet with no open
+    case anchored on it, or the snapshot has reached the maximum age. Written
+    at once, as it used to be, the retrospective preceded everything respond
+    did [opensrm-91pa].
+
+    The cursor and the pending snapshots are in ``get_state``, but nothing
+    here relies on getting them back: core keeps none of a worker's state
+    today (opensrm-youu). After a restart the module reads core's newest
+    page of snapshots again, and the quiet clock runs from core's
+    timestamps. No snapshot gets a second retrospective, because a
+    snapshot's retrospective always has the same id and core refuses a
+    duplicate. What a restart can lose is a pending snapshot that has
+    fallen off that page.
+
+    A snapshot whose chain cannot be read stays pending, and is given up
+    (``retrospective_abandoned``) once it is twice the maximum age old.
+
+    Known limit: if respond does not act within the quiet period (it is
+    down, or slow), there is no case yet to hold the incident open, and the
+    retrospective closes as ``quiet`` with the triggers alone.
 
     Retrospectives are narrative: "What happened during this incident?"
     They describe decisions and events, not whether decisions were correct.
@@ -265,7 +492,13 @@ class LearnRetrospectiveModule:
     """
 
     client: CoreAPIClient
+    quiet_minutes: float = 10
+    max_age_hours: float = 24
+    # The newest snapshot taken into ``_pending``; older ones are not looked
+    # at again.
     _cursor: str | None = None
+    # Snapshots with no retrospective yet, by id, as core returned them.
+    _pending: dict[str, dict] = field(default_factory=dict)
 
     @property
     def name(self) -> str:
@@ -274,27 +507,114 @@ class LearnRetrospectiveModule:
     async def restore_state(self, state: dict | None) -> None:
         if state:
             self._cursor = state.get("cursor")
+            pending = state.get("pending")
+            if isinstance(pending, dict):
+                self._pending = {
+                    sid: snap for sid, snap in pending.items()
+                    if isinstance(sid, str) and isinstance(snap, dict)
+                }
 
     async def process_cycle(self) -> None:
-        # Poll for new correlation_snapshot assessments
+        await self._take_new_snapshots()
+
+        now = datetime.now(UTC)
+        for snapshot_id, snapshot in list(self._pending.items()):
+            chain = await fetch_incident_chain(self.client, snapshot)
+            if chain is None:
+                # Never written from half a chain. But not held forever
+                # either: at twice the maximum age it is given up.
+                created = _parse_timestamp(snapshot.get("created_at"))
+                max_age = timedelta(hours=self.max_age_hours)
+                if created is None or now - created >= 2 * max_age:
+                    logger.error("retrospective_abandoned", snapshot_id=snapshot_id)
+                    del self._pending[snapshot_id]
+                else:
+                    logger.warning("retrospective_chain_unreadable", snapshot_id=snapshot_id)
+                continue
+            closed_by = retrospective_closure(
+                now=now,
+                snapshot_created_at=_parse_timestamp(snapshot.get("created_at")),
+                chain=chain,
+                # Respond anchors an incident's case on a trigger verdict
+                # (the first breach id), which is in the chain.
+                open_case=await has_open_case(
+                    self.client, chain.ids, incident_service(snapshot)
+                ),
+                quiet=timedelta(minutes=self.quiet_minutes),
+                max_age=timedelta(hours=self.max_age_hours),
+            )
+            if closed_by is None:
+                continue
+            # A failed submission leaves the snapshot pending for next cycle.
+            if await self._generate_retrospective(snapshot, chain, closed_by):
+                del self._pending[snapshot_id]
+
+    async def _take_new_snapshots(self) -> None:
+        """Move snapshots newer than the cursor, and not yet written up, into
+        ``_pending``.
+
+        A process that starts with no state, which is every process until
+        core keeps worker state (opensrm-youu), takes up the snapshots core's
+        newest page still holds: the pending ones are pending again. The
+        finished ones are skipped when core's newest page of retrospectives
+        names them. That page can miss one, since retrospectives are not
+        written in snapshot order, and it does not need to be complete: a
+        snapshot taken up needlessly is refused by core when it is
+        submitted, because its retrospective has the same id
+        (``retrospective_id``). The read only saves the work in between.
+        """
         result = await self.client.get_assessments(kind="correlation_snapshot")
         if not result.ok or not result.data:
             return
-
+        candidates: list[dict] = []
         for snapshot in result.data:
             created = snapshot.get("created_at", "")
             if self._cursor and created <= self._cursor:
                 continue
+            snapshot_id = snapshot.get("id")
+            if not snapshot_id:
+                logger.warning("retrospective_snapshot_without_id", created_at=created)
+                continue
+            if snapshot_id not in self._pending:
+                candidates.append(snapshot)
+        if candidates:
+            # A failed read skips nothing: core still refuses a second
+            # retrospective for a snapshot that has one.
+            written = await self._written_snapshot_ids() or set()
+            for snapshot in candidates:
+                if snapshot["id"] not in written:
+                    self._pending[snapshot["id"]] = snapshot
+        newest = max(
+            (s.get("created_at", "") for s in result.data), default=""
+        )
+        if newest and (not self._cursor or newest > self._cursor):
+            self._cursor = newest
 
-            success = await self._generate_retrospective(snapshot)
-            # Only advance cursor on successful submission
-            if success and (not self._cursor or created > self._cursor):
-                self._cursor = created
+    async def _written_snapshot_ids(self) -> set[str] | None:
+        """The snapshots core's newest page of retrospectives covers; None
+        when it cannot be read."""
+        result = await self.client.get_assessments(kind="retrospective")
+        if not result.ok:
+            return None
+        retrospectives = result.data if isinstance(result.data, list) else []
+        return {
+            snapshot_id
+            for retro in retrospectives
+            if isinstance(retro, dict)
+            and (snapshot_id := (retro.get("data") or {}).get("correlation_snapshot_id"))
+        }
 
-    async def _generate_retrospective(self, snapshot: dict) -> bool:
+    async def _generate_retrospective(
+        self, snapshot: dict, incident: IncidentChain, closed_by: str
+    ) -> bool:
         """Generate and submit a retrospective assessment. Returns True on success."""
         snapshot_data = snapshot.get("data", {})
         domain = snapshot_data.get("domain", {})
+        # The service the retrospective is filed under: the snapshot's own,
+        # as before. ``incident_service`` is a different question (which
+        # service respond filed the case under) and has respond's rule; the
+        # two agree whenever the snapshot names its domain's service, which
+        # correlate's always do.
         service = snapshot.get("service", domain.get("service", "unknown"))
 
         # opensrm-dpws: resolve trigger_service via correlation-first /
@@ -307,31 +627,16 @@ class LearnRetrospectiveModule:
             snapshot.get("service"),
         )
 
-        # Build verdict chain by querying verdicts for the affected service
-        # during the snapshot window. Cannot use get_ancestors on an assessment
-        # ID — that endpoint operates on verdict IDs only.
-        chain = []
-        window = snapshot_data.get("window", {})
-        opened_at = window.get("opened_at")
-        closed_at = window.get("closed_at")
-        if opened_at and closed_at:
-            chain_result = await self.client.get_verdicts(
-                service=service,
-                created_after=opened_at,
-                created_before=closed_at,
-                limit=100,
-            )
-            if chain_result.ok and chain_result.data:
-                chain = chain_result.data
+        chain = list(incident.decisions)
 
         # Build timeline
         timeline = _build_chain_timeline(chain)
 
-        # Compute metrics
-        resolved_count = sum(
-            1 for v in chain
-            if _outcome_status(v) != _PENDING
-        )
+        # A decision counts as resolved when core holds an outcome child for
+        # it. Its own ``outcome`` field is not read here: core never updates
+        # it. (A timeline entry's ``outcome`` is still that field as the
+        # producer wrote it, so it can lag the coverage figures.)
+        resolved_count = len(incident.resolved_ids)
         pending_count = len(chain) - resolved_count
 
         # Extract root cause from correlation data
@@ -391,6 +696,9 @@ class LearnRetrospectiveModule:
 
         data: dict[str, Any] = {
             "correlation_snapshot_id": snapshot.get("id"),
+            # "quiet" or "max_age". A max_age retrospective may describe an
+            # incident that is still open.
+            "closed_by": closed_by,
             "duration_minutes": duration / 60 if duration else 0,
             "decisions_affected": sum(1 for v in chain if v.get("type") == "quality_breach"),
             "verdict_count": len(chain),
@@ -410,7 +718,10 @@ class LearnRetrospectiveModule:
             data["declared_dependencies_by_service"] = declared_dependencies_by_service
 
         assessment = {
-            "id": f"retro-{service}-{uuid.uuid4().hex[:8]}",
+            # One id per snapshot, so core refuses a second retrospective
+            # for it (409): "exactly one" holds whatever this process
+            # remembers or can still read back.
+            "id": retrospective_id(snapshot),
             "created_at": now.isoformat(),
             "kind": "retrospective",
             "service": service,
@@ -418,16 +729,25 @@ class LearnRetrospectiveModule:
         }
 
         result = await self.client.submit_assessment(wrap_assessment(assessment, component="learn"))
+        if result.status_code == _HTTP_CONFLICT:
+            # Core already holds this snapshot's retrospective, written
+            # before a restart. Done, and nothing was written twice.
+            logger.info("retrospective_already_written", snapshot_id=snapshot.get("id"))
+            return True
         if not result.ok:
             logger.warning("retrospective_submit_failed", service=service, error=result.error)
             return False
-        logger.info("retrospective_emitted", service=service, verdict_count=len(chain))
+        logger.info(
+            "retrospective_emitted", service=service, verdict_count=len(chain), closed_by=closed_by
+        )
         return True
 
     async def get_state(self) -> dict:
         state: dict[str, Any] = {}
         if self._cursor:
             state["cursor"] = self._cursor
+        if self._pending:
+            state["pending"] = dict(self._pending)
         return state
 
 

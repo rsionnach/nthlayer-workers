@@ -345,38 +345,40 @@ class TestDescendantAndChainReads:
         )
         assert timeline[0]["outcome"] is None
 
-    async def test_retrospective_counts_statusless_verdicts_as_pending(self):
+    async def test_retrospective_coverage_reads_outcome_children_not_the_outcome_key(self):
+        """Whatever a decision's own ``outcome`` says or lacks, it counts as
+        resolved only when core holds an outcome child for it
+        [opensrm-91pa]: core never updates the key."""
+        from tests.learn.core_fake import FakeCore
+
+        core = FakeCore()
         # Shape of the correlation_snapshot assessment correlate emits
-        # (correlate/worker.py, ``data.window.opened_at`` / ``closed_at``).
-        snapshot = {
+        # (correlate/worker.py): the trigger ids are ``data.parent_ids``.
+        chain = [
+            {"id": f"v-{n}", "created_at": "2026-01-01T00:10:00+00:00",
+             "type": "quality_breach", "service": "svc", "parent_ids": [], **extra}
+            for n, extra in enumerate(_NO_STATUS_SHAPES)
+        ] + [{"id": "v-done", "created_at": "2026-01-01T00:20:00+00:00", "type": "approval",
+              "service": "svc", "parent_ids": [], "outcome": {"status": "confirmed"}}]
+        for verdict in chain:
+            core.put_verdict(verdict)
+        core.put_verdict({"id": "out-v-0", "type": "outcome_resolution",
+                          "created_at": "2026-01-01T02:00:00+00:00", "parent_ids": ["v-0"]})
+        core.assessments.append({
             "id": "csn-1", "kind": "correlation_snapshot", "service": "svc",
             "created_at": "2026-01-01T01:00:00+00:00",
             "data": {"domain": {"service": "svc"},
                      "window": {"duration_seconds": 3600,
                                 "opened_at": "2026-01-01T00:00:00+00:00",
                                 "closed_at": "2026-01-01T01:00:00+00:00"},
-                     "affected_services": ["svc"], "correlation_groups": []},
+                     "affected_services": ["svc"], "correlation_groups": [],
+                     "parent_ids": [v["id"] for v in chain]},
+        })
+
+        await LearnRetrospectiveModule(client=core).process_cycle()
+
+        (retro,) = core.retrospectives
+        # v-0 has a child and no outcome key; v-done says confirmed and has none.
+        assert retro["data"]["outcome_coverage"] == {
+            "resolved": 1, "pending": len(chain) - 1, "total": len(chain),
         }
-        chain = [
-            {"id": f"v-{n}", "created_at": "2026-01-01T00:10:00+00:00",
-             "type": "quality_breach", "service": "svc", **extra}
-            for n, extra in enumerate(_NO_STATUS_SHAPES)
-        ] + [{"id": "v-done", "created_at": "2026-01-01T00:20:00+00:00", "type": "approval",
-              "service": "svc", "outcome": {"status": "confirmed"}}]
-        client = AsyncMock()
-        client.get_assessments = AsyncMock(return_value=_ok([snapshot]))
-        client.get_verdicts = AsyncMock(return_value=_ok(chain))
-        client.get_manifests = AsyncMock(return_value=_ok([]))
-        submitted: list[dict] = []
-
-        async def _capture(envelope):
-            submitted.append(envelope["data"])
-            return _ok(status_code=201)
-
-        client.submit_assessment = AsyncMock(side_effect=_capture)
-
-        await LearnRetrospectiveModule(client=client).process_cycle()
-
-        coverage = [a for a in submitted if a["kind"] == "retrospective"][0]["data"]["outcome_coverage"]
-        assert coverage["resolved"] == 1
-        assert coverage["pending"] == len(_NO_STATUS)

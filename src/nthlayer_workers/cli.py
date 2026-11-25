@@ -43,6 +43,13 @@ def main():
                               help="Learn outcome resolution cycle interval in seconds (default: 60)")
     serve_parser.add_argument("--retrospective-interval", type=int, default=30,
                               help="Learn retrospective cycle interval in seconds (default: 30)")
+    serve_parser.add_argument("--retrospective-quiet-minutes", type=float, default=10,
+                              help="Write an incident's retrospective once no verdict has joined "
+                                   "its chain for this many minutes and no open case anchors on "
+                                   "it (default: 10)")
+    serve_parser.add_argument("--retrospective-max-age-hours", type=float, default=24,
+                              help="Write the retrospective at this age whatever the state of "
+                                   "the incident (default: 24)")
     serve_parser.add_argument("--expiry-threshold-days", type=int, default=7,
                               help="Verdict expiry threshold in days (default: 7)")
     serve_parser.add_argument("--min-resolution-age-hours", type=int, default=1,
@@ -114,7 +121,11 @@ def main():
             expiry_threshold_days=args.expiry_threshold_days,
             minimum_resolution_age_hours=args.min_resolution_age_hours,
         )
-        learn_retro = LearnRetrospectiveModule(client=client)
+        learn_retro = LearnRetrospectiveModule(
+            client=client,
+            quiet_minutes=args.retrospective_quiet_minutes,
+            max_age_hours=args.retrospective_max_age_hours,
+        )
 
         runner.register(learn_outcome, interval_seconds=args.outcome_interval)
         runner.register(learn_retro, interval_seconds=args.retrospective_interval)

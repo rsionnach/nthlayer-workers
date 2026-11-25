@@ -38,6 +38,7 @@ nthlayer-workers serve \
   [--measure-interval 60] [--respond-interval 30] \
   [--outcome-interval 60] [--retrospective-interval 30] \
   [--expiry-threshold-days 7] [--min-resolution-age-hours 1] \
+  [--retrospective-quiet-minutes 10] [--retrospective-max-age-hours 24] \
   [--tempo-endpoint http://tempo:3200]
 
 # CLI-only deploy gate (no HTTP API in v1.5)
