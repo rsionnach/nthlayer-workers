@@ -52,12 +52,13 @@ class FakeCore:
                 mine[ancestor] = min(mine.get(ancestor, hops + 1), hops + 1)
         return verdict
 
-    def put_case(self, case_id: str, underlying_verdict: str, state: str = "pending") -> None:
+    def put_case(self, case_id: str, underlying_verdict: str, state: str = "pending",
+                 service: str = "fraud-detect") -> None:
         """A case as respond creates it (``_create_case_for_incident``) and
         core stores it: ``state`` is core's, pending until leased or resolved."""
         self.cases[case_id] = {
             "id": case_id, "kind": "incident", "underlying_verdict": underlying_verdict,
-            "state": state,
+            "service": service, "state": state,
         }
 
     # -- the client surface learn uses ------------------------------------
@@ -65,7 +66,10 @@ class FakeCore:
     async def get_assessments(self, kind=None, **_kwargs):
         if "get_assessments" in self.fail:
             return failed()
-        return ok([a for a in self.assessments if kind is None or a.get("kind") == kind])
+        # Newest first, one page: core's ORDER BY created_at DESC LIMIT.
+        found = [a for a in self.assessments if kind is None or a.get("kind") == kind]
+        found.sort(key=lambda a: a.get("created_at", ""), reverse=True)
+        return ok(found[: _kwargs.get("limit", 100)])
 
     async def get_verdict(self, verdict_id):
         if "get_verdict" in self.fail:
@@ -87,7 +91,11 @@ class FakeCore:
     async def get_cases(self, *, state=None, priority=None, service=None, limit=100):
         if "get_cases" in self.fail:
             return failed()
-        cases = [c for c in self.cases.values() if state is None or c["state"] == state]
+        cases = [
+            c for c in self.cases.values()
+            if (state is None or c["state"] == state)
+            and (service is None or c["service"] == service)
+        ]
         return ok(cases[:limit])
 
     async def get_manifests(self):
@@ -96,7 +104,10 @@ class FakeCore:
     async def submit_assessment(self, envelope):
         if "submit_assessment" in self.fail:
             return failed()
-        self.submitted.append(envelope.get("data", envelope))
+        assessment = envelope.get("data", envelope)
+        self.submitted.append(assessment)
+        # Core stores what is submitted: a later read finds it.
+        self.assessments.append(assessment)
         return ok(status_code=201)
 
     @property

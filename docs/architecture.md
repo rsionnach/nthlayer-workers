@@ -986,8 +986,14 @@ opensrm-jmy.6.
   `workers.learn.expiry_threshold_days` (default 7).
 - `LearnRetrospectiveModule` (30s): one retrospective per
   `correlation_snapshot`, written once the incident has run its course
-  (opensrm-91pa). A snapshot newer than the cursor is held in
-  `_pending` (persisted in the module's state, as core returned it).
+  (opensrm-91pa). A snapshot newer than the cursor, and with no
+  retrospective in core naming it yet, is held in `_pending`. The
+  cursor and the pending set are in `get_state`, but nothing relies on
+  getting them back, because core keeps none of a worker's state today
+  (opensrm-youu): a process that starts with no state reads core's
+  newest page of snapshots again and skips those a retrospective
+  already names. A restart can lose only a pending snapshot that has
+  fallen off that page.
   Each cycle, for each pending snapshot:
   - `fetch_incident_chain(client, snapshot)` reads the chain BY
     LINEAGE: the snapshot's trigger verdicts (`data.parent_ids`) plus
@@ -999,10 +1005,11 @@ opensrm-jmy.6.
     decisions: they stay out of the chain and mark their decision in
     `resolved_ids`. A failed read gives no chain (retry next cycle),
     never half of one.
-  - `has_open_case(client, ids)`: whether core holds an unresolved
-    case whose `underlying_verdict` is in the chain (or is the
-    snapshot id). A failed read, or a full page of open cases, is
-    "cannot tell".
+  - `has_open_case(client, ids, service)`: whether core holds an
+    unresolved case, for the service respond files the incident under
+    (`incident_service`), whose `underlying_verdict` is in the chain
+    (or is the snapshot id). A failed read, or a full page of that
+    service's open cases, is "cannot tell".
   - `retrospective_closure(...)` decides: `max_age` once the snapshot
     is `--retrospective-max-age-hours` old (default 24), whatever the
     incident's state; `quiet` once no open case anchors on the chain
@@ -1010,7 +1017,13 @@ opensrm-jmy.6.
     (default 10). The quiet clock runs from core's timestamps (the
     newest decision, or the snapshot when that is newer), so a restart
     does not reset it.
-  A failed submission leaves the snapshot pending. Retrospective data:
+  A failed submission leaves the snapshot pending. So does a chain
+  that cannot be read: a retrospective is never written from half a
+  chain, and one that is still unreadable at twice the maximum age is
+  given up (`retrospective_abandoned`). Known limit: if respond does
+  not act within the quiet period, no case exists yet to hold the
+  incident open, and it closes as `quiet` with its triggers alone.
+  Retrospective data:
   `{correlation_snapshot_id, closed_by, duration_minutes,
   decisions_affected, verdict_count, root_cause, blast_radius,
   timeline[:20], recommendations, outcome_coverage{resolved, pending,

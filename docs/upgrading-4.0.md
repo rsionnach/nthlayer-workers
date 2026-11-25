@@ -239,6 +239,17 @@ Now:
   outcome for it. It read the decision's own `outcome` field before, which
   core does not update when an outcome is resolved.
 
+Two limits to know about:
+
+- If respond does not act on a snapshot within the quiet period (it is
+  stopped, or far behind), there is no case yet to hold the incident open,
+  and its retrospective is written as `quiet` with the trigger verdicts
+  alone.
+- After a workers restart, learn reads core's newest 100 snapshots again
+  and skips those that already have a retrospective. A snapshot still
+  waiting for its retrospective that is older than those 100 is not picked
+  up again.
+
 What to expect: a retrospective now arrives at least the quiet period after
 the last verdict, and for an incident with a case, not before the case is
 resolved or 24 hours pass. Anything that waits for a retrospective right

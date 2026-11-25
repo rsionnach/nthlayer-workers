@@ -20,11 +20,12 @@ from nthlayer_workers.learn.worker import (
     LearnRetrospectiveModule,
     fetch_incident_chain,
     has_open_case,
+    incident_service,
     retrospective_closure,
 )
 from nthlayer_workers.respond.config import RespondConfig
 from nthlayer_workers.respond.worker_helpers import open_from_snapshot
-from tests.learn.core_fake import FakeCore
+from tests.learn.core_fake import FakeCore, failed
 
 NOW = datetime.now(UTC)
 
@@ -283,18 +284,18 @@ async def test_an_unresolved_case_on_the_chain_is_an_open_case(state, underlying
     core = FakeCore()
     core.put_case("case-INC-1", underlying, state)
 
-    assert await has_open_case(core, _ANCHORS) is expected
+    assert await has_open_case(core, _ANCHORS, "fraud-detect") is expected
 
 
 async def test_no_cases_is_no_open_case():
-    assert await has_open_case(FakeCore(), _ANCHORS) is False
+    assert await has_open_case(FakeCore(), _ANCHORS, "fraud-detect") is False
 
 
 async def test_a_failed_case_read_cannot_rule_one_out():
     core = FakeCore()
     core.fail.add("get_cases")
 
-    assert await has_open_case(core, _ANCHORS) is None
+    assert await has_open_case(core, _ANCHORS, "fraud-detect") is None
 
 
 async def test_a_full_page_of_open_cases_cannot_rule_one_out():
@@ -302,7 +303,7 @@ async def test_a_full_page_of_open_cases_cannot_rule_one_out():
     for n in range(100):
         core.put_case(f"case-{n}", f"vrd-other-{n}", "pending")
 
-    assert await has_open_case(core, _ANCHORS) is None
+    assert await has_open_case(core, _ANCHORS, "fraud-detect") is None
 
 
 async def test_a_full_page_that_holds_the_anchoring_case_is_an_open_case():
@@ -311,7 +312,36 @@ async def test_a_full_page_that_holds_the_anchoring_case_is_an_open_case():
         core.put_case(f"case-{n}", f"vrd-other-{n}", "pending")
     core.put_case("case-mine", "vrd-breach-1", "pending")
 
-    assert await has_open_case(core, _ANCHORS) is True
+    assert await has_open_case(core, _ANCHORS, "fraud-detect") is True
+
+
+async def test_other_services_open_cases_do_not_fill_the_page():
+    """A fleet with a hundred open cases elsewhere: this service's page is
+    its own, so the answer is still known."""
+    core = FakeCore()
+    for n in range(150):
+        core.put_case(f"case-{n}", f"vrd-other-{n}", "pending", service=f"svc-{n}")
+
+    assert await has_open_case(core, _ANCHORS, "fraud-detect") is False
+
+    core.put_case("case-mine", "vrd-breach-1", "pending", service="fraud-detect")
+    assert await has_open_case(core, _ANCHORS, "fraud-detect") is True
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"domain": {"service": "fraud-detect"}, "affected_services": ["payment-api"]},
+        {"domain": {}, "affected_services": ["payment-api", "fraud-detect"]},
+        {"affected_services": ["payment-api"]},
+        {"domain": {"service": ""}, "affected_services": []},
+        {},
+    ],
+)
+def test_the_incidents_service_is_the_one_respond_files_its_case_under(data):
+    snapshot = {"id": "csn-1", "service": "top-level-is-not-used", "data": data}
+
+    assert incident_service(snapshot) == open_from_snapshot(snapshot, RespondConfig()).service
 
 
 # ------------------------------------------------------------------ #
@@ -475,7 +505,18 @@ async def test_the_maximum_age_writes_up_an_incident_that_is_still_open():
     assert retro["data"]["verdict_count"] == 5
 
 
-async def test_the_quiet_period_and_maximum_age_are_the_modules_own():
+async def test_the_quiet_period_is_the_modules_own():
+    core = FakeCore()
+    _incident(core, minutes_ago=4)
+
+    await LearnRetrospectiveModule(client=core).process_cycle()
+    assert core.retrospectives == []  # 10 minutes by default
+
+    await LearnRetrospectiveModule(client=core, quiet_minutes=1).process_cycle()
+    assert [r["data"]["closed_by"] for r in core.retrospectives] == ["quiet"]
+
+
+async def test_the_maximum_age_is_the_modules_own():
     core = FakeCore()
     _incident(core, minutes_ago=4)
     core.put_case("case-INC-1", "vrd-breach-1", "pending")
@@ -486,9 +527,65 @@ async def test_the_quiet_period_and_maximum_age_are_the_modules_own():
     await LearnRetrospectiveModule(client=core, max_age_hours=0.05).process_cycle()
     assert [r["data"]["closed_by"] for r in core.retrospectives] == ["max_age"]
 
-    core.cases.clear()
-    await LearnRetrospectiveModule(client=core, quiet_minutes=1).process_cycle()
-    assert [r["data"]["closed_by"] for r in core.retrospectives] == ["max_age", "quiet"]
+
+# What core gives a worker back today: none of the keys it saved
+# (Store.put_component_state keeps last_cursor, hysteresis_state and
+# dedup_cache only; opensrm-youu).
+_STATE_AS_CORE_RETURNS_IT = {
+    "component": "learn.retrospective", "last_cursor": None,
+    "hysteresis_state": None, "dedup_cache": None,
+}
+
+
+@pytest.mark.parametrize("restored", [None, _STATE_AS_CORE_RETURNS_IT])
+async def test_a_restart_with_no_state_takes_up_pending_snapshots_and_repeats_none(restored):
+    core = FakeCore()
+    _incident(core, snapshot_id="csn-done", minutes_ago=40)
+    _incident(core, snapshot_id="csn-moving", triggers=("vrd-breach-2",), minutes_ago=4)
+    first = LearnRetrospectiveModule(client=core)
+    await first.process_cycle()
+    assert [r["data"]["correlation_snapshot_id"] for r in core.retrospectives] == ["csn-done"]
+
+    restarted = LearnRetrospectiveModule(client=core)
+    await restarted.restore_state(restored)
+    await restarted.process_cycle()
+    await restarted.process_cycle()
+
+    # csn-done is not written a second time; csn-moving is pending again.
+    assert [r["data"]["correlation_snapshot_id"] for r in core.retrospectives] == ["csn-done"]
+    assert list((await restarted.get_state())["pending"]) == ["csn-moving"]
+
+    # ... and closes in the restarted process once it is quiet.
+    finisher = LearnRetrospectiveModule(client=core, quiet_minutes=1)
+    await finisher.restore_state(restored)
+    await finisher.process_cycle()
+    assert [r["data"]["correlation_snapshot_id"] for r in core.retrospectives] == [
+        "csn-done", "csn-moving",
+    ]
+
+
+async def test_snapshots_wait_when_core_cannot_say_which_are_written_up():
+    """Taking them all would write a second retrospective for the finished
+    ones, so none is taken and the cursor stays put."""
+    core = FakeCore()
+    _incident(core, minutes_ago=30)
+    module = LearnRetrospectiveModule(client=core)
+    real = core.get_assessments
+
+    async def no_retrospectives(kind=None, **kwargs):
+        if kind == "retrospective":
+            return failed()
+        return await real(kind=kind, **kwargs)
+
+    core.get_assessments = no_retrospectives
+    await module.process_cycle()
+
+    assert core.retrospectives == []
+    assert await module.get_state() == {}
+
+    core.get_assessments = real
+    await module.process_cycle()
+    assert len(core.retrospectives) == 1
 
 
 async def test_a_failed_submission_keeps_the_snapshot_pending():
@@ -523,6 +620,22 @@ async def test_an_unreadable_chain_keeps_the_snapshot_pending_and_says_so():
     assert (await module.get_state())["pending"] == {"csn-fraud-1": snapshot}
     (event,) = [e for e in logs if e["event"] == "retrospective_chain_unreadable"]
     assert (event["snapshot_id"], event["log_level"]) == ("csn-fraud-1", "warning")
+
+
+async def test_a_chain_that_stays_unreadable_is_given_up_at_twice_the_maximum_age():
+    core = FakeCore()
+    _incident(core, minutes_ago=2 * 24 * 60 + 1)
+    module = LearnRetrospectiveModule(client=core)
+    await module._take_new_snapshots()
+    core.fail.add("get_descendants")
+
+    with structlog.testing.capture_logs() as logs:
+        await module.process_cycle()
+
+    assert core.retrospectives == []
+    assert "pending" not in await module.get_state()
+    (event,) = [e for e in logs if e["event"] == "retrospective_abandoned"]
+    assert (event["snapshot_id"], event["log_level"]) == ("csn-fraud-1", "error")
 
 
 async def test_pending_snapshots_are_still_worked_when_the_snapshot_read_fails():
