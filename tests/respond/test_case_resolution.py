@@ -38,8 +38,10 @@ class _Cases:
 
     def __init__(self) -> None:
         self.cases: dict[str, dict] = {}
-        self.unreachable = False
-        self.unreachable_status = 0
+        # Set to a status to have core refuse every resolve with it. 0 is
+        # the client's answer when it could not reach core at all
+        # (CoreAPIClient._request, after its retries).
+        self.refuse_with: int | None = None
         self.resolve_calls: list[tuple[str, str]] = []
 
     async def create_case(self, case: dict) -> APIResult:
@@ -48,10 +50,8 @@ class _Cases:
 
     async def resolve_case(self, case_id: str, resolution_id: str) -> APIResult:
         self.resolve_calls.append((case_id, resolution_id))
-        if self.unreachable:
-            # The client's answer when it could not reach core at all:
-            # status 0 (CoreAPIClient._request, after its retries).
-            return _refused(self.unreachable_status, "connection_failed")
+        if self.refuse_with is not None:
+            return _refused(self.refuse_with, "refused")
         if not resolution_id:
             return _refused(422, "missing_fields")
         case = self.cases.get(case_id)
@@ -205,12 +205,11 @@ async def test_an_incident_with_no_case_is_settled_without_one():
 @pytest.mark.parametrize("status", [0, 500, 503, 401, 422])
 async def test_an_answer_that_settles_nothing_is_tried_again_next_cycle(status):
     cases = _Cases()
-    cases.unreachable_status = status
     module = _module(cases)
     context = _incident(IncidentState.RESOLVED)
     module._incidents[context.id] = context
     await _open_case(module, context)
-    cases.unreachable = True
+    cases.refuse_with = status
 
     with structlog.testing.capture_logs() as logs:
         await module.process_cycle()
@@ -222,7 +221,7 @@ async def test_an_answer_that_settles_nothing_is_tried_again_next_cycle(status):
         "INC-FRAUD-1", status, "warning",
     )
 
-    cases.unreachable = False
+    cases.refuse_with = None
     await module.process_cycle()
 
     assert cases.cases["case-INC-FRAUD-1"]["state"] == "resolved"
@@ -237,7 +236,7 @@ async def test_a_core_that_is_down_costs_one_call_a_cycle_not_one_per_incident()
                             verdict_chain=(f"vrd-{n}",))
         module._incidents[context.id] = context
         await _open_case(module, context)
-    cases.unreachable = True
+    cases.refuse_with = 0
 
     with structlog.testing.capture_logs() as logs:
         await module.process_cycle()
@@ -245,7 +244,7 @@ async def test_a_core_that_is_down_costs_one_call_a_cycle_not_one_per_incident()
     assert len(cases.resolve_calls) == 1
     assert len([e for e in logs if e["event"] == "respond_case_resolve_failed"]) == 1
 
-    cases.unreachable = False
+    cases.refuse_with = None
     cases.resolve_calls.clear()
     await module.process_cycle()
 

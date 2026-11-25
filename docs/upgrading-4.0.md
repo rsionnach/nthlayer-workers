@@ -228,6 +228,8 @@ naming the incident's last verdict as the resolution.
 - A case an operator holds a lease on is resolved all the same when its
   incident resolves, and core drops the lease.
 
+## Breaking changes
+
 
 ### `gen_ai.decision.evaluated` → per-dimension grader events + a summary
 

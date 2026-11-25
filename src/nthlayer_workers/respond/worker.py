@@ -64,14 +64,14 @@ class Cursors:
 CASE_RESOLUTION = "case_resolution"
 CASE_RESOLVED = "resolved"
 CASE_ALREADY_RESOLVED = "already_resolved"
-CASE_ABSENT = "no_case"
+CASE_NO_CASE = "no_case"
 CASE_NO_VERDICT = "no_verdict"
 # Core's answers to PUT /cases/{id}/resolve that settle the matter. Anything
 # else (a 5xx, or no answer at all) is tried again.
 _CASE_RESOLUTION_BY_STATUS = {
     200: CASE_RESOLVED,
     409: CASE_ALREADY_RESOLVED,
-    404: CASE_ABSENT,
+    404: CASE_NO_CASE,
 }
 
 
