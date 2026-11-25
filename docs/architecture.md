@@ -991,9 +991,13 @@ opensrm-jmy.6.
   cursor and the pending set are in `get_state`, but nothing relies on
   getting them back, because core keeps none of a worker's state today
   (opensrm-youu): a process that starts with no state reads core's
-  newest page of snapshots again and skips those a retrospective
-  already names. A restart can lose only a pending snapshot that has
-  fallen off that page.
+  newest page of snapshots again. No snapshot gets a second
+  retrospective: its id is always `retro-<snapshot id>`
+  (`retrospective_id`), core refuses a duplicate id with 409, and the
+  module treats that as done. Reading core's newest page of
+  retrospectives first only saves the work of re-reading a finished
+  snapshot's chain. A restart can lose only a pending snapshot that
+  has fallen off the snapshot page.
   Each cycle, for each pending snapshot:
   - `fetch_incident_chain(client, snapshot)` reads the chain BY
     LINEAGE: the snapshot's trigger verdicts (`data.parent_ids`) plus

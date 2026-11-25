@@ -564,12 +564,23 @@ async def test_a_restart_with_no_state_takes_up_pending_snapshots_and_repeats_no
     ]
 
 
-async def test_snapshots_wait_when_core_cannot_say_which_are_written_up():
-    """Taking them all would write a second retrospective for the finished
-    ones, so none is taken and the cursor stays put."""
+async def test_a_snapshots_retrospective_always_has_the_same_id():
     core = FakeCore()
     _incident(core, minutes_ago=30)
-    module = LearnRetrospectiveModule(client=core)
+
+    await LearnRetrospectiveModule(client=core).process_cycle()
+
+    assert [r["id"] for r in core.retrospectives] == ["retro-csn-fraud-1"]
+
+
+async def test_core_refuses_a_second_retrospective_when_the_first_cannot_be_read_back():
+    """A restart with no state, and the read of existing retrospectives
+    fails: the finished snapshot is taken up again, and core's refusal of
+    the duplicate id is what keeps it to one."""
+    core = FakeCore()
+    _incident(core, minutes_ago=30)
+    await LearnRetrospectiveModule(client=core).process_cycle()
+    assert len(core.retrospectives) == 1
     real = core.get_assessments
 
     async def no_retrospectives(kind=None, **kwargs):
@@ -578,14 +589,46 @@ async def test_snapshots_wait_when_core_cannot_say_which_are_written_up():
         return await real(kind=kind, **kwargs)
 
     core.get_assessments = no_retrospectives
-    await module.process_cycle()
+    restarted = LearnRetrospectiveModule(client=core)
 
-    assert core.retrospectives == []
-    assert await module.get_state() == {}
+    with structlog.testing.capture_logs() as logs:
+        await restarted.process_cycle()
 
-    core.get_assessments = real
-    await module.process_cycle()
     assert len(core.retrospectives) == 1
+    assert [r["id"] for r in core.refused] == ["retro-csn-fraud-1"]
+    assert "pending" not in await restarted.get_state()
+    (event,) = [e for e in logs if e["event"] == "retrospective_already_written"]
+    assert event["snapshot_id"] == "csn-fraud-1"
+
+
+async def test_a_retrospective_that_has_fallen_off_cores_newest_page_is_not_repeated():
+    """Retrospectives are written as incidents close, not in snapshot order,
+    so a finished snapshot still on the snapshot page can have its
+    retrospective pushed off the retrospective page by a hundred later
+    ones. A restart must not write it again."""
+    core = FakeCore()
+    _incident(core, snapshot_id="csn-early", triggers=("vrd-breach-early",), minutes_ago=300)
+    await LearnRetrospectiveModule(client=core).process_cycle()
+    assert [r["id"] for r in core.retrospectives] == ["retro-csn-early"]
+    # A hundred retrospectives written after it, for snapshots core's
+    # snapshot page no longer holds.
+    for n in range(100):
+        core.assessments.append({
+            "id": f"retro-csn-old-{n}", "kind": "retrospective", "service": "fraud-detect",
+            # Written after csn-early's, which was written at the time this
+            # test ran: well clear of it, whenever in the suite that was.
+            "created_at": _at(-(10 + n)),
+            "data": {"correlation_snapshot_id": f"csn-old-{n}"},
+        })
+    page = (await core.get_assessments(kind="retrospective")).data
+    assert "retro-csn-early" not in {r["id"] for r in page}
+
+    restarted = LearnRetrospectiveModule(client=core)
+    await restarted.process_cycle()
+
+    assert [r["id"] for r in core.retrospectives] == ["retro-csn-early"]
+    assert [r["id"] for r in core.refused] == ["retro-csn-early"]
+    assert "pending" not in await restarted.get_state()
 
 
 async def test_a_failed_submission_keeps_the_snapshot_pending():

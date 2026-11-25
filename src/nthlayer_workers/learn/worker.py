@@ -261,6 +261,15 @@ _CASE_RESOLVED = "resolved"
 _OPEN_CASE_STATES = ("pending", "leased")
 _CASE_PAGE_LIMIT = 100
 
+# Core's answer to an assessment whose id it already holds.
+_HTTP_CONFLICT = 409
+
+
+def retrospective_id(snapshot: dict) -> str:
+    """The id of the one retrospective a snapshot gets."""
+    return f"retro-{snapshot.get('id')}"
+
+
 # How a retrospective came to be written.
 CLOSED_BY_QUIET = "quiet"
 CLOSED_BY_MAX_AGE = "max_age"
@@ -466,9 +475,11 @@ class LearnRetrospectiveModule:
     The cursor and the pending snapshots are in ``get_state``, but nothing
     here relies on getting them back: core keeps none of a worker's state
     today (opensrm-youu). After a restart the module reads core's newest
-    page of snapshots again and skips the ones a retrospective already
-    names, and the quiet clock runs from core's timestamps. What a restart
-    can lose is a pending snapshot that has fallen off that page.
+    page of snapshots again, and the quiet clock runs from core's
+    timestamps. No snapshot gets a second retrospective, because a
+    snapshot's retrospective always has the same id and core refuses a
+    duplicate. What a restart can lose is a pending snapshot that has
+    fallen off that page.
 
     Known limit: if respond does not act within the quiet period (it is
     down, or slow), there is no case yet to hold the incident open, and the
@@ -540,12 +551,15 @@ class LearnRetrospectiveModule:
         """Move snapshots newer than the cursor, and not yet written up, into
         ``_pending``.
 
-        "Not yet written up" is read from core (a retrospective naming the
-        snapshot), not from this module's memory. So a process that starts
-        with no state, which is every process until core keeps worker state
-        (opensrm-youu), takes up the snapshots core's newest page still
-        holds, exactly once each: the pending ones are pending again and the
-        finished ones are not written a second time.
+        A process that starts with no state, which is every process until
+        core keeps worker state (opensrm-youu), takes up the snapshots core's
+        newest page still holds: the pending ones are pending again. The
+        finished ones are skipped when core's newest page of retrospectives
+        names them. That page can miss one, since retrospectives are not
+        written in snapshot order, and it does not need to be complete: a
+        snapshot taken up needlessly is refused by core when it is
+        submitted, because its retrospective has the same id
+        (``retrospective_id``). The read only saves the work in between.
         """
         result = await self.client.get_assessments(kind="correlation_snapshot")
         if not result.ok or not result.data:
@@ -562,11 +576,9 @@ class LearnRetrospectiveModule:
             if snapshot_id not in self._pending:
                 candidates.append(snapshot)
         if candidates:
-            written = await self._written_snapshot_ids()
-            if written is None:
-                # Cannot tell which are done: leave the cursor where it is
-                # and look again next cycle.
-                return
+            # A failed read skips nothing: core still refuses a second
+            # retrospective for a snapshot that has one.
+            written = await self._written_snapshot_ids() or set()
             for snapshot in candidates:
                 if snapshot["id"] not in written:
                     self._pending[snapshot["id"]] = snapshot
@@ -697,7 +709,10 @@ class LearnRetrospectiveModule:
             data["declared_dependencies_by_service"] = declared_dependencies_by_service
 
         assessment = {
-            "id": f"retro-{service}-{uuid.uuid4().hex[:8]}",
+            # One id per snapshot, so core refuses a second retrospective
+            # for it (409): "exactly one" holds whatever this process
+            # remembers or can still read back.
+            "id": retrospective_id(snapshot),
             "created_at": now.isoformat(),
             "kind": "retrospective",
             "service": service,
@@ -705,6 +720,11 @@ class LearnRetrospectiveModule:
         }
 
         result = await self.client.submit_assessment(wrap_assessment(assessment, component="learn"))
+        if result.status_code == _HTTP_CONFLICT:
+            # Core already holds this snapshot's retrospective, written
+            # before a restart. Done, and nothing was written twice.
+            logger.info("retrospective_already_written", snapshot_id=snapshot.get("id"))
+            return True
         if not result.ok:
             logger.warning("retrospective_submit_failed", service=service, error=result.error)
             return False

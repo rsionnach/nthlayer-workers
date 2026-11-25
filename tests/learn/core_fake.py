@@ -37,6 +37,7 @@ class FakeCore:
         self.assessments: list[dict] = []
         self.cases: dict[str, dict] = {}
         self.submitted: list[dict] = []
+        self.refused: list[dict] = []
         self.fail: set[str] = set()
         self.manifests: list[dict] = []
 
@@ -105,6 +106,10 @@ class FakeCore:
         if "submit_assessment" in self.fail:
             return failed()
         assessment = envelope.get("data", envelope)
+        # Core's assessments table is keyed on id: a second one is a 409.
+        if any(a.get("id") == assessment.get("id") for a in self.assessments):
+            self.refused.append(assessment)
+            return APIResult(ok=False, status_code=409, error="duplicate")
         self.submitted.append(assessment)
         # Core stores what is submitted: a later read finds it.
         self.assessments.append(assessment)

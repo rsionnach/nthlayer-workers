@@ -245,8 +245,9 @@ Two limits to know about:
   stopped, or far behind), there is no case yet to hold the incident open,
   and its retrospective is written as `quiet` with the trigger verdicts
   alone.
-- After a workers restart, learn reads core's newest 100 snapshots again
-  and skips those that already have a retrospective. A snapshot still
+- After a workers restart, learn reads core's newest 100 snapshots again.
+  None gets a second retrospective: a retrospective's id is now
+  `retro-<snapshot id>`, and core refuses a duplicate. A snapshot still
   waiting for its retrospective that is older than those 100 is not picked
   up again.
 
