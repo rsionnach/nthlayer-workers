@@ -477,6 +477,9 @@ class LearnRetrospectiveModule:
     duplicate. What a restart can lose is a pending snapshot that has
     fallen off that page.
 
+    A snapshot whose chain cannot be read stays pending, and is given up
+    (``retrospective_abandoned``) once it is twice the maximum age old.
+
     Known limit: if respond does not act within the quiet period (it is
     down, or slow), there is no case yet to hold the incident open, and the
     retrospective closes as ``quiet`` with the triggers alone.
@@ -607,6 +610,11 @@ class LearnRetrospectiveModule:
         """Generate and submit a retrospective assessment. Returns True on success."""
         snapshot_data = snapshot.get("data", {})
         domain = snapshot_data.get("domain", {})
+        # The service the retrospective is filed under: the snapshot's own,
+        # as before. ``incident_service`` is a different question (which
+        # service respond filed the case under) and has respond's rule; the
+        # two agree whenever the snapshot names its domain's service, which
+        # correlate's always do.
         service = snapshot.get("service", domain.get("service", "unknown"))
 
         # opensrm-dpws: resolve trigger_service via correlation-first /
@@ -625,7 +633,9 @@ class LearnRetrospectiveModule:
         timeline = _build_chain_timeline(chain)
 
         # A decision counts as resolved when core holds an outcome child for
-        # it. Its own ``outcome`` field is not read: core never updates it.
+        # it. Its own ``outcome`` field is not read here: core never updates
+        # it. (A timeline entry's ``outcome`` is still that field as the
+        # producer wrote it, so it can lag the coverage figures.)
         resolved_count = len(incident.resolved_ids)
         pending_count = len(chain) - resolved_count
 
