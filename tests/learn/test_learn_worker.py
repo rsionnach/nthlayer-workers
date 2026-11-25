@@ -274,73 +274,39 @@ class TestRetrospectiveModuleProtocol:
 
 
 class TestRetrospectiveCycle:
-    async def test_snapshot_triggers_retrospective(self):
-        """New correlation_snapshot → retrospective assessment emitted."""
-        client = AsyncMock()
-        client.get_assessments = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
-            {
-                "id": "csn-001",
-                "created_at": "2026-04-24T12:00:00+00:00",
-                "kind": "correlation_snapshot",
-                "service": "fraud-detect",
-                "data": {
-                    "domain": {"service": "fraud-detect", "environment": "production"},
-                    "window": {"duration_seconds": 120, "opened_at": "2026-04-24T11:58:00+00:00", "closed_at": "2026-04-24T12:00:00+00:00"},
-                    "affected_services": ["fraud-detect", "payment-api"],
-                    "correlation_groups": [],
-                },
-            }
-        ]))
-        client.get_verdicts = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
-            {"id": "vrd-001", "type": "quality_breach", "created_at": "2026-04-24T11:58:00+00:00",
-             "service": "fraud-detect", "outcome": {"status": "pending"}},
-        ]))
-        submitted = []
-        client.submit_assessment = AsyncMock(
-            side_effect=lambda a: (submitted.append(a.get('data', a)), APIResult(ok=True, status_code=201, data={}))[1]
-        )
+    # How a snapshot becomes a retrospective (the chain by lineage, and when
+    # it is written) is in test_incident_chain.py [opensrm-91pa].
 
-        module = LearnRetrospectiveModule(client=client)
-        await module.process_cycle()
+    async def test_the_service_and_time_query_is_gone(self):
+        """The chain is read by lineage: a snapshot whose service has
+        verdicts inside its window, none of them linked to it, has an empty
+        chain."""
+        from tests.learn.core_fake import FakeCore
 
-        assert len(submitted) == 1
-        retro = submitted[0]
+        core = FakeCore()
+        core.assessments.append({
+            "id": "csn-001",
+            "created_at": "2026-04-24T12:00:00+00:00",
+            "kind": "correlation_snapshot",
+            "service": "fraud-detect",
+            "data": {
+                "domain": {"service": "fraud-detect", "environment": "production"},
+                "window": {"duration_seconds": 120, "opened_at": "2026-04-24T11:58:00+00:00",
+                           "closed_at": "2026-04-24T12:00:00+00:00"},
+                "affected_services": ["fraud-detect", "payment-api"],
+                "correlation_groups": [],
+            },
+        })
+        core.put_verdict({"id": "vrd-001", "type": "quality_breach", "service": "fraud-detect",
+                          "created_at": "2026-04-24T11:58:30+00:00", "parent_ids": []})
+
+        await LearnRetrospectiveModule(client=core).process_cycle()
+
+        (retro,) = core.retrospectives
         assert retro["kind"] == "retrospective"
         assert retro["service"] == "fraud-detect"
-        assert retro["data"]["verdict_count"] == 1
-        assert retro["data"]["outcome_coverage"]["pending"] == 1
-
-    async def test_outcome_coverage_reported(self):
-        """Retrospective includes resolved/pending/total counts."""
-        client = AsyncMock()
-        client.get_assessments = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
-            {
-                "id": "csn-002",
-                "created_at": "2026-04-24T12:00:00+00:00",
-                "kind": "correlation_snapshot",
-                "service": "svc",
-                "data": {"domain": {"service": "svc"}, "window": {"duration_seconds": 60, "opened_at": "2026-04-24T11:59:00+00:00", "closed_at": "2026-04-24T12:00:00+00:00"},
-                         "affected_services": ["svc"], "correlation_groups": []},
-            }
-        ]))
-        client.get_verdicts = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
-            {"id": "v1", "type": "approval", "created_at": "2026-04-24T11:59:00+00:00",
-             "service": "svc", "outcome": {"status": "confirmed"}},
-            {"id": "v2", "type": "action_request", "created_at": "2026-04-24T11:59:30+00:00",
-             "service": "svc", "outcome": {"status": "pending"}},
-        ]))
-        submitted = []
-        client.submit_assessment = AsyncMock(
-            side_effect=lambda a: (submitted.append(a.get('data', a)), APIResult(ok=True, status_code=201, data={}))[1]
-        )
-
-        module = LearnRetrospectiveModule(client=client)
-        await module.process_cycle()
-
-        coverage = submitted[0]["data"]["outcome_coverage"]
-        assert coverage["resolved"] == 1
-        assert coverage["pending"] == 1
-        assert coverage["total"] == 2
+        assert retro["data"]["verdict_count"] == 0
+        assert retro["data"]["outcome_coverage"] == {"resolved": 0, "pending": 0, "total": 0}
 
     async def test_no_snapshots_noop(self):
         client = AsyncMock()

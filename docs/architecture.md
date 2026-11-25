@@ -41,7 +41,8 @@ Cycle failures are swallowed (runner continues).
 `--prometheus-url`, plus per-module intervals (collect, drift,
 topology, correlate, topology-drift, contract, measure, respond,
 outcome, retrospective), `--expiry-threshold-days=7`,
-`--min-resolution-age-hours=1`, `--tempo-endpoint`.
+`--min-resolution-age-hours=1`, `--retrospective-quiet-minutes=10`,
+`--retrospective-max-age-hours=24`, `--tempo-endpoint`.
 
 `gate --service X [--tier critical] [--commit-sha Y] [--core-url]`:
 CLI-only deploy gate, no HTTP API in v1.5. Exit codes:
@@ -983,15 +984,40 @@ opensrm-jmy.6.
   observed_outcome, calibration_delta, resolution_path,
   producer_system}`. Expiry threshold configurable via
   `workers.learn.expiry_threshold_days` (default 7).
-- `LearnRetrospectiveModule` (30s): cursor-based poll for new
-  `correlation_snapshot` assessments (same pattern as correlate),
-  wraps existing `build_retrospective()` swapping VerdictStore reads
-  for `CoreAPIClient` calls. Retrospective data:
-  `{correlation_snapshot_id, duration_minutes, decisions_affected,
-  verdict_count, root_cause, blast_radius, timeline[:20],
-  recommendations, outcome_coverage{resolved, pending, total}}` —
-  `outcome_coverage` makes incomplete-outcome retrospectives
-  transparent.
+- `LearnRetrospectiveModule` (30s): one retrospective per
+  `correlation_snapshot`, written once the incident has run its course
+  (opensrm-91pa). A snapshot newer than the cursor is held in
+  `_pending` (persisted in the module's state, as core returned it).
+  Each cycle, for each pending snapshot:
+  - `fetch_incident_chain(client, snapshot)` reads the chain BY
+    LINEAGE: the snapshot's trigger verdicts (`data.parent_ids`) plus
+    every descendant of the snapshot id. Respond's first verdict names
+    the snapshot id in `parent_ids` and each later one chains to the
+    one before, and core's `/verdicts/{id}/descendants` answers for any
+    ancestor id. It is the one place that knows how an incident's
+    verdicts are found. `outcome_resolution` children are not
+    decisions: they stay out of the chain and mark their decision in
+    `resolved_ids`. A failed read gives no chain (retry next cycle),
+    never half of one.
+  - `has_open_case(client, ids)`: whether core holds an unresolved
+    case whose `underlying_verdict` is in the chain (or is the
+    snapshot id). A failed read, or a full page of open cases, is
+    "cannot tell".
+  - `retrospective_closure(...)` decides: `max_age` once the snapshot
+    is `--retrospective-max-age-hours` old (default 24), whatever the
+    incident's state; `quiet` once no open case anchors on the chain
+    and nothing has joined it for `--retrospective-quiet-minutes`
+    (default 10). The quiet clock runs from core's timestamps (the
+    newest decision, or the snapshot when that is newer), so a restart
+    does not reset it.
+  A failed submission leaves the snapshot pending. Retrospective data:
+  `{correlation_snapshot_id, closed_by, duration_minutes,
+  decisions_affected, verdict_count, root_cause, blast_radius,
+  timeline[:20], recommendations, outcome_coverage{resolved, pending,
+  total}}`. `closed_by` is `quiet` or `max_age`; a `max_age`
+  retrospective may describe an open incident. `outcome_coverage`
+  counts a decision as resolved when core holds an outcome child for
+  it, whatever that child says.
 
 Both assessment kinds (`retrospective`, `calibration_signal`) added
 to `ASSESSMENT_KINDS` in `nthlayer_common/cloudevents.py` [P3-F.1].

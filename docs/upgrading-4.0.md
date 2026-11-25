@@ -214,6 +214,36 @@ What else changes:
   `deploy_gate` assessment. A service with no readings at all is still
   approved by default.
 
+## 4.4: retrospectives are written when the incident is over
+
+`learn.retrospective` wrote a retrospective the moment a correlation
+snapshot appeared, from the verdicts on the service inside the snapshot's
+window. Respond acts after that window closes, so the retrospective never
+contained anything respond did.
+
+Now:
+
+- **The chain is found by lineage**: the snapshot's trigger verdicts, plus
+  every verdict that descends from the snapshot. That includes respond's
+  triage, investigation, communication and remediation verdicts, and
+  excludes other incidents on the same service.
+- **The retrospective waits for the incident.** It is written once nothing
+  has joined the chain for `--retrospective-quiet-minutes` (default 10) and
+  no unresolved case in core is anchored on the chain. An incident whose
+  case is still open waits for the case to be resolved.
+- **It is written at `--retrospective-max-age-hours` (default 24)
+  regardless**, so an incident that is never resolved still gets one.
+- **`closed_by`** on the retrospective says which: `quiet` or `max_age`. A
+  `max_age` retrospective may describe an incident that is still open.
+- **`outcome_coverage`** counts a decision as resolved when core holds an
+  outcome for it. It read the decision's own `outcome` field before, which
+  core does not update when an outcome is resolved.
+
+What to expect: a retrospective now arrives at least the quiet period after
+the last verdict, and for an incident with a case, not before the case is
+resolved or 24 hours pass. Anything that waits for a retrospective right
+after a snapshot needs to allow for that, or lower the two flags.
+
 ## Breaking changes
 
 ### `gen_ai.decision.evaluated` → per-dimension grader events + a summary
