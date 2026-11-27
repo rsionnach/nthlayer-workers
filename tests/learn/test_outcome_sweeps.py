@@ -9,7 +9,10 @@ than from learn:
 - ``GET /verdicts`` (``store.py`` ``query_verdicts``): ``created_at >=
   created_after`` and ``created_at <= created_before``, both inclusive,
   ``ORDER BY created_at DESC LIMIT ?``: newest first, so a page that hits the
-  limit has dropped the oldest. ``server.py`` caps ``limit`` at ``LIMIT_CAP``
+  limit has dropped the oldest. The comparison is on text: the column holds
+  ``created_at`` as the producer sent it and each bound is normalised by
+  ``_normalise_timestamp``. Every stamp here is the ``+00:00`` ISO form that
+  measure writes, for which text order is time order. ``server.py`` caps ``limit`` at ``LIMIT_CAP``
   (1000).
 - ``POST /verdicts/{id}/outcome`` (``server.py`` ``post_verdict_outcome``):
   creates ``out-<id>`` and never mutates the original; a second POST for the
@@ -44,6 +47,12 @@ def _instant(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+def _core_normalised(bound: str) -> str:
+    """nthlayer-core store.py ``_normalise_timestamp``, for a bound that parses."""
+    parsed = datetime.fromisoformat(bound)
+    return (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).isoformat()
+
+
 class _Clock:
     def __init__(self, now: datetime):
         self.now = now
@@ -66,12 +75,16 @@ class _Core(_FakeCore):
     async def get_verdicts(self, *, created_after=None, created_before=None, limit=100, **_) -> APIResult:
         assert limit <= _CORE_LIMIT_CAP
         self.queries.append({"created_after": created_after, "created_before": created_before})
+        # Core compares text: created_at as its producer sent it against the
+        # bound normalised to an ISO string, and orders by that text.
+        after = None if created_after is None else _core_normalised(created_after)
+        before = None if created_before is None else _core_normalised(created_before)
         rows = [
             v for v in self.verdicts.values()
-            if (created_after is None or _instant(v["created_at"]) >= _instant(created_after))
-            and (created_before is None or _instant(v["created_at"]) <= _instant(created_before))
+            if (after is None or v["created_at"] >= after)
+            and (before is None or v["created_at"] <= before)
         ]
-        rows.sort(key=lambda v: _instant(v["created_at"]), reverse=True)
+        rows.sort(key=lambda v: v["created_at"], reverse=True)
         return _ok(rows[:limit])
 
     async def get_descendants(self, verdict_id: str) -> APIResult:
@@ -564,3 +577,177 @@ class TestInputsThatCannotBeWorked:
         await module.process_cycle()
 
         assert await module.get_state() == state
+
+
+class TestWhereASweepStops:
+    """The cursor after a sweep that could not finish its page."""
+
+    async def test_the_expiry_cap_leaves_the_cursor_at_the_first_verdict_not_expired(self, breach):
+        stamps = [_T0, _T0 + timedelta(minutes=1), _T0 + timedelta(minutes=2)]
+        core = _Core([_at(breach, f"vrd-{n}", at) for n, at in enumerate(stamps)])
+        module = _module(core, _Clock(_T0 + timedelta(days=8)), max_expiries_per_cycle=2)
+
+        await module.process_cycle()
+
+        assert core.posted("expired") == ["vrd-0", "vrd-1"]
+        assert _instant((await module.get_state())["expiry_cursor"]) == stamps[2]
+
+    @pytest.mark.parametrize("expiring", [False, True])
+    async def test_an_unreadable_lineage_leaves_the_cursor_at_that_verdict(self, breach, expiring):
+        stamps = [_T0, _T0 + timedelta(minutes=1)]
+        core = _Core([_at(breach, f"vrd-{n}", at) for n, at in enumerate(stamps)])
+        client = core.client()
+
+        async def _descendants(verdict_id):
+            return _unavailable() if verdict_id == "vrd-1" else await core.get_descendants(verdict_id)
+
+        client.get_descendants = AsyncMock(side_effect=_descendants)
+        clock = _Clock(_T0 + (timedelta(days=8) if expiring else timedelta(hours=2)))
+        module = LearnOutcomeModule(client=client, clock=clock)
+
+        await module.process_cycle()
+
+        state = await module.get_state()
+        assert _instant(state["expiry_cursor" if expiring else "cursor"]) == stamps[1]
+
+    @pytest.mark.parametrize("status", _NOT_AN_ANSWER)
+    async def test_an_expiry_core_did_not_answer_is_retried_next_cycle(self, breach, status):
+        core = _Core([_at(breach, "vrd-1", _T0)])
+        core.down_with = APIResult(ok=False, status_code=status, error="unavailable")
+        clock = _Clock(_T0 + timedelta(days=8))
+        module = _module(core, clock)
+
+        core.outcome_down = True
+        await module.process_cycle()
+        assert core.posts == []
+        assert _instant((await module.get_state())["expiry_cursor"]) == _T0
+
+        core.outcome_down = False
+        clock.now += timedelta(minutes=1)
+        await module.process_cycle()
+        assert core.posted("expired") == ["vrd-1"]
+
+    async def test_a_verdict_that_raises_is_passed_and_the_next_one_examined(self, breach):
+        core = _Core([_at(breach, "vrd-1", _T0), _at(breach, "vrd-2", _T0 + timedelta(minutes=1))])
+        client = core.client()
+
+        async def _descendants(verdict_id):
+            if verdict_id == "vrd-1":
+                raise RuntimeError("not a client result")
+            return await core.get_descendants(verdict_id)
+
+        client.get_descendants = AsyncMock(side_effect=_descendants)
+        clock = _Clock(_T0 + timedelta(days=8))
+        module = LearnOutcomeModule(client=client, clock=clock)
+
+        await module.process_cycle()
+
+        assert core.posted("expired") == ["vrd-2"]
+        assert _instant((await module.get_state())["expiry_cursor"]) == clock.now - timedelta(days=7)
+
+    async def test_a_cursor_ahead_of_the_cutoff_is_not_moved_back(self, breach):
+        """A clock that stepped back, or a threshold that was raised."""
+        core = _Core([_at(breach, "vrd-1", _T0)])
+        module = _module(core, _Clock(_T0 + timedelta(days=8)))
+        state = {
+            "cursor": (_T0 + timedelta(days=8)).isoformat(),
+            "expiry_cursor": (_T0 + timedelta(days=2)).isoformat(),
+        }
+        await module.restore_state(state)
+
+        await module.process_cycle()
+
+        assert await module.get_state() == state
+        assert core.queries == []
+
+    async def test_only_an_expiry_core_recorded_counts_towards_the_cap(self, breach):
+        """An expiry answered 409 was someone else's write, not one of this cycle's."""
+        core = _Core([_at(breach, f"vrd-{n}", _T0 + timedelta(minutes=n)) for n in range(3)])
+        client = core.client()
+        answers = [APIResult(ok=False, status_code=409, error="duplicate")]
+
+        async def _resolve(verdict_id, body):
+            return answers.pop() if answers else await core.resolve_outcome(verdict_id, body)
+
+        client.resolve_outcome = AsyncMock(side_effect=_resolve)
+        module = LearnOutcomeModule(
+            client=client, clock=_Clock(_T0 + timedelta(days=8)), max_expiries_per_cycle=2
+        )
+
+        await module.process_cycle()
+
+        assert core.posted("expired") == ["vrd-1", "vrd-2"]
+
+    async def test_a_verdict_exactly_at_the_expiry_age_is_expired(self, breach):
+        core = _Core([_at(breach, "vrd-1", _T0)])
+        module = _module(core, _Clock(_T0 + timedelta(days=7)))
+
+        await module.process_cycle()
+
+        assert core.posted("expired") == ["vrd-1"]
+
+
+class TestNarrowingWithNoCursor:
+    async def test_a_first_run_over_a_long_backlog_starts_at_its_old_end(self, breach):
+        """30 days of verdicts and no cursor: one step back of a day leaves the
+        page full, so the step has to grow until the window's end is early
+        enough. The first window that is not full may be empty (it ends
+        before the backlog begins); the cycle after it reads from there."""
+        step = timedelta(days=30) / 3000
+        verdicts = [_at(breach, f"vrd-{n:05d}", _T0 + n * step) for n in range(3000)]
+        core = _Core(verdicts)
+        clock = _Clock(_T0 + timedelta(days=31))
+        module = _module(core, clock, expiry_threshold_days=0)
+
+        for _ in range(2):
+            await module.process_cycle()
+            clock.now += timedelta(minutes=1)
+
+        assert 0 < len(core.lineage_reads) < _CORE_LIMIT_CAP
+        assert core.lineage_reads == [v["id"] for v in verdicts[:len(core.lineage_reads)]]
+
+    async def test_a_full_page_at_the_cursors_own_instant_is_given_up_on(self, breach):
+        """Nothing left to halve: the page is not processed and the cursor stays."""
+        verdicts = [_at(breach, f"vrd-{n:05d}", _T0) for n in range(_CORE_LIMIT_CAP)]
+        core = _Core(verdicts)
+        module = _module(core, _Clock(_T0 + timedelta(hours=3)), expiry_threshold_days=0)
+        await module.restore_state({"cursor": _T0.isoformat()})
+
+        with structlog.testing.capture_logs() as logs:
+            await module.process_cycle()
+
+        assert core.lineage_reads == []
+        assert await module.get_state() == {"cursor": _T0.isoformat()}
+        assert [e["event"] for e in logs] == ["outcome_window_unnarrowable"]
+
+
+class TestLineageSignals:
+    @pytest.mark.parametrize("overridden_first", [True, False])
+    async def test_an_overridden_descendant_outranks_an_execution(self, breach, overridden_first):
+        """An execution that was overridden is a divergence, not a confirmation."""
+        core = _Core([_at(breach, "vrd-1", _T0)])
+        names = ["vrd-over", "vrd-exec"] if overridden_first else ["vrd-exec", "vrd-over"]
+        for n, name in enumerate(names):
+            core.add(_execution(name, "vrd-1", _T0 + timedelta(minutes=n + 1)))
+        core.override_in_place("vrd-over")
+        module = _module(core, _Clock(_T0 + timedelta(hours=2)))
+
+        await module.process_cycle()
+
+        assert core.posted("overridden") == ["vrd-1"]
+        assert core.posts[0][1]["path"] == "divergence"
+        assert core.signals[0]["data"]["observed_outcome"] == "overridden"
+
+    @pytest.mark.parametrize("body", [None, {}, "not json"])
+    async def test_a_lineage_body_that_is_not_a_list_is_unreadable_not_silent(self, breach, body):
+        """Expiring on it would record that nothing resolved a verdict whose
+        lineage was never read."""
+        core = _Core([_at(breach, "vrd-1", _T0)])
+        client = core.client()
+        client.get_descendants = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=body))
+        module = LearnOutcomeModule(client=client, clock=_Clock(_T0 + timedelta(days=8)))
+
+        await module.process_cycle()
+
+        assert core.posts == []
+        assert _instant((await module.get_state())["expiry_cursor"]) == _T0

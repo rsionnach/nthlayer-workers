@@ -378,7 +378,16 @@ class LearnOutcomeModule:
                 status_code=descendants.status_code,
             )
             return (_Lineage.REFUSED if refused else _Lineage.UNREADABLE), None
-        found = descendants.data if isinstance(descendants.data, list) else []
+        found = descendants.data
+        if not isinstance(found, list):
+            # Not a lineage: reading it as "no descendants" would let the
+            # expiry sweep record that nothing resolved the verdict.
+            logger.warning(
+                "outcome_lineage_unreadable",
+                verdict_id=verdict_id,
+                status_code=descendants.status_code,
+            )
+            return _Lineage.UNREADABLE, None
 
         if any(_resolves(desc, verdict_id) for desc in found):
             return _Lineage.RESOLVED, None
