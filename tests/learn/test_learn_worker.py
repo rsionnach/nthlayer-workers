@@ -40,7 +40,7 @@ class TestOutcomeModuleProtocol:
     async def test_restore_state_restores_cursor(self):
         module = LearnOutcomeModule(client=AsyncMock())
         await module.restore_state({"cursor": "2026-04-24T10:00:00+00:00"})
-        assert module._cursor == "2026-04-24T10:00:00+00:00"
+        assert await module.get_state() == {"cursor": "2026-04-24T10:00:00+00:00"}
 
 
 class TestOutcomeCycle:
@@ -208,8 +208,10 @@ class TestOutcomeCycle:
         assert submitted[0]["data"]["calibration_delta"] == 0.9
 
     async def test_cursor_advances_after_cycle(self):
-        """Outcome module cursor advances after processing verdicts."""
-        old_time = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+        """The cursor moves to the end of the window that was read: the
+        minimum-age cutoff, not the newest verdict's created_at [opensrm-lpbi]."""
+        now = datetime.now(UTC)
+        old_time = (now - timedelta(hours=2)).isoformat()
         client = AsyncMock()
         client.get_verdicts = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=[
             {
@@ -226,12 +228,11 @@ class TestOutcomeCycle:
         client.resolve_outcome = AsyncMock()
         client.submit_assessment = AsyncMock()
 
-        module = LearnOutcomeModule(client=client)
+        module = LearnOutcomeModule(client=client, clock=lambda: now)
         await module.process_cycle()
 
         state = await module.get_state()
-        assert "cursor" in state
-        assert state["cursor"] == old_time
+        assert state["cursor"] == (now - timedelta(hours=1)).isoformat()
 
     async def test_api_failure_no_crash(self):
         client = AsyncMock()

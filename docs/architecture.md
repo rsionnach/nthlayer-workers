@@ -972,13 +972,45 @@ opensrm-jmy.6.
 
 `worker.py` — P3-F.1 splits into two WorkerModule impls:
 
-- `LearnOutcomeModule` (60s): polls core for pending verdicts (batch
-  50, oldest first), attempts resolution via five paths:
+- `LearnOutcomeModule` (60s): examines each pending verdict at two
+  ages, in two sweeps with a cursor each (`cursor`, `expiry_cursor` in
+  `component_state`, opensrm-lpbi). The resolution sweep reads verdicts
+  as they pass `--min-resolution-age-hours` (1h) and records an outcome
+  a descendant already shows. The expiry sweep reads them again as they
+  pass the expiry threshold: the lineage is re-read, a signal that
+  arrived in between is recorded (late, at that age), and a verdict
+  that still has none is expired. At most `max_expiries_per_cycle`
+  (100, a module field with no CLI flag: opensrm-sacr) are expired
+  per cycle; the count is logged as
+  `outcome_expiry_sweep`.
+
+  A sweep reads from its cursor to its age cutoff, oldest first, and
+  moves the cursor to the end of the window it read, whether or not the
+  window held a candidate. Core serves `GET /verdicts` newest first and
+  at most 1000, so a full page has dropped the oldest: the window's end
+  is then halved towards the cursor until the page is not full, and the
+  cursor never passes a truncated page (`order=asc` in core would
+  replace this: opensrm-6imd). If core does not answer a lineage read
+  or a resolution (a transport failure or a 5xx), the sweep stops at
+  that verdict and returns to it next cycle. A 4xx other than the 409
+  below is core's answer for that verdict: it is logged and passed.
+
+  Core holds the record of what is resolved. `POST
+  /verdicts/{id}/outcome` creates an `out-<id>` child and never marks
+  the original, so a verdict whose own `outcome_resolution` child
+  exists is skipped: nothing is posted and no signal is emitted. A 409
+  from that POST means the same. A verdict overridden in place (`POST
+  /verdicts/{id}/override`) reads as not pending and is skipped too; it
+  gets no `calibration_signal` (opensrm-g6y4).
+
+  Resolution paths:
   1. lineage: downstream verdict references this one.
   2. calibration_sampling: ground-truth label exists.
   3. downstream_signal: external event attributed via `parent_ids`.
   4. score_outcome_divergence: confidence vs observed outcome.
-  5. expiry: >7d pending → "expired".
+  5. expiry: still pending at the expiry age (7d) → "expired", by the
+     expiry sweep only. The cycles after an upgrade work through every
+     older pending verdict, 100 per cycle.
 
   "Pending" is read as core reads it: a verdict with no `outcome` key, a
   null `outcome` or no `outcome.status` is pending (`_outcome_status`,

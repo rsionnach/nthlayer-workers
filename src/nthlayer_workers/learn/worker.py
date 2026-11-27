@@ -8,8 +8,10 @@ Two modules implementing WorkerModule protocol:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from enum import Enum
 from typing import Any
 
 import structlog
@@ -79,17 +81,89 @@ def _resolves(descendant: dict, verdict_id: str) -> bool:
 # LearnOutcomeModule — continuous verdict outcome resolution
 # ---------------------------------------------------------------------------
 
+# The most verdicts core returns for one query (nthlayer-core server.py
+# LIMIT_CAP). Core serves newest first, so a page this long has dropped the
+# oldest of its window. order=asc in core would replace the narrowing
+# below [opensrm-6imd].
+_PAGE_LIMIT = 1000
+# Queries one sweep may spend narrowing a truncated window.
+_MAX_NARROWINGS = 64
+# With no cursor there is no lower bound to halve towards, so the window's end
+# is stepped back from the cutoff by a span that starts here and doubles.
+_FIRST_STEP_BACK = timedelta(days=1)
+
+# Core's answer to a write whose id it already holds.
+_HTTP_CONFLICT = 409
+_HTTP_BAD_REQUEST = 400
+_HTTP_TOO_MANY_REQUESTS = 429
+_HTTP_SERVER_ERROR = 500
+
+_EXPIRED_RESOLUTION = {
+    "outcome_status": "expired",
+    "resolution": "No outcome signal within threshold",
+}
+
+
+class _Lineage(Enum):
+    """What a verdict's descendants say about its outcome."""
+
+    UNREADABLE = "unreadable"  # core did not answer
+    REFUSED = "refused"  # core will not answer for this verdict
+    RESOLVED = "resolved"  # core already holds this verdict's resolution record
+    SIGNAL = "signal"  # a descendant resolves it; the resolution is not recorded yet
+    SILENT = "silent"  # nothing resolves it
+
+
+class _Write(Enum):
+    """How core answered a resolution."""
+
+    RECORDED = "recorded"
+    NOT_NEEDED = "not_needed"  # already resolved, or refused for good
+    UNAVAILABLE = "unavailable"
+
+
+class _Step(Enum):
+    """How one verdict's examination ended."""
+
+    DONE = "done"
+    EXPIRED = "expired"
+    HALT = "halt"  # core is unavailable: stop here and come back to this verdict
+
+
+def _is_refusal(status_code: int) -> bool:
+    """Whether core's answer for this verdict will be the same next cycle.
+
+    A 4xx is, except 429: the client retries it as transient and hands it
+    back when the retries run out (``api_client._TRANSIENT_CODES``). A
+    transport failure reads as status 0.
+    """
+    if status_code == _HTTP_TOO_MANY_REQUESTS:
+        return False
+    return _HTTP_BAD_REQUEST <= status_code < _HTTP_SERVER_ERROR
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
 
 @dataclass
 class LearnOutcomeModule:
     """Continuous background maintenance of verdict outcome state.
 
-    Each process_cycle():
-    1. Fetches pending verdicts older than minimum_resolution_age
-    2. Attempts resolution via five paths (lineage, calibration sampling,
-       downstream signal, score-outcome divergence, expiry)
-    3. Emits calibration_signal assessment when outcomes resolve
-    4. Marks expired verdicts past threshold
+    Each verdict is examined at two ages, by two sweeps with a cursor each
+    [opensrm-lpbi]:
+
+    - the resolution sweep, when the verdict passes ``minimum_resolution_age``:
+      a descendant that resolves it (an execution, an override) is recorded as
+      its outcome and a calibration_signal is emitted;
+    - the expiry sweep, when it passes ``expiry_threshold``: its lineage is
+      read again, a signal that arrived late is recorded as above, and a
+      verdict that still has none is expired.
+
+    A sweep reads the window between its cursor and its age cutoff, oldest
+    first, and moves the cursor to the end of what it read. Core holds the
+    record of what is resolved: a verdict whose own ``outcome_resolution``
+    child exists is left alone.
 
     Calibration signals feed measure module's self-calibration (v2).
     Expired verdicts don't produce signals — absence of data is not
@@ -99,7 +173,18 @@ class LearnOutcomeModule:
     client: CoreAPIClient
     expiry_threshold_days: int = 7
     minimum_resolution_age_hours: int = 1
-    _cursor: str | None = None
+    # The first expiry sweep meets every pending verdict older than the
+    # threshold; each expiry is a write to core.
+    max_expiries_per_cycle: int = 100
+    clock: Callable[[], datetime] = _utc_now
+    _cursor: datetime | None = None
+    _expiry_cursor: datetime | None = None
+
+    def __post_init__(self) -> None:
+        # A cap of zero would stop the expiry sweep at its first candidate
+        # every cycle. Expiry is switched off with expiry_threshold_days.
+        if self.max_expiries_per_cycle < 1:
+            raise ValueError("max_expiries_per_cycle must be at least 1")
 
     @property
     def name(self) -> str:
@@ -107,108 +192,261 @@ class LearnOutcomeModule:
 
     async def restore_state(self, state: dict | None) -> None:
         if state:
-            self._cursor = state.get("cursor")
+            # A cursor that does not read as a time is dropped: the sweep then
+            # starts from the beginning, which costs reads and loses nothing.
+            self._cursor = _parse_timestamp(state.get("cursor"))
+            self._expiry_cursor = _parse_timestamp(state.get("expiry_cursor"))
 
     async def process_cycle(self) -> None:
-        now = datetime.now(UTC)
+        now = self.clock()
+        # Verdicts examined so far this cycle. The expiry sweep runs first and
+        # on a backlog both windows hold the same verdicts: the resolution
+        # sweep skips what it finds here, so each gets one lineage read.
+        examined: set[str] = set()
 
-        # Minimum age floor: skip verdicts younger than threshold because
-        # downstream signals may not have arrived yet. Premature resolution
-        # attempts always return "no signal found" and waste cycles.
-        age_cutoff = now - timedelta(hours=self.minimum_resolution_age_hours)
+        if self.expiry_threshold_days > 0:
+            self._expiry_cursor = await self._sweep(
+                self._expiry_cursor,
+                now - timedelta(days=self.expiry_threshold_days),
+                now=now, expire=True, examined=examined,
+            )
 
-        result = await self.client.get_verdicts(
-            created_before=age_cutoff.isoformat(),
-            created_after=self._cursor,
-            limit=50,
+        # Minimum age floor: downstream signals may not have arrived for a
+        # younger verdict, and a look that finds nothing is not repeated
+        # until the expiry age.
+        self._cursor = await self._sweep(
+            self._cursor,
+            now - timedelta(hours=self.minimum_resolution_age_hours),
+            now=now, expire=False, examined=examined,
         )
-        if not result.ok or not result.data:
-            return
 
-        for verdict in result.data:
+    async def _sweep(
+        self,
+        cursor: datetime | None,
+        cutoff: datetime,
+        *,
+        now: datetime,
+        expire: bool,
+        examined: set[str],
+    ) -> datetime | None:
+        """Examine the verdicts created from ``cursor`` to ``cutoff``, oldest first.
+
+        Returns the sweep's new cursor: the end of the window it read, the
+        verdict it had to stop at, or ``cursor`` unchanged when it read nothing.
+        """
+        if cursor is not None and cursor >= cutoff:
+            return cursor
+        window = await self._oldest_page(cursor, cutoff)
+        if window is None:
+            return cursor
+        page, window_end = window
+
+        expired = 0
+        capped = False
+        stopped_at: dict | None = None
+        for verdict in page:
+            verdict_id = verdict.get("id") if isinstance(verdict, dict) else None
+            if not isinstance(verdict_id, str):
+                continue  # nothing core could be asked about
             if verdict.get("type") in _RESOLUTION_RECORD_TYPES:
                 continue
+            # POST /verdicts/{id}/override sets the original's outcome in place.
             if _outcome_status(verdict) != _PENDING:
                 continue
+            if verdict_id in examined:
+                continue
+            # The verdict's own age decides, not the window that was asked for.
+            if expire and not self._is_past_expiry(verdict, now):
+                continue
+            if expire and expired >= self.max_expiries_per_cycle:
+                capped = True
+                stopped_at = verdict
+                break
 
             try:
-                # Attempt resolution via five paths
-                resolution = await self._attempt_resolution(verdict)
-                if resolution:
-                    submit = await self.client.resolve_outcome(verdict["id"], resolution)
-                    if submit.ok:
-                        await self._emit_calibration_signal(verdict, resolution)
-                    continue
-
-                # Expiry fallback
-                if self._is_past_expiry(verdict, now):
-                    await self.client.resolve_outcome(verdict["id"], {
-                        "outcome_status": "expired",
-                        "resolution": "No outcome signal within threshold",
-                    })
+                step = await self._examine(verdict, expire=expire)
             except Exception:
-                logger.warning("outcome_resolution_failed", verdict_id=verdict.get("id"))
+                # One verdict that cannot be examined must not hold the rest.
+                logger.warning("outcome_resolution_failed", verdict_id=verdict_id)
+                step = _Step.DONE
+            if step is _Step.HALT:
+                stopped_at = verdict
+                break
+            examined.add(verdict_id)
+            if step is _Step.EXPIRED:
+                expired += 1
 
-            # Advance cursor past this verdict regardless of outcome
-            created = verdict.get("created_at", "")
-            if created and (not self._cursor or created > self._cursor):
-                self._cursor = created
+        if expired or capped:
+            logger.info("outcome_expiry_sweep", expired=expired, capped=capped)
+        if stopped_at is None:
+            return window_end
+        # The bounds core applies are inclusive, so the verdict stopped at is
+        # read again next cycle. So are any that share its created_at, and
+        # those already resolved are skipped on their resolution record.
+        resume_at = _parse_timestamp(stopped_at.get("created_at"))
+        if resume_at is None or (cursor is not None and resume_at <= cursor):
+            return cursor
+        return resume_at
 
-    async def _attempt_resolution(self, verdict: dict) -> dict | None:
-        """Try the five resolution paths in order. Returns resolution dict or None."""
-        verdict_id = verdict.get("id", "")
+    async def _oldest_page(
+        self, cursor: datetime | None, cutoff: datetime
+    ) -> tuple[list[dict], datetime] | None:
+        """The oldest untruncated page from ``cursor``, oldest first, and where it ends.
 
-        # Paths 1+4: Lineage + divergence — single pass over descendants.
-        # Check for downstream verdicts that resolve this one.
-        # Priority: overridden > confirmed (an execution that was overridden
-        # is a divergence signal, not a confirmation).
-        descendants = await self.client.get_descendants(verdict_id)
-        if descendants.ok and descendants.data:
-            has_execution = None
-            has_overridden = None
-            for desc in descendants.data:
-                desc_type = desc.get("type", "")
-                if _outcome_status(desc) == "overridden" and has_overridden is None:
-                    has_overridden = desc
-                if has_execution is None and (
-                    desc_type == "execution"
-                    or _resolves(desc, verdict_id)
-                ):
-                    has_execution = desc
+        Core returns newest first and at most ``_PAGE_LIMIT``, so a full page
+        has dropped the oldest verdicts of its window. The window's end is
+        then brought down towards the cursor until the page is not full: the
+        verdicts next to the cursor are never passed over. None when core did
+        not answer or the window could not be narrowed.
+        """
+        window_end = cutoff
+        step_back = _FIRST_STEP_BACK
+        for _ in range(_MAX_NARROWINGS):
+            result = await self.client.get_verdicts(
+                created_after=cursor.isoformat() if cursor else None,
+                created_before=window_end.isoformat(),
+                limit=_PAGE_LIMIT,
+            )
+            if not result.ok:
+                logger.warning("outcome_query_failed", status_code=result.status_code)
+                return None
+            page = result.data
+            if not isinstance(page, list):
+                # Not a page of verdicts: reading it as an empty window would
+                # move the cursor past everything in it.
+                logger.warning("outcome_query_unreadable", status_code=result.status_code)
+                return None
+            if len(page) < _PAGE_LIMIT:
+                return list(reversed(page)), window_end
 
-            # Overridden takes priority (Path 4: divergence)
-            if has_overridden:
-                return {
-                    "outcome_status": "overridden",
-                    "resolution": f"Overridden by {has_overridden.get('id')}",
-                    "path": "divergence",
-                }
-            # Execution/outcome_resolution confirms (Path 1: lineage)
-            if has_execution:
-                return {
-                    "outcome_status": "confirmed",
-                    "resolution": f"Resolved by downstream {has_execution.get('type')} verdict {has_execution.get('id')}",
-                    "path": "lineage",
-                }
+            if cursor is None:
+                try:
+                    window_end = cutoff - step_back
+                except OverflowError:
+                    break
+                step_back *= 2
+            elif window_end <= cursor:
+                break  # a full page inside one instant
+            else:
+                window_end = cursor + (window_end - cursor) / 2
 
-        # Path 2: Calibration sampling — v1.5 stub (infrastructure not yet built)
-        # Path 3: Downstream signal — captured by lineage when external signals
-        #   create verdicts with parent_ids pointing to this verdict.
-        # Path 5: Expiry — handled in the caller's expiry fallback
+        logger.error(
+            "outcome_window_unnarrowable",
+            cursor=cursor.isoformat() if cursor else None,
+            window_end=window_end.isoformat(),
+        )
         return None
+
+    async def _examine(self, verdict: dict, *, expire: bool) -> _Step:
+        """Read one pending verdict's lineage and record what it shows."""
+        lineage, resolution = await self._read_lineage(verdict["id"])
+        if lineage is _Lineage.UNREADABLE:
+            return _Step.HALT
+        if lineage in (_Lineage.RESOLVED, _Lineage.REFUSED):
+            return _Step.DONE
+
+        if resolution is not None:
+            write = await self._record(verdict, resolution)
+            if write is _Write.RECORDED:
+                await self._emit_calibration_signal(verdict, resolution)
+            return _Step.HALT if write is _Write.UNAVAILABLE else _Step.DONE
+
+        if not expire:
+            return _Step.DONE
+        write = await self._record(verdict, dict(_EXPIRED_RESOLUTION))
+        if write is _Write.UNAVAILABLE:
+            return _Step.HALT
+        return _Step.EXPIRED if write is _Write.RECORDED else _Step.DONE
+
+    async def _read_lineage(self, verdict_id: str) -> tuple[_Lineage, dict | None]:
+        """What the verdict's descendants say, and the resolution to record if any.
+
+        The verdict's own resolution record is looked for first: core never
+        marks the original, so that child is the only sign it is resolved, and
+        a resolved verdict is not resolved again whatever else descends from it.
+        Then, in priority order: an overridden descendant (divergence: an
+        execution that was overridden is not a confirmation), an execution
+        (lineage). Core's lineage is transitive, so both may sit under a child.
+        """
+        descendants = await self.client.get_descendants(verdict_id)
+        if not descendants.ok:
+            # A 4xx is core's answer for this verdict and will be the same
+            # next cycle; waiting on it would hold every verdict behind it.
+            refused = _is_refusal(descendants.status_code)
+            logger.warning(
+                "outcome_lineage_refused" if refused else "outcome_lineage_unreadable",
+                verdict_id=verdict_id,
+                status_code=descendants.status_code,
+            )
+            return (_Lineage.REFUSED if refused else _Lineage.UNREADABLE), None
+        found = descendants.data
+        if not isinstance(found, list):
+            # Not a lineage: reading it as "no descendants" would let the
+            # expiry sweep record that nothing resolved the verdict.
+            logger.warning(
+                "outcome_lineage_unreadable",
+                verdict_id=verdict_id,
+                status_code=descendants.status_code,
+            )
+            return _Lineage.UNREADABLE, None
+
+        if any(_resolves(desc, verdict_id) for desc in found):
+            return _Lineage.RESOLVED, None
+
+        overridden = next((d for d in found if _outcome_status(d) == "overridden"), None)
+        if overridden is not None:
+            return _Lineage.SIGNAL, {
+                "outcome_status": "overridden",
+                "resolution": f"Overridden by {overridden.get('id')}",
+                "path": "divergence",
+            }
+        execution = next((d for d in found if d.get("type") == "execution"), None)
+        if execution is not None:
+            return _Lineage.SIGNAL, {
+                "outcome_status": "confirmed",
+                "resolution": f"Resolved by downstream execution verdict {execution.get('id')}",
+                "path": "lineage",
+            }
+        # Calibration sampling is a v1.5 stub; an external signal arrives as a
+        # verdict naming this one in parent_ids, so the lineage read covers it.
+        return _Lineage.SILENT, None
+
+    async def _record(self, verdict: dict, resolution: dict) -> _Write:
+        """POST the resolution to core and say how it was answered."""
+        verdict_id = verdict["id"]
+        submit = await self.client.resolve_outcome(verdict_id, resolution)
+        if submit.ok:
+            return _Write.RECORDED
+        if submit.status_code == _HTTP_CONFLICT:
+            # Core holds this verdict's resolution record already: another
+            # writer got there between the lineage read and this POST.
+            return _Write.NOT_NEEDED
+        if _is_refusal(submit.status_code):
+            # Core will give the same answer next cycle; waiting on it would
+            # hold every verdict behind this one.
+            logger.warning(
+                "outcome_resolution_refused",
+                verdict_id=verdict_id,
+                status_code=submit.status_code,
+            )
+            return _Write.NOT_NEEDED
+        logger.warning(
+            "outcome_resolution_unavailable",
+            verdict_id=verdict_id,
+            status_code=submit.status_code,
+        )
+        return _Write.UNAVAILABLE
 
     def _is_past_expiry(self, verdict: dict, now: datetime) -> bool:
         """Check if a verdict has exceeded the expiry threshold."""
         if self.expiry_threshold_days <= 0:
             return False  # 0 or negative threshold disables expiry
-        created = verdict.get("created_at", "")
-        if not created:
+        # Core stores created_at as its producer sent it: one with no offset
+        # is read as UTC, and one that is not a time is never past expiry.
+        created = _parse_timestamp(verdict.get("created_at"))
+        if created is None:
             return False
-        try:
-            created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
-            return (now - created_dt) >= timedelta(days=self.expiry_threshold_days)
-        except (ValueError, AttributeError):
-            return False
+        return now - created >= timedelta(days=self.expiry_threshold_days)
 
     async def _emit_calibration_signal(self, verdict: dict, resolution: dict) -> None:
         """Emit calibration_signal assessment for a resolved verdict."""
@@ -244,7 +482,9 @@ class LearnOutcomeModule:
     async def get_state(self) -> dict:
         state: dict[str, Any] = {}
         if self._cursor:
-            state["cursor"] = self._cursor
+            state["cursor"] = self._cursor.isoformat()
+        if self._expiry_cursor:
+            state["expiry_cursor"] = self._expiry_cursor.isoformat()
         return state
 
 
@@ -261,8 +501,6 @@ _OUTCOME_RESOLUTION = "outcome_resolution"
 _OPEN_CASE_STATES = ("pending", "leased")
 _CASE_PAGE_LIMIT = 100
 
-# Core's answer to an assessment whose id it already holds.
-_HTTP_CONFLICT = 409
 
 
 def retrospective_id(snapshot: dict) -> str:

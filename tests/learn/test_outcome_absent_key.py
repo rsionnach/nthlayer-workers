@@ -121,7 +121,8 @@ class TestMeasureVerdictsAreResolved:
 
     async def test_young_measure_verdict_is_examined_and_left_pending(self):
         """Pending but neither resolvable nor expired: the lineage is looked
-        up, nothing is written, and the cursor moves past it."""
+        up once, nothing is written, and the cursor moves past it (to the end
+        of the window read, opensrm-lpbi)."""
         verdict = _aged((await _measure_verdicts())["quality_breach"], hours=2)
         client = _learn_client([verdict])
 
@@ -130,7 +131,8 @@ class TestMeasureVerdictsAreResolved:
 
         client.get_descendants.assert_awaited_once_with(verdict["id"])
         client.resolve_outcome.assert_not_awaited()
-        assert (await module.get_state())["cursor"] == verdict["created_at"]
+        cursor = datetime.fromisoformat((await module.get_state())["cursor"])
+        assert cursor > datetime.fromisoformat(verdict["created_at"])
 
 
 # Each case is a way a stored verdict can lack a status; core reads all of
@@ -286,10 +288,10 @@ class TestResolutionRecordOfAChildIsNotAConfirmation:
         assert core.resolutions == {change["id"]: "expired", breach["id"]: "expired"}
         client.submit_assessment.assert_not_awaited()
 
-    async def test_a_verdicts_own_resolution_record_still_resolves_it(self):
-        """Unchanged by this bead: a verdict whose own ``out-<id>`` child
-        exists is read as resolved by lineage. (That learn then posts the
-        resolution again is opensrm-lpbi.)"""
+    async def test_a_verdicts_own_resolution_record_means_it_is_resolved(self):
+        """A verdict whose own ``out-<id>`` child exists is resolved already:
+        nothing is posted and no signal is emitted [opensrm-lpbi]. Before, the
+        child read as a lineage confirmation and was posted again each cycle."""
         verdict = _aged((await _measure_verdicts())["quality_breach"], hours=2)
         core = _FakeCore([verdict])
         await core.resolve_outcome(verdict["id"], {"outcome_status": "confirmed"})
@@ -297,10 +299,9 @@ class TestResolutionRecordOfAChildIsNotAConfirmation:
 
         await LearnOutcomeModule(client=client).process_cycle()
 
-        client.resolve_outcome.assert_awaited_once()
-        verdict_id, resolution = client.resolve_outcome.call_args[0]
-        assert verdict_id == verdict["id"]
-        assert resolution["path"] == "lineage"
+        client.get_descendants.assert_awaited_once_with(verdict["id"])
+        client.resolve_outcome.assert_not_awaited()
+        client.submit_assessment.assert_not_awaited()
 
     async def test_execution_under_a_child_still_confirms_the_ancestor(self):
         """Transitive confirmation by a real downstream action is kept."""
