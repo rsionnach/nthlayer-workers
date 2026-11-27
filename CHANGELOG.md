@@ -6,6 +6,30 @@ across the ecosystem under the v1.5 epic plan; we did not reconstruct phase-by-p
 git history because that history did not exist as commits at the time the work
 was being done. This narrative is the honest substitute.
 
+## [4.4.0](https://github.com/rsionnach/nthlayer-workers/compare/v4.3.0...v4.4.0) (2026-11-25)
+
+
+### Features
+
+* observe reads error budgets from generate's rules (opensrm-9qa6) ([a968670](https://github.com/rsionnach/nthlayer-workers/commit/a9686707684543c836894a4317a1b252f0a5408c))
+* respond resolves the case of a resolved incident (opensrm-j9io) ([8016033](https://github.com/rsionnach/nthlayer-workers/commit/80160339cd11f76010a256e93daa6fdf24665152))
+
+
+### Bug Fixes
+
+* observe reads an SLO only when its query is a ratio (opensrm-1jrk) ([1515a49](https://github.com/rsionnach/nthlayer-workers/commit/1515a49f3d2c2d40735d243e551717cf2ad62b81))
+* require nthlayer-common 5.12.2 ([b18b729](https://github.com/rsionnach/nthlayer-workers/commit/b18b729b1d20dd8692d4e66e58e1f3742883ac47))
+* require nthlayer-common 5.12.2 ([8d984c3](https://github.com/rsionnach/nthlayer-workers/commit/8d984c39d3cc032f729d6d14f7d6445deb231d90))
+* retrospectives contain the respond chain (opensrm-91pa) ([dfbdbc0](https://github.com/rsionnach/nthlayer-workers/commit/dfbdbc0ab522e3d98c31b8ccbf20fe1a994b0d9e))
+
+
+### Documentation
+
+* head the observe upgrade note 4.3.1 (opensrm-1jrk) ([da93eab](https://github.com/rsionnach/nthlayer-workers/commit/da93eabf6f61abe694f2076156a2f259bb19bcac))
+* one 4.4 upgrade section for observe (opensrm-9qa6) ([6691ca3](https://github.com/rsionnach/nthlayer-workers/commit/6691ca3a3b06b49dad86d468f4d4ea4f403c5b4c))
+* place the respond upgrade note before the observe one (opensrm-j9io) ([b46e537](https://github.com/rsionnach/nthlayer-workers/commit/b46e537c9d87a9daf16023d853c9d45254f48732))
+* the retrospective flags in the README synopsis (opensrm-91pa) ([4f6db8b](https://github.com/rsionnach/nthlayer-workers/commit/4f6db8b9e0781be44cd4a55887a92bb69ddb6e69))
+
 ## [4.3.0](https://github.com/rsionnach/nthlayer-workers/compare/v4.2.2...v4.3.0) (2026-11-23)
 
 
