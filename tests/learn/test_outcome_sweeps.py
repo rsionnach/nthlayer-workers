@@ -747,7 +747,10 @@ class TestLineageSignals:
         client.get_descendants = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=body))
         module = LearnOutcomeModule(client=client, clock=_Clock(_T0 + timedelta(days=8)))
 
-        await module.process_cycle()
+        with structlog.testing.capture_logs() as logs:
+            await module.process_cycle()
 
         assert core.posts == []
         assert _instant((await module.get_state())["expiry_cursor"]) == _T0
+        # Once per sweep: both stop at this verdict.
+        assert [(e["event"], e["verdict_id"]) for e in logs] == [("outcome_lineage_unreadable", "vrd-1")] * 2
