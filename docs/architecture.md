@@ -990,8 +990,9 @@ opensrm-jmy.6.
   is then halved towards the cursor until the page is not full, and the
   cursor never passes a truncated page (`order=asc` in core would
   replace this: opensrm-6imd). If core does not answer a lineage read
-  or a resolution, the sweep stops at that verdict and returns to it
-  next cycle.
+  or a resolution (a transport failure or a 5xx), the sweep stops at
+  that verdict and returns to it next cycle. A 4xx other than the 409
+  below is core's answer for that verdict: it is logged and passed.
 
   Core holds the record of what is resolved. `POST
   /verdicts/{id}/outcome` creates an `out-<id>` child and never marks

@@ -388,6 +388,31 @@ class TestCoreUnavailable:
         await module.process_cycle()
         assert core.posted("expired") == ["vrd-1", "vrd-2"]
 
+    @pytest.mark.parametrize("expiring", [False, True])
+    async def test_a_lineage_read_core_refuses_does_not_hold_the_verdicts_behind_it(self, breach, expiring):
+        """A 4xx is the same answer every cycle (an id with a slash in it
+        misses core's route and reads 404): the verdict is passed, not waited on."""
+        core = _Core([_at(breach, "a/b", _T0), _at(breach, "vrd-2", _T0 + timedelta(minutes=1))])
+        client = core.client()
+
+        async def _descendants(verdict_id):
+            if verdict_id == "a/b":
+                return APIResult(ok=False, status_code=404, error="not_found")
+            return await core.get_descendants(verdict_id)
+
+        client.get_descendants = AsyncMock(side_effect=_descendants)
+        clock = _Clock(_T0 + (timedelta(days=8) if expiring else timedelta(hours=2)))
+        module = LearnOutcomeModule(client=client, clock=clock)
+
+        await module.process_cycle()
+
+        assert core.lineage_reads == ["vrd-2"]
+        assert core.posted("expired") == (["vrd-2"] if expiring else [])
+        state = await module.get_state()
+        assert _instant(state["cursor"]) == clock.now - timedelta(hours=1)
+        if expiring:
+            assert _instant(state["expiry_cursor"]) == clock.now - timedelta(days=7)
+
     async def test_a_refused_post_is_retried_next_cycle(self, breach):
         core = _Core([_at(breach, "vrd-1", _T0)])
         core.add(_execution("vrd-exec", "vrd-1", _T0 + timedelta(minutes=5)))

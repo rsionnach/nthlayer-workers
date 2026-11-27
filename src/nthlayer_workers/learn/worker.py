@@ -107,6 +107,7 @@ class _Lineage(Enum):
     """What a verdict's descendants say about its outcome."""
 
     UNREADABLE = "unreadable"  # core did not answer
+    REFUSED = "refused"  # core will not answer for this verdict
     RESOLVED = "resolved"  # core already holds this verdict's resolution record
     SIGNAL = "signal"  # a descendant resolves it; the resolution is not recorded yet
     SILENT = "silent"  # nothing resolves it
@@ -322,7 +323,7 @@ class LearnOutcomeModule:
         lineage, resolution = await self._read_lineage(verdict["id"])
         if lineage is _Lineage.UNREADABLE:
             return _Step.HALT
-        if lineage is _Lineage.RESOLVED:
+        if lineage in (_Lineage.RESOLVED, _Lineage.REFUSED):
             return _Step.DONE
 
         if resolution is not None:
@@ -350,12 +351,15 @@ class LearnOutcomeModule:
         """
         descendants = await self.client.get_descendants(verdict_id)
         if not descendants.ok:
+            # A 4xx is core's answer for this verdict and will be the same
+            # next cycle; waiting on it would hold every verdict behind it.
+            refused = _HTTP_BAD_REQUEST <= descendants.status_code < _HTTP_SERVER_ERROR
             logger.warning(
-                "outcome_lineage_unreadable",
+                "outcome_lineage_refused" if refused else "outcome_lineage_unreadable",
                 verdict_id=verdict_id,
                 status_code=descendants.status_code,
             )
-            return _Lineage.UNREADABLE, None
+            return (_Lineage.REFUSED if refused else _Lineage.UNREADABLE), None
         found = descendants.data if isinstance(descendants.data, list) else []
 
         if any(_resolves(desc, verdict_id) for desc in found):
