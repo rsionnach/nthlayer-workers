@@ -95,6 +95,7 @@ _FIRST_STEP_BACK = timedelta(days=1)
 # Core's answer to a write whose id it already holds.
 _HTTP_CONFLICT = 409
 _HTTP_BAD_REQUEST = 400
+_HTTP_TOO_MANY_REQUESTS = 429
 _HTTP_SERVER_ERROR = 500
 
 _EXPIRED_RESOLUTION = {
@@ -127,6 +128,18 @@ class _Step(Enum):
     DONE = "done"
     EXPIRED = "expired"
     HALT = "halt"  # core is unavailable: stop here and come back to this verdict
+
+
+def _is_refusal(status_code: int) -> bool:
+    """Whether core's answer for this verdict will be the same next cycle.
+
+    A 4xx is, except 429: the client retries it as transient and hands it
+    back when the retries run out (``api_client._TRANSIENT_CODES``). A
+    transport failure reads as status 0.
+    """
+    if status_code == _HTTP_TOO_MANY_REQUESTS:
+        return False
+    return _HTTP_BAD_REQUEST <= status_code < _HTTP_SERVER_ERROR
 
 
 def _utc_now() -> datetime:
@@ -353,7 +366,7 @@ class LearnOutcomeModule:
         if not descendants.ok:
             # A 4xx is core's answer for this verdict and will be the same
             # next cycle; waiting on it would hold every verdict behind it.
-            refused = _HTTP_BAD_REQUEST <= descendants.status_code < _HTTP_SERVER_ERROR
+            refused = _is_refusal(descendants.status_code)
             logger.warning(
                 "outcome_lineage_refused" if refused else "outcome_lineage_unreadable",
                 verdict_id=verdict_id,
@@ -393,7 +406,7 @@ class LearnOutcomeModule:
             # Core holds this verdict's resolution record already: another
             # writer got there between the lineage read and this POST.
             return _Write.NOT_NEEDED
-        if _HTTP_BAD_REQUEST <= submit.status_code < _HTTP_SERVER_ERROR:
+        if _is_refusal(submit.status_code):
             # Core will give the same answer next cycle; waiting on it would
             # hold every verdict behind this one.
             logger.warning(

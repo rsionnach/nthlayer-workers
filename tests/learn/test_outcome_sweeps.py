@@ -55,6 +55,7 @@ class _Clock:
 class _Core(_FakeCore):
     def __init__(self, verdicts: list[dict]):
         super().__init__(verdicts)
+        self.down_with = _unavailable()
         self.lineage_reads: list[str] = []
         self.posts: list[tuple[str, dict]] = []
         self.queries: list[dict] = []
@@ -75,13 +76,13 @@ class _Core(_FakeCore):
 
     async def get_descendants(self, verdict_id: str) -> APIResult:
         if self.lineage_down:
-            return _unavailable()
+            return self.down_with
         self.lineage_reads.append(verdict_id)
         return await super().get_descendants(verdict_id)
 
     async def resolve_outcome(self, verdict_id: str, body: dict) -> APIResult:
         if self.outcome_down:
-            return _unavailable()
+            return self.down_with
         if f"out-{verdict_id}" in self.verdicts:
             return APIResult(ok=False, status_code=409, error="duplicate")
         self.posts.append((verdict_id, body))
@@ -373,9 +374,16 @@ class TestExpiryCap:
         assert logged[3] == []
 
 
+# nthlayer-common api_client.py: a transport failure comes back as status_code
+# 0, and 429 is one of _TRANSIENT_CODES, returned once the retries run out.
+_NOT_AN_ANSWER = [503, 0, 429]
+
+
 class TestCoreUnavailable:
-    async def test_an_unreadable_lineage_expires_nothing_and_is_retried(self, breach):
+    @pytest.mark.parametrize("status", _NOT_AN_ANSWER)
+    async def test_an_unreadable_lineage_expires_nothing_and_is_retried(self, breach, status):
         core = _Core([_at(breach, "vrd-1", _T0), _at(breach, "vrd-2", _T0 + timedelta(minutes=1))])
+        core.down_with = APIResult(ok=False, status_code=status, error="unavailable")
         clock = _Clock(_T0 + timedelta(days=8))
         module = _module(core, clock)
 
@@ -413,8 +421,10 @@ class TestCoreUnavailable:
         if expiring:
             assert _instant(state["expiry_cursor"]) == clock.now - timedelta(days=7)
 
-    async def test_a_refused_post_is_retried_next_cycle(self, breach):
+    @pytest.mark.parametrize("status", _NOT_AN_ANSWER)
+    async def test_a_post_core_did_not_answer_is_retried_next_cycle(self, breach, status):
         core = _Core([_at(breach, "vrd-1", _T0)])
+        core.down_with = APIResult(ok=False, status_code=status, error="unavailable")
         core.add(_execution("vrd-exec", "vrd-1", _T0 + timedelta(minutes=5)))
         clock = _Clock(_T0 + timedelta(hours=2))
         module = _module(core, clock)
