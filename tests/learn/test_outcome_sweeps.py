@@ -525,3 +525,42 @@ class TestInputsThatCannotBeWorked:
 
         assert core.lineage_reads == ["vrd-1"]
         assert core.posted("expired") == ["vrd-1"]
+
+    # Core stores created_at as the producer sent it (server.py post_verdict
+    # checks only that the field is there), so any string can come back.
+    @pytest.mark.parametrize("stamp", ["2026-11-01T12:00:00", "2026-11-01T12:00:00Z"])
+    async def test_a_created_at_without_an_offset_is_read_as_utc(self, breach, stamp):
+        odd = {**breach, "id": "vrd-odd", "created_at": stamp}
+        core = _Core([odd, _at(breach, "vrd-2", _T0 + timedelta(minutes=1))])
+        client = core.client()
+        client.get_verdicts = AsyncMock(return_value=_ok([core.verdicts["vrd-2"], odd]))
+        module = LearnOutcomeModule(client=client, clock=_Clock(_T0 + timedelta(days=8)))
+
+        await module.process_cycle()
+
+        assert core.posted("expired") == ["vrd-odd", "vrd-2"]
+
+    @pytest.mark.parametrize("stamp", ["yesterday", "", None, 20261101])
+    async def test_a_created_at_that_is_not_a_time_is_never_expired_and_holds_nothing(self, breach, stamp):
+        odd = {**breach, "id": "vrd-odd", "created_at": stamp}
+        core = _Core([odd, _at(breach, "vrd-2", _T0)])
+        client = core.client()
+        client.get_verdicts = AsyncMock(return_value=_ok([core.verdicts["vrd-2"], odd]))
+        module = LearnOutcomeModule(client=client, clock=_Clock(_T0 + timedelta(days=8)))
+
+        await module.process_cycle()
+
+        assert core.posted("expired") == ["vrd-2"]
+
+    @pytest.mark.parametrize("body", [None, {}, {"verdicts": []}, "not json"])
+    async def test_a_page_that_is_not_a_list_is_not_an_empty_window(self, breach, body):
+        core = _Core([_at(breach, "vrd-1", _T0)])
+        client = core.client()
+        client.get_verdicts = AsyncMock(return_value=APIResult(ok=True, status_code=200, data=body))
+        module = LearnOutcomeModule(client=client, clock=_Clock(_T0 + timedelta(days=8)))
+        state = {"cursor": _T0.isoformat(), "expiry_cursor": (_T0 - timedelta(days=1)).isoformat()}
+        await module.restore_state(state)
+
+        await module.process_cycle()
+
+        assert await module.get_state() == state

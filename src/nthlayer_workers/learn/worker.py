@@ -309,7 +309,12 @@ class LearnOutcomeModule:
             if not result.ok:
                 logger.warning("outcome_query_failed", status_code=result.status_code)
                 return None
-            page = result.data if isinstance(result.data, list) else []
+            page = result.data
+            if not isinstance(page, list):
+                # Not a page of verdicts: reading it as an empty window would
+                # move the cursor past everything in it.
+                logger.warning("outcome_query_unreadable", status_code=result.status_code)
+                return None
             if len(page) < _PAGE_LIMIT:
                 return list(reversed(page)), window_end
 
@@ -426,14 +431,12 @@ class LearnOutcomeModule:
         """Check if a verdict has exceeded the expiry threshold."""
         if self.expiry_threshold_days <= 0:
             return False  # 0 or negative threshold disables expiry
-        created = verdict.get("created_at", "")
-        if not created:
+        # Core stores created_at as its producer sent it: one with no offset
+        # is read as UTC, and one that is not a time is never past expiry.
+        created = _parse_timestamp(verdict.get("created_at"))
+        if created is None:
             return False
-        try:
-            created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
-            return (now - created_dt) >= timedelta(days=self.expiry_threshold_days)
-        except (ValueError, AttributeError):
-            return False
+        return now - created >= timedelta(days=self.expiry_threshold_days)
 
     async def _emit_calibration_signal(self, verdict: dict, resolution: dict) -> None:
         """Emit calibration_signal assessment for a resolved verdict."""
