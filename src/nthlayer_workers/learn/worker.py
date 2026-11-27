@@ -199,8 +199,9 @@ class LearnOutcomeModule:
 
     async def process_cycle(self) -> None:
         now = self.clock()
-        # Verdicts the expiry sweep examined this cycle. On a backlog both
-        # windows hold them, and one lineage read per cycle is enough.
+        # Verdicts examined so far this cycle. The expiry sweep runs first and
+        # on a backlog both windows hold the same verdicts: the resolution
+        # sweep skips what it finds here, so each gets one lineage read.
         examined: set[str] = set()
 
         if self.expiry_threshold_days > 0:

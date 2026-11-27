@@ -980,7 +980,8 @@ opensrm-jmy.6.
   pass the expiry threshold: the lineage is re-read, a signal that
   arrived in between is recorded (late, at that age), and a verdict
   that still has none is expired. At most `max_expiries_per_cycle`
-  (100) are expired per cycle; the count is logged as
+  (100, a module field with no CLI flag: opensrm-sacr) are expired
+  per cycle; the count is logged as
   `outcome_expiry_sweep`.
 
   A sweep reads from its cursor to its age cutoff, oldest first, and
@@ -1008,7 +1009,7 @@ opensrm-jmy.6.
   3. downstream_signal: external event attributed via `parent_ids`.
   4. score_outcome_divergence: confidence vs observed outcome.
   5. expiry: still pending at the expiry age (7d) → "expired", by the
-     expiry sweep only. The first cycle after an upgrade meets every
+     expiry sweep only. The cycles after an upgrade work through every
      older pending verdict, 100 per cycle.
 
   "Pending" is read as core reads it: a verdict with no `outcome` key, a
